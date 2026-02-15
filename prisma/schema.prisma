@@ -1,4 +1,4 @@
-// prisma/schema.prisma
+// server/prisma/schema.prisma
 
 generator client {
   provider = "prisma-client-js"
@@ -15,32 +15,32 @@ datasource db {
 
 // ------ نموذج الموظفين (شاشة 817) ------
 model Employee {
-  id               String    @id @default(cuid())
-  employeeCode     String    @unique @default(cuid())
-  name             String
-  nameEn           String?
-  nationalId       String    @unique
-  email            String    @unique
-  phone            String    @unique
-  position         String
-  department       String
-  hireDate         DateTime
-  baseSalary       Float?
-  jobLevel         Int?
-  type             String    @default("full-time")
-  status           String    @default("active")
-  nationality      String?
-  gosiNumber       String?
-  iqamaNumber      String?
+  id                String    @id @default(cuid())
+  employeeCode      String    @unique @default(cuid())
+  name              String
+  nameEn            String?
+  nationalId        String    @unique
+  email             String    @unique
+  phone             String    @unique
+  position          String
+  department        String
+  hireDate          DateTime
+  baseSalary        Float?
+  jobLevel          Int?
+  type              String    @default("full-time")
+  status            String    @default("active")
+  nationality       String?
+  gosiNumber        String?
+  iqamaNumber       String?
   performanceRating Float?
-  frozenUntil      DateTime?
-  frozenReason     String?
-  password         String
-  refreshToken     String?
-  permissionsCount Int?      // عدد الصلاحيات المخصصة
+  frozenUntil       DateTime?
+  frozenReason      String?
+  password          String
+  refreshToken      String?
+  permissionsCount  Int?      // عدد الصلاحيات المخصصة
   
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
   // --- العلاقات الفرعية للموظف ---
   attachments       Attachment[]       @relation("EmployeeAttachments")
@@ -52,25 +52,25 @@ model Employee {
   promotions        EmployeePromotion[]
 
   // --- علاقات العمل والمهام ---
-  roles              JobRole[]          @relation("EmployeeToJobRole")
-  specialPermissions Permission[]       @relation("EmployeeToSpecialPermission")
+  roles              JobRole[]           @relation("EmployeeToJobRole")
+  specialPermissions Permission[]        @relation("EmployeeToSpecialPermission")
   managedProjects    Project[]
-  assignedTasks      Task[]             @relation("EmployeeToTask")
+  assignedTasks      Task[]              @relation("EmployeeToTask")
   
   // --- المراسلات ---
-  sentMessages       Message[]          @relation("SenderToMessage")
-  conversations      Conversation[]     @relation("EmployeeToConversation")
+  sentMessages        Message[]           @relation("SenderToMessage")
+  conversations       Conversation[]      @relation("EmployeeToConversation")
   
   // --- النظام المالي والإداري ---
   uploadedAttachments    Attachment[]
-  paymentsReceived       Payment[]              @relation("EmployeeToPayment")
-  activitiesPerformed    ActivityLog[]          @relation("EmployeeToActivityLog")
+  paymentsReceived       Payment[]               @relation("EmployeeToPayment")
+  activitiesPerformed    ActivityLog[]           @relation("EmployeeToActivityLog")
   
   // --- إدارة الوثائق ---
-  ownedDocuments         Document[]             @relation("OwnedDocuments")
-  docPermissions         DocumentPermission[]   @relation("GrantedPermissions")
+  ownedDocuments         Document[]              @relation("OwnedDocuments")
+  docPermissions         DocumentPermission[]    @relation("GrantedPermissions")
   documentActivities     DocumentActivity[]
-  documentAccess         DocumentPermission[]   // الصلاحيات الممنوحة للموظف
+  documentAccess         DocumentPermission[]    // الصلاحيات الممنوحة للموظف
   createdClassifications DocumentClassification[] @relation("CreatedClassifications")
   
   // --- المعاملات ---
@@ -194,31 +194,31 @@ model JobRole {
 
 // ------ نموذج الصلاحيات (شاشة 902) ------
 model Permission {
-  id           String    @id @default(cuid())
-  code         String    @unique
-  name         String
-  description  String?
-  level        String
-  screenId     String?
-  screenName   String?
-  tabId        String?
-  tabName      String?
-  actionType   String?
-  status       String    @default("active")
+  id             String    @id @default(cuid())
+  code           String    @unique
+  name           String
+  description    String?
+  level          String
+  screenId       String?
+  screenName     String?
+  tabId          String?
+  tabName        String?
+  actionType     String?
+  status         String    @default("active")
   
-  frozenType   String?
-  frozenDate   DateTime?
-  frozenUntil  DateTime?
-  frozenBy     String?
-  frozenReason String?
+  frozenType     String?
+  frozenDate     DateTime?
+  frozenUntil    DateTime?
+  frozenBy       String?
+  frozenReason   String?
   
-  createdDate  DateTime  @default(now())
-  lastModified DateTime  @updatedAt
-  modifiedBy   String?
+  createdDate    DateTime  @default(now())
+  lastModified   DateTime  @updatedAt
+  modifiedBy     String?
   
-  roles        JobRole[]         @relation("JobRoleToPermission")
-  employees    Employee[]        @relation("EmployeeToSpecialPermission")
-  groups       PermissionGroup[] @relation("GroupToPermission")
+  roles          JobRole[]         @relation("JobRoleToPermission")
+  employees      Employee[]        @relation("EmployeeToSpecialPermission")
+  groups         PermissionGroup[] @relation("GroupToPermission")
 }
 
 // ------ نموذج مجموعات الصلاحيات ------
@@ -237,45 +237,50 @@ model PermissionGroup {
 }
 
 // ===============================================
-// 2. نموذج العملاء (Client Module)
+// 2. نموذج العملاء (Client Module) - محدث ليدعم WMS
 // ===============================================
 
 // ------ نموذج العميل (شاشة 300) ------
 model Client {
-  id           String  @id @default(cuid())
-  clientCode   String  @unique 
+  id             String  @id @default(cuid())
+  clientCode     String  @unique 
 
   // --- بيانات الاتصال الأساسية ---
-  mobile       String  @unique
-  email        String? @unique
-  idNumber     String  @unique
+  mobile         String  @unique
+  email          String? @unique
+  idNumber       String  @unique // الهوية الوطنية
 
   // --- بيانات JSON للمرونة ---
-  name           Json 
-  contact        Json 
-  address        Json? 
-  identification Json 
+  name             Json  // { ar: "...", en: "..." }
+  contact          Json 
+  address          Json? 
+  identification   Json 
 
+  // --- حقول WMS الصريحة (للسرعة والفلترة) ---
+  officialNameAr   String? @map("official_name_ar") // مهم جداً للبحث
+  riskTier         String  @default("LOW")          // LOW, MEDIUM, HIGH
+  
   // --- التفاصيل ---
-  type                 String // (فرد، شركة، جهة حكومية)
-  category             String? // (VIP, مؤسسة, عادي)
-  nationality          String?
-  occupation           String?
-  company              String?
-  taxNumber            String?
-  rating               Int?    @default(3)
-  secretRating         Int?    @default(50)
-  grade                String? // (أ, ب, ج)
-  gradeScore           Int?
+  type             String // (فرد، شركة، جهة حكومية)
+  category         String? // (VIP, مؤسسة, عادي)
+  nationality      String?
+  occupation       String?
+  company          String?
+  taxNumber        String?
+  rating           Int?    @default(3)
+  secretRating     Int?    @default(50)
+  grade            String? // (أ, ب, ج)
+  gradeScore       Int?
   completionPercentage Float?
-  isActive             Boolean @default(true)
-  notes                String?
-  createdBy            String?
+  isActive         Boolean @default(true)
+  notes            String?
+  createdBy        String?
 
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
   // --- العلاقات ---
+  ownerships   OwnershipFile[] // علاقة جديدة (شاشة 310)
   transactions Transaction[]
   contracts    Contract[]
   quotations   Quotation[]
@@ -293,7 +298,40 @@ model ClientClassification {
 }
 
 // ===============================================
-// 3. نموذج المعاملات والمشاريع (Core Business Logic)
+// 3. نموذج الملكيات (Ownership Files Module - Screen 310)
+// ===============================================
+// (تمت إضافته ليتوافق مع WMS Spec)
+
+model OwnershipFile {
+  id                String             @id @default(cuid())
+  code              String             @unique // OWN-2026-0001
+  clientId          String             
+  
+  // Deed Details
+  documentType      String             @default("DEED") // DEED, CONTRACT...
+  documentNo        String?            
+  issuingAuthority  String?            
+  documentDate      DateTime?          @db.Date
+  
+  // Location Data
+  city              String?
+  district          String?
+  planNo            String?            
+  parcelNo          String?            
+  areaSqm           Float?             
+  
+  status            String             @default("DRAFT") // DRAFT, VERIFIED...
+
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  // Relations
+  client            Client             @relation(fields: [clientId], references: [id])
+  transactions      Transaction[]      // المعاملات المرتبطة بهذه الملكية
+}
+
+// ===============================================
+// 4. نموذج المعاملات والمشاريع (Core Business Logic)
 // ===============================================
 
 // ------ نموذج المشروع ------
@@ -313,34 +351,34 @@ model Project {
 
 // ------ نموذج المعاملة (قلب النظام) ------
 model Transaction {
-  id              String   @id @default(cuid())
-  transactionCode String   @unique
+  id              String    @id @default(cuid())
+  transactionCode String    @unique
   title           String 
 
   // --- النوع والقالب ---
-  transactionType   TransactionType? @relation(fields: [transactionTypeId], references: [id])
-  transactionTypeId String?
+  transactionType    TransactionType? @relation(fields: [transactionTypeId], references: [id])
+  transactionTypeId  String?
 
   // --- البيانات الأساسية ---
-  status      String  @default("Draft")
-  statusColor String? @default("#6b7280")
-  priority    String? @default("متوسط")
-  description String?
-  location    String?
-  deedNumber  String?
+  status       String  @default("Draft")
+  statusColor  String? @default("#6b7280")
+  priority     String? @default("متوسط")
+  description  String?
+  location     String?
+  deedNumber   String? // يمكن استبداله بالربط مع OwnershipFile
   projectClassification String?
 
   // --- بيانات التتبع والتقدم ---
-  category    String? 
-  complexity  String? 
-  duration    Int?    
-  progress    Float?  @default(0)
+  category     String? 
+  complexity   String? 
+  duration     Int?      
+  progress     Float?  @default(0)
 
   // --- البيانات المالية ---
   totalFees       Float?  @default(0) 
   paidAmount      Float?  @default(0)
   remainingAmount Float?  @default(0)
-  fees            Json?   
+  fees            Json?    
 
   // --- التفاصيل الفنية (JSON) ---
   floors               Json? @default("[]")
@@ -360,14 +398,18 @@ model Transaction {
   requestPurposes      Json?
   
   // --- العلاقات ---
-  client      Client   @relation(fields: [clientId], references: [id])
-  clientId    String
+  client       Client    @relation(fields: [clientId], references: [id])
+  clientId     String
 
-  project     Project? @relation(fields: [projectId], references: [id])
-  projectId   Int?
+  // علاقة جديدة مع الملكية (شاشة 310)
+  ownership    OwnershipFile? @relation(fields: [ownershipId], references: [id])
+  ownershipId  String?
 
-  contract    Contract? @relation(fields: [contractId], references: [id])
-  contractId  String?
+  project      Project? @relation(fields: [projectId], references: [id])
+  projectId    Int?
+
+  contract     Contract? @relation(fields: [contractId], references: [id])
+  contractId   String?
 
   // --- المرفقات والمهام والموظفين ---
   attachments          Attachment[]
@@ -379,52 +421,52 @@ model Transaction {
   followUpTasks        FollowUpTask[]
   
   // --- تواريخ ---
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  completedDate DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  completedDate   DateTime?
 }
 
 // ------ نوع المعاملة (Configuration) ------
 model TransactionType {
-  id            String   @id @default(cuid())
-  code          String   @unique
-  name          String   @unique
-  description   String?
-  isActive      Boolean  @default(true)
+  id             String    @id @default(cuid())
+  code           String    @unique
+  name           String    @unique
+  description    String?
+  isActive       Boolean   @default(true)
 
   // تفاصيل الإعدادات
-  category      String? 
-  categoryAr    String? 
-  duration      Int?     @default(0)
-  estimatedCost Float?   @default(0) 
-  complexity    String? 
+  category       String? 
+  categoryAr     String? 
+  duration       Int?      @default(0)
+  estimatedCost  Float?    @default(0) 
+  complexity     String? 
 
-  defaultCosts Json?
+  defaultCosts   Json?
   // القيم الافتراضية
-  tasks         Json?    
-  documents     String[] 
-  authorities   String[] 
-  fees          Json?    
-  stages        Json?    
-  warnings      String[] 
-  notes         String[] 
+  tasks          Json?    
+  documents      String[] 
+  authorities    String[] 
+  fees           Json?    
+  stages         Json?    
+  warnings       String[] 
+  notes          String[] 
 
-  transactions  Transaction[]
+  transactions   Transaction[]
 }
 
 // ------ سجل الموظفين العاملين على المعاملة ------
 model TransactionEmployee {
-  id            String      @id @default(cuid())
+  id             String      @id @default(cuid())
   
-  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
-  transactionId String
+  transaction    Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  transactionId  String
   
-  employee      Employee    @relation(fields: [employeeId], references: [id])
-  employeeId    String
+  employee       Employee    @relation(fields: [employeeId], references: [id])
+  employeeId     String
   
-  role          String      // الدور في المعاملة (مهندس مصمم، مراجع، etc)
+  role           String      // الدور في المعاملة (مهندس مصمم، مراجع، etc)
   
-  createdAt     DateTime    @default(now())
+  createdAt      DateTime    @default(now())
 
   @@unique([transactionId, employeeId])
   @@index([transactionId])
@@ -432,7 +474,7 @@ model TransactionEmployee {
 }
 
 // ===============================================
-// 4. النماذج الديناميكية (Dynamic Forms)
+// 5. النماذج الديناميكية (Dynamic Forms)
 // ===============================================
 
 model RequestPurpose {
@@ -451,12 +493,12 @@ model RequestPurpose {
 }
 
 model DynamicFormDefinition {
-  id          String   @id @default(cuid())
-  name        String   @unique
+  id          String    @id @default(cuid())
+  name        String    @unique
   description String?
 
   purpose     RequestPurpose @relation(fields: [purposeId], references: [id], onDelete: Cascade)
-  purposeId   String   @unique 
+  purposeId   String    @unique 
 
   fields      DynamicFormField[]
 
@@ -465,180 +507,180 @@ model DynamicFormDefinition {
 }
 
 model DynamicFormField {
-  id             String  @id @default(cuid())
-  label          String  
-  fieldKey       String  
-  fieldType      String  
-  order          Int     @default(0) 
+  id               String  @id @default(cuid())
+  label            String  
+  fieldKey         String  
+  fieldType        String  
+  order            Int     @default(0) 
   
-  optionsJson    Json? 
-  validationJson Json? 
-  placeholder    String?
+  optionsJson      Json? 
+  validationJson   Json? 
+  placeholder      String?
 
-  form           DynamicFormDefinition @relation(fields: [formId], references: [id], onDelete: Cascade)
-  formId         String
+  form             DynamicFormDefinition @relation(fields: [formId], references: [id], onDelete: Cascade)
+  formId           String
 
   @@index([formId])
   @@unique([formId, fieldKey]) 
 }
 
 // ===============================================
-// 5. المهام والمواعيد (Task & Appointment Management)
+// 6. المهام والمواعيد (Task & Appointment Management)
 // ===============================================
 
 model Task {
-  id               String    @id @default(cuid())
-  taskNumber       String?   @unique
-  title            String
-  description      String?
-  status           String    @default("Pending")
-  dueDate          DateTime?
+  id                String     @id @default(cuid())
+  taskNumber        String?    @unique
+  title             String
+  description       String?
+  status            String     @default("Pending")
+  dueDate           DateTime?
   
-  priority         String?   @default("medium")
-  progress         Int?      @default(0)
-  category         String?
-  assignedById     String?   
-  receivedDate     DateTime?
-  completedDate    DateTime?
-  attachmentsCount Int?      @default(0)
-  commentsCount    Int?      @default(0)
-  fees             Json?     
+  priority          String?    @default("medium")
+  progress          Int?       @default(0)
+  category          String?
+  assignedById      String?    
+  receivedDate      DateTime?
+  completedDate     DateTime?
+  attachmentsCount  Int?       @default(0)
+  commentsCount     Int?       @default(0)
+  fees              Json?      
 
-  createdAt        DateTime  @default(now())
+  createdAt         DateTime   @default(now())
 
-  transaction      Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
-  transactionId    String
+  transaction       Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  transactionId     String
 
-  assignedTo       Employee? @relation("EmployeeToTask", fields: [assignedToId], references: [id])
-  assignedToId     String?
+  assignedTo        Employee? @relation("EmployeeToTask", fields: [assignedToId], references: [id])
+  assignedToId      String?
   
   @@index([assignedToId]) 
   @@index([transactionId])
 }
 
 model Appointment {
-  id            String      @id @default(cuid())
-  title         String      
-  date          DateTime    
-  type          String      
-  status        String      @default("scheduled") 
-  notes         String?     
-  location      String?     
+  id             String      @id @default(cuid())
+  title          String      
+  date           DateTime    
+  type           String      
+  status         String      @default("scheduled") 
+  notes          String?     
+  location       String?     
   
-  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
-  transactionId String
+  transaction    Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  transactionId  String
 
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
 
   @@index([transactionId])
 }
 
 // ===============================================
-// 6. المالية والعقود (Finance & Contracts)
+// 7. المالية والعقود (Finance & Contracts)
 // ===============================================
 
 model Contract {
-  id           String   @id @default(cuid())
-  contractCode String   @unique
-  title        String
-  startDate    DateTime
-  endDate      DateTime
-  totalValue   Float
-  status       String   @default("Active")
+  id             String    @id @default(cuid())
+  contractCode   String    @unique
+  title          String
+  startDate      DateTime
+  endDate        DateTime
+  totalValue     Float
+  status         String    @default("Active")
 
-  client       Client   @relation(fields: [clientId], references: [id])
-  clientId     String
+  client         Client    @relation(fields: [clientId], references: [id])
+  clientId       String
 
-  transactions Transaction[]
-  quotation    Quotation? @relation(fields: [quotationId], references: [id])
-  quotationId  String?    @unique
-  attachments  Attachment[]
+  transactions   Transaction[]
+  quotation      Quotation? @relation(fields: [quotationId], references: [id])
+  quotationId    String?    @unique
+  attachments    Attachment[]
 }
 
 model Quotation {
-  id            String   @id @default(cuid())
-  quotationCode String   @unique
-  status        String   @default("Pending")
-  totalValue    Float
-  createdAt     DateTime @default(now())
+  id             String    @id @default(cuid())
+  quotationCode  String    @unique
+  status         String    @default("Pending")
+  totalValue     Float
+  createdAt      DateTime  @default(now())
 
-  client        Client    @relation(fields: [clientId], references: [id])
-  clientId      String
+  client         Client     @relation(fields: [clientId], references: [id])
+  clientId       String
 
-  contract      Contract?
+  contract       Contract?
 }
 
 model Payment {
-  id            String   @id @default(cuid())
-  amount        Float
-  date          DateTime @default(now())
-  method        String   // (Cash, Check, Transfer)
-  reference     String?
-  notes         String?
+  id              String    @id @default(cuid())
+  amount          Float
+  date            DateTime  @default(now())
+  method          String    // (Cash, Check, Transfer)
+  reference       String?
+  notes           String?
   
-  category      String?  @default("أتعاب مكتب") 
-  isFollowUpFee Boolean  @default(false)        
-  receiptImage  String?                         
+  category        String?   @default("أتعاب مكتب") 
+  isFollowUpFee   Boolean   @default(false)        
+  receiptImage    String?                          
 
-  receivedBy    Employee @relation("EmployeeToPayment", fields: [receivedById], references: [id])
-  receivedById  String
+  receivedBy      Employee  @relation("EmployeeToPayment", fields: [receivedById], references: [id])
+  receivedById    String
   
-  allocations   Json?    @default("[]")
+  allocations     Json?     @default("[]")
 
-  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
-  transactionId String
+  transaction     Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  transactionId   String
 
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   @@index([transactionId])
   @@index([receivedById])
 }
 
 // ===============================================
-// 7. إدارة الوثائق والأرشفة (DMS)
+// 8. إدارة الوثائق والأرشفة (DMS)
 // ===============================================
 
 model Document {
-  id               String   @id @default(cuid())
-  fileNumber       String   @unique
-  name             String   
-  type             String   // 'file' أو 'folder'
-  extension        String?  
-  size             Int?     
-  filePath         String?  @unique
+  id               String    @id @default(cuid())
+  fileNumber       String    @unique
+  name             String    
+  type             String    // 'file' أو 'folder'
+  extension        String?   
+  size             Int?      
+  filePath         String?   @unique
   
-  createdAt        DateTime @default(now())
-  modifiedAt       DateTime @updatedAt
+  createdAt        DateTime  @default(now())
+  modifiedAt       DateTime  @updatedAt
   
-  owner            Employee @relation("OwnedDocuments", fields: [ownerId], references: [id])
+  owner            Employee  @relation("OwnedDocuments", fields: [ownerId], references: [id])
   ownerId          String
   
-  classification   DocumentClassification? @relation(fields: [classificationId], references: [id])
-  classificationId String?
+  classification    DocumentClassification? @relation(fields: [classificationId], references: [id])
+  classificationId  String?
   
-  tags             String[] 
-  version          String   @default("1.0")
-  isShared         Boolean  @default(false)
-  downloads        Int      @default(0)
-  views            Int      @default(0)
+  tags              String[] 
+  version           String    @default("1.0")
+  isShared          Boolean   @default(false)
+  downloads         Int       @default(0)
+  views             Int       @default(0)
 
   // هيكلية المجلدات
-  path             String   
-  parent           Document? @relation("FolderHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
-  parentId         String?
-  children         Document[] @relation("FolderHierarchy")
+  path              String    
+  parent            Document? @relation("FolderHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
+  parentId          String?
+  children          Document[] @relation("FolderHierarchy")
 
   // الربط بالكيانات الأخرى
-  transaction      Transaction? @relation(fields: [transactionId], references: [id], onDelete: Cascade)
-  transactionId    String?
+  transaction       Transaction? @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  transactionId     String?
   
-  client           Client?      @relation(fields: [clientId], references: [id])
-  clientId         String?
+  client            Client?       @relation(fields: [clientId], references: [id])
+  clientId          String?
 
-  permissions      DocumentPermission[]
-  activities       DocumentActivity[]
+  permissions       DocumentPermission[]
+  activities        DocumentActivity[]
   
   @@index([ownerId])
   @@index([parentId])
@@ -648,40 +690,40 @@ model Document {
 }
 
 model DocumentPermission {
-  id               String   @id @default(cuid())
-  permissionNumber String   @unique @default(cuid())
+  id               String    @id @default(cuid())
+  permissionNumber String    @unique @default(cuid())
   
-  document         Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  document         Document  @relation(fields: [documentId], references: [id], onDelete: Cascade)
   documentId       String
   
-  user             Employee @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user             Employee  @relation(fields: [userId], references: [id], onDelete: Cascade)
   userId           String
   
-  accessLevel      String   // 'view', 'edit', 'delete', 'admin'
+  accessLevel      String    // 'view', 'edit', 'delete', 'admin'
   expiryDate       DateTime?
   
-  grantedBy        Employee @relation("GrantedPermissions", fields: [grantedById], references: [id])
+  grantedBy        Employee  @relation("GrantedPermissions", fields: [grantedById], references: [id])
   grantedById      String
-  grantedAt        DateTime @default(now())
+  grantedAt        DateTime  @default(now())
 
   @@unique([documentId, userId])
   @@index([userId])
 }
 
 model DocumentActivity {
-  id             String   @id @default(cuid())
-  activityNumber String   @unique @default(cuid())
+  id             String    @id @default(cuid())
+  activityNumber String    @unique @default(cuid())
   
-  document       Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  document       Document  @relation(fields: [documentId], references: [id], onDelete: Cascade)
   documentId     String
   
-  fileName       String   
-  action         String   // 'upload', 'download', 'edit', 'delete', ...
+  fileName       String    
+  action         String    // 'upload', 'download', 'edit', 'delete', ...
   
-  user           Employee @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user           Employee  @relation(fields: [userId], references: [id], onDelete: Cascade)
   userId         String
   
-  timestamp      DateTime @default(now())
+  timestamp      DateTime  @default(now())
   ipAddress      String?
   details        String?
 
@@ -690,52 +732,52 @@ model DocumentActivity {
 }
 
 model DocumentClassification {
-  id          String   @id @default(cuid())
-  name        String   @unique
-  color       String   @default("#6b7280")
+  id          String    @id @default(cuid())
+  name        String    @unique
+  color       String    @default("#6b7280")
   description String?
 
-  createdBy   Employee @relation("CreatedClassifications", fields: [createdById], references: [id])
-  createdById String
-  createdAt   DateTime @default(now())
+  createdBy    Employee  @relation("CreatedClassifications", fields: [createdById], references: [id])
+  createdById  String
+  createdAt    DateTime  @default(now())
 
-  documents   Document[]
+  documents    Document[]
 
   @@index([createdById])
 }
 
 model Attachment {
-  id           String   @id @default(cuid())
-  fileName     String
-  filePath     String   @unique
-  fileType     String
-  fileSize     Int
-  createdAt    DateTime @default(now())
+  id             String    @id @default(cuid())
+  fileName       String
+  filePath       String    @unique
+  fileType       String
+  fileSize       Int
+  createdAt      DateTime  @default(now())
 
-  uploadedBy   Employee @relation(fields: [uploadedById], references: [id])
-  uploadedById String
+  uploadedBy     Employee  @relation(fields: [uploadedById], references: [id])
+  uploadedById   String
 
-  transaction   Transaction? @relation(fields: [transactionId], references: [id], onDelete: Cascade)
-  transactionId String?
+  transaction    Transaction? @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  transactionId  String?
 
-  contract      Contract?    @relation(fields: [contractId], references: [id])
-  contractId    String?
+  contract       Contract?    @relation(fields: [contractId], references: [id])
+  contractId     String?
 
-  client        Client?      @relation(fields: [clientId], references: [id])
-  clientId      String?
+  client         Client?      @relation(fields: [clientId], references: [id])
+  clientId       String?
 
-  employee      Employee?    @relation("EmployeeAttachments", fields: [employeeId], references: [id], onDelete: Cascade)
-  employeeId    String?
+  employee       Employee?    @relation("EmployeeAttachments", fields: [employeeId], references: [id], onDelete: Cascade)
+  employeeId     String?
 }
 
 // ===============================================
-// 8. وحدات إضافية (التعقيب، شوارع الرياض، الإعدادات)
+// 9. وحدات إضافية (التعقيب، شوارع الرياض، الإعدادات)
 // ===============================================
 
 // وحدة التعقيب (Follow-Up)
 model FollowUpAgent {
-  id                 String   @id @default(cuid())
-  type               String   // 'individual' or 'entity'
+  id                 String    @id @default(cuid())
+  type               String    // 'individual' or 'entity'
   name               String
   nationalId         String?  
   commercialRegister String?  
@@ -759,30 +801,30 @@ model FollowUpAgent {
 }
 
 model FollowUpTask {
-  id               String   @id @default(cuid())
+  id                 String    @id @default(cuid())
   
-  agent            FollowUpAgent @relation(fields: [agentId], references: [id], onDelete: Cascade)
-  agentId          String
+  agent              FollowUpAgent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  agentId            String
 
-  transaction      Transaction   @relation(fields: [transactionId], references: [id], onDelete: Cascade)
-  transactionId    String
+  transaction        Transaction   @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  transactionId      String
 
-  governmentEntity String   
-  description      String   
+  governmentEntity   String   
+  description        String   
   
-  startDate        DateTime @default(now())
-  targetDate       DateTime?
-  completionDate   DateTime?
+  startDate          DateTime @default(now())
+  targetDate         DateTime?
+  completionDate     DateTime?
 
-  status           String   @default("pending") 
-  successStatus    String   @default("pending") 
-  attempts         Int      @default(0)         
+  status             String   @default("pending") 
+  successStatus      String   @default("pending") 
+  attempts           Int      @default(0)          
   
-  notes            String?
-  feedbacks        String[] 
+  notes              String?
+  feedbacks          String[] 
 
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 
   @@index([agentId])
   @@index([transactionId])
@@ -804,8 +846,8 @@ model RiyadhDistrict {
 }
 
 model RiyadhStreet {
-  id               String   @id @default(cuid())
-  streetCode       String   @unique 
+  id               String    @id @default(cuid())
+  streetCode       String    @unique 
   name             String
 
   sector           RiyadhSector   @relation(fields: [sectorId], references: [id])
@@ -814,11 +856,11 @@ model RiyadhStreet {
   district         RiyadhDistrict @relation(fields: [districtId], references: [id])
   districtId       String
 
-  type             String   
+  type             String    
   width            Float
   length           Float
   lanes            Int
-  status           String   
+  status           String    
   
   lighting         Boolean  @default(true)
   sidewalks        Boolean  @default(true)
@@ -838,17 +880,17 @@ model RiyadhStreet {
 
 // سجل الأنشطة العام
 model ActivityLog {
-  id            String   @id @default(cuid())
-  date          DateTime @default(now())
-  action        String 
-  description   String
-  category      String 
+  id             String    @id @default(cuid())
+  date           DateTime  @default(now())
+  action         String 
+  description    String
+  category       String 
 
-  performedBy   Employee @relation("EmployeeToActivityLog", fields: [performedById], references: [id])
-  performedById String
+  performedBy    Employee @relation("EmployeeToActivityLog", fields: [performedById], references: [id])
+  performedById  String
 
-  client        Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  clientId      String
+  client         Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  clientId       String
 
   @@index([clientId])
   @@index([performedById])
@@ -856,7 +898,7 @@ model ActivityLog {
 
 // إعدادات النظام
 model SystemSettings {
-  id               String   @id @default("singleton") 
+  id               String    @id @default("singleton") 
   gradingCriteria  Json? 
   gradeThresholds  Json? 
 
@@ -865,22 +907,22 @@ model SystemSettings {
 
 // نظام المحادثات
 model Conversation {
-  id           String    @id @default(cuid())
-  name         String?
-  createdAt    DateTime  @default(now())
+  id            String    @id @default(cuid())
+  name          String?
+  createdAt     DateTime  @default(now())
 
-  participants Employee[] @relation("EmployeeToConversation")
-  messages     Message[]
+  participants  Employee[] @relation("EmployeeToConversation")
+  messages      Message[]
 }
 
 model Message {
-  id             String    @id @default(cuid())
-  content        String
-  createdAt      DateTime  @default(now())
+  id              String    @id @default(cuid())
+  content         String
+  createdAt       DateTime  @default(now())
 
-  conversation   Conversation @relation(fields: [conversationId], references: [id])
-  conversationId String
+  conversation    Conversation @relation(fields: [conversationId], references: [id])
+  conversationId  String
 
-  sender         Employee     @relation("SenderToMessage", fields: [senderId], references: [id])
-  senderId       String
+  sender          Employee     @relation("SenderToMessage", fields: [senderId], references: [id])
+  senderId        String
 }

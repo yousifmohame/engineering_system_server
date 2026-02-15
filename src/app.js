@@ -66,6 +66,8 @@ app.use('/api/followup', followUpRoutes);
 const riyadhStreetsRoutes = require('./routes/riyadhStreetsRoutes');
 app.use('/api/riyadh-streets', riyadhStreetsRoutes);
 
+const propertyRoutes = require('./routes/propertyRoutes');
+app.use('/api/properties', propertyRoutes);
 
 
 // فحص صحة السيرفر
