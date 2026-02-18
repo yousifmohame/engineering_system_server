@@ -1,5 +1,5 @@
 // controllers/transactionController.js
-const prisma = require('../utils/prisma');
+const prisma = require("../utils/prisma");
 
 const calculateTotalsFromFees = (feesData) => {
   if (!feesData || !Array.isArray(feesData)) {
@@ -12,12 +12,12 @@ const calculateTotalsFromFees = (feesData) => {
       (sum, cat) =>
         sum +
         (cat.items || []).reduce((s, i) => s + (Number(i.amount) || 0), 0),
-      0
+      0,
     );
     const paid = feesData.reduce(
       (sum, cat) =>
         sum + (cat.items || []).reduce((s, i) => s + (Number(i.paid) || 0), 0),
-      0
+      0,
     );
     return { total, paid, remaining: total - paid };
   }
@@ -25,7 +25,7 @@ const calculateTotalsFromFees = (feesData) => {
   // الحالة 2: الهيكل البسيط (مصفوفة مسطحة)
   const total = feesData.reduce(
     (sum, item) => sum + (Number(item.amount) || Number(item.cost) || 0),
-    0
+    0,
   );
   // نفترض في الهيكل البسيط أن المدفوع 0 ما لم يذكر خلاف ذلك
   return { total, paid: 0, remaining: total };
@@ -57,7 +57,7 @@ const generateNextTransactionCode = async () => {
     } catch (e) {
       console.error(
         "Failed to parse last transaction code, defaulting to 1",
-        e
+        e,
       );
       nextNumber = 1;
     }
@@ -67,7 +67,6 @@ const generateNextTransactionCode = async () => {
   const paddedNumber = String(nextNumber).padStart(6, "0");
   return `${prefix}${paddedNumber}`; // TR-2025-000001
 };
-
 
 const generateNextTransactionTypeCode = async () => {
   const prefix = "TT-"; // Transaction Type
@@ -93,48 +92,153 @@ const generateNextTransactionTypeCode = async () => {
 // 2. جلب جميع المعاملات (شاشة 284)
 // GET /api/transactions
 // ===============================================
+// const getAllTransactions = async (req, res) => {
+//   try {
+//     const transactions = await prisma.transaction.findMany({
+//       orderBy: { createdAt: "desc" },
+//       include: {
+//         client: { select: { name: true, clientCode: true } },
+//         transactionType: { select: { name: true } },
+//         _count: { select: { tasks: true } },
+//       },
+//     });
+
+//     // ✅ إصلاح البيانات "أثناء الطيران": إذا كان الإجمالي 0 ولكن يوجد fees، نحسبه ونرسله
+//     const fixedTransactions = transactions.map((t) => {
+//       let { totalFees, paidAmount, remainingAmount, fees } = t;
+
+//       // إذا كانت الأرقام صفرية ويوجد مصفوفة رسوم، قم بالحساب
+//       if (
+//         (!totalFees || totalFees === 0) &&
+//         fees &&
+//         Array.isArray(fees) &&
+//         fees.length > 0
+//       ) {
+//         const calculated = calculateTotalsFromFees(fees);
+//         totalFees = calculated.total;
+//         paidAmount = calculated.paid;
+//         remainingAmount = calculated.remaining;
+//       }
+
+//       return {
+//         ...t,
+//         totalFees: totalFees || 0,
+//         paidAmount: paidAmount || 0,
+//         remainingAmount: remainingAmount || 0,
+//       };
+//     });
+
+//     res.status(200).json(fixedTransactions);
+//   } catch (error) {
+//     console.error(error);
+//     res.status(500).json({ message: "خطأ في الخادم" });
+//   }
+// };
 const getAllTransactions = async (req, res) => {
   try {
-    const transactions = await prisma.transaction.findMany({
-      orderBy: { createdAt: "desc" },
-      include: {
-        client: { select: { name: true, clientCode: true } },
-        transactionType: { select: { name: true } },
-        _count: { select: { tasks: true } },
-      },
-    });
+    const {
+      page = 1,
+      limit = 10,
+      search,
+      status,
+      type,
+      startDate,
+      endDate,
+    } = req.query;
 
-    // ✅ إصلاح البيانات "أثناء الطيران": إذا كان الإجمالي 0 ولكن يوجد fees، نحسبه ونرسله
-    const fixedTransactions = transactions.map((t) => {
-      let { totalFees, paidAmount, remainingAmount, fees } = t;
+    const skip = (page - 1) * limit;
 
-      // إذا كانت الأرقام صفرية ويوجد مصفوفة رسوم، قم بالحساب
-      if (
-        (!totalFees || totalFees === 0) &&
-        fees &&
-        Array.isArray(fees) &&
-        fees.length > 0
-      ) {
-        const calculated = calculateTotalsFromFees(fees);
-        totalFees = calculated.total;
-        paidAmount = calculated.paid;
-        remainingAmount = calculated.remaining;
-      }
+    const where = {};
+
+    if (search) {
+      where.OR = [
+        { transactionCode: { contains: search, mode: "insensitive" } },
+        { title: { contains: search, mode: "insensitive" } },
+        { client: { name: { path: ["ar"], string_contains: search } } },
+        { client: { mobile: { contains: search } } },
+        // { deedNumber: { contains: search } } // تأكد أن هذا الحقل موجود في Schema وإلا احذفه
+      ];
+    }
+
+    if (status && status !== "All") where.status = status;
+    if (type) where.transactionTypeId = type;
+
+    if (startDate && endDate) {
+      where.createdAt = {
+        gte: new Date(startDate),
+        lte: new Date(endDate),
+      };
+    }
+
+    const [transactions, total] = await Promise.all([
+      prisma.transaction.findMany({
+        where,
+        skip: parseInt(skip),
+        take: parseInt(limit),
+        orderBy: { updatedAt: "desc" },
+        include: {
+          client: {
+            select: { id: true, name: true, mobile: true, type: true },
+          },
+          transactionType: {
+            select: { id: true, name: true, code: true },
+          },
+          project: {
+            select: { id: true, title: true },
+          },
+          // ✅ التصحيح هنا: استخدام 'tasks' بدلاً من 'assignedTasks'
+          tasks: {
+            select: { id: true, status: true },
+          },
+        },
+      }),
+      prisma.transaction.count({ where }),
+    ]);
+
+    const formattedTransactions = transactions.map((t) => {
+      // ✅ التصحيح هنا أيضاً: استخدام 't.tasks'
+      const totalTasks = t.tasks ? t.tasks.length : 0;
+      const completedTasks = t.tasks
+        ? t.tasks.filter((task) => task.status === "Completed").length
+        : 0;
+
+      const calculatedProgress =
+        totalTasks > 0
+          ? Math.round((completedTasks / totalTasks) * 100)
+          : t.progress || 0;
 
       return {
-        ...t,
-        totalFees: totalFees || 0,
-        paidAmount: paidAmount || 0,
-        remainingAmount: remainingAmount || 0,
+        id: t.id,
+        code: t.transactionCode,
+        title: t.title,
+        clientName: t.client?.name?.ar || t.client?.name || "غير محدد", // تحسين لدعم JSON أو String
+        clientMobile: t.client?.mobile,
+        type: t.transactionType?.name || "عام",
+        status: t.status,
+        date: t.createdAt,
+        progress: calculatedProgress,
+        amount: t.totalFees || 0,
+        paid: t.paidAmount || 0,
+        remaining: (t.totalFees || 0) - (t.paidAmount || 0),
+        priority: t.priority,
       };
     });
 
-    res.status(200).json(fixedTransactions);
+    res.json({
+      success: true,
+      data: formattedTransactions,
+      pagination: {
+        total,
+        page: parseInt(page),
+        pages: Math.ceil(total / limit),
+      },
+    });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "خطأ في الخادم" });
+    console.error("Error fetching transactions:", error);
+    res.status(500).json({ success: false, message: "فشل في جلب المعاملات" });
   }
 };
+
 // ===============================================
 // 3. جلب بيانات معاملة واحدة (لعرض التابات 284)
 // GET /api/transactions/:id
@@ -162,88 +266,190 @@ const convertFlatFeesToCategories = (flatFees) => {
   }));
 };
 
-
 // ===============================================
 // 1. إنشاء معاملة جديدة (شاشة 286) - (مُعدل)
 // POST /api/transactions
 // ===============================================
+// const createTransaction = async (req, res) => {
+//   try {
+//     const {
+//       clientId, type, title, priority, description,
+//       category, projectClassification, status, statusColor, location, deedNumber,
+//       progress, projectId, contractId,
+//       totalFees, paidAmount, remainingAmount,
+//       fees, costDetails
+//     } = req.body;
+
+//     if (!clientId || !title ) {
+//       return res.status(400).json({ message: 'العميل (clientId) والعنوان (title) مطلوبان' });
+//     }
+//     const generatedTransactionCode = await generateNextTransactionCode();
+//     // 3. تحديد الرسوم الأولية
+//     let finalFees = costDetails || fees || [];
+//     // 4. منطق جلب الرسوم من القالب
+//     if (finalFees.length === 0) {
+//       if (type) {
+//         const transactionType = await prisma.transactionType.findUnique({
+//             where: { id: type },
+//             select: { defaultCosts: true, fees: true }
+//         });
+//         if (transactionType) {
+//             if (transactionType.defaultCosts && Array.isArray(transactionType.defaultCosts) && transactionType.defaultCosts.length > 0) {
+//                 finalFees = transactionType.defaultCosts;
+//             } else if (transactionType.fees && Array.isArray(transactionType.fees) && transactionType.fees.length > 0) {
+//                 finalFees = convertFlatFeesToCategories(transactionType.fees);
+//             }
+//         }
+//       }
+//     }
+//     // 5. حساب الإجماليات المالية
+//     let finalTotal = totalFees ? parseFloat(totalFees) : 0;
+//     let finalPaid = paidAmount ? parseFloat(paidAmount) : 0;
+//     let finalRemaining = remainingAmount ? parseFloat(remainingAmount) : 0;
+//     if (finalFees.length > 0) {
+//         const calculated = calculateTotalsFromFees(finalFees);
+//         // نستخدم القيم المحسوبة فقط إذا لم يتم إرسال قيم صريحة (أو لتأكيد الدقة)
+//         finalTotal = calculated.total;
+//         // finalPaid يبقى كما هو (عادة 0 عند الإنشاء) إلا إذا أردت فرضه من الحساب
+//         finalRemaining = calculated.remaining; // المتبقي = الإجمالي - المدفوع
+
+//     }
+//     const newTransaction = await prisma.transaction.create({
+//       data: {
+//         transactionCode: generatedTransactionCode,
+//         title,
+//         clientId,
+//         transactionTypeId: type || null,
+//         priority: priority || 'متوسط',
+//         description,
+//         category,
+//         projectClassification,
+//         status: status || 'Draft',
+//         statusColor: statusColor || '#6b7280',
+//         location,
+//         deedNumber,
+//         progress: progress ? parseFloat(progress) : 0,
+//         projectId,
+//         contractId,
+//         // القيم المالية
+//         totalFees: finalTotal,
+//         paidAmount: finalPaid,
+//         remainingAmount: finalRemaining,
+//         fees: finalFees, // ✅ هذا هو الحقل الأهم
+//       },
+//       include: {
+//         client: { select: { name: true, clientCode: true } }
+//       }
+//     });
+//     res.status(201).json(newTransaction);
+//   } catch (error) {
+//     if (error.code === 'P2002') {
+//       return res.status(400).json({ message: `خطأ: بيانات مكررة` });
+//     }
+//     res.status(500).json({ message: 'خطأ في الخادم' });
+//   }
+// };
+
 const createTransaction = async (req, res) => {
   try {
-    const { 
-      clientId, type, title, priority, description,
-      category, projectClassification, status, statusColor, location, deedNumber,
-      progress, projectId, contractId, 
-      totalFees, paidAmount, remainingAmount,
-      fees, costDetails 
+    const {
+      clientId,
+      ownershipId,
+      transactionTypeId, // الكود القادم من الواجهة (560-01)
+      title,
+      internalContractNumber,
+      priority = "Normal",
+      notes,
     } = req.body;
 
-    if (!clientId || !title ) {
-      return res.status(400).json({ message: 'العميل (clientId) والعنوان (title) مطلوبان' });
-    }
-    const generatedTransactionCode = await generateNextTransactionCode();
-    // 3. تحديد الرسوم الأولية
-    let finalFees = costDetails || fees || [];
-    // 4. منطق جلب الرسوم من القالب
-    if (finalFees.length === 0) {
-      if (type) {
-        const transactionType = await prisma.transactionType.findUnique({
-            where: { id: type },
-            select: { defaultCosts: true, fees: true }
-        });
-        if (transactionType) {
-            if (transactionType.defaultCosts && Array.isArray(transactionType.defaultCosts) && transactionType.defaultCosts.length > 0) {
-                finalFees = transactionType.defaultCosts;
-            } else if (transactionType.fees && Array.isArray(transactionType.fees) && transactionType.fees.length > 0) {
-                finalFees = convertFlatFeesToCategories(transactionType.fees);
-            }
-        }
-      }
-    }
-    // 5. حساب الإجماليات المالية
-    let finalTotal = totalFees ? parseFloat(totalFees) : 0;
-    let finalPaid = paidAmount ? parseFloat(paidAmount) : 0;
-    let finalRemaining = remainingAmount ? parseFloat(remainingAmount) : 0;
-    if (finalFees.length > 0) {
-        const calculated = calculateTotalsFromFees(finalFees); 
-        // نستخدم القيم المحسوبة فقط إذا لم يتم إرسال قيم صريحة (أو لتأكيد الدقة)
-        finalTotal = calculated.total;
-        // finalPaid يبقى كما هو (عادة 0 عند الإنشاء) إلا إذا أردت فرضه من الحساب
-        finalRemaining = calculated.remaining; // المتبقي = الإجمالي - المدفوع
+    console.log("📥 Received Payload:", req.body); // للتتبع
 
-    }   
+    // 1. التحقق من العميل
+    if (!clientId) {
+      return res
+        .status(400)
+        .json({ success: false, message: "يجب تحديد العميل" });
+    }
+
+    // 2. البحث عن نوع المعاملة
+    // ملاحظة: إذا لم يرسل المستخدم نوعاً، نستخدم نوعاً افتراضياً أو نتجاوز
+    let typeIdToConnect = undefined;
+    if (transactionTypeId) {
+      const typeObj = await prisma.transactionType.findUnique({
+        where: { code: transactionTypeId },
+      });
+
+      if (!typeObj) {
+        console.error(
+          `❌ Transaction Type '${transactionTypeId}' not found in DB`,
+        );
+        return res
+          .status(400)
+          .json({
+            success: false,
+            message: `نوع المعاملة (${transactionTypeId}) غير موجود في النظام. يرجى إضافته أولاً.`,
+          });
+      }
+      typeIdToConnect = typeObj.id;
+    }
+
+    // 3. توليد الكود
+    const currentYear = new Date().getFullYear();
+    const count = await prisma.transaction.count();
+    const sequence = String(count + 1).padStart(4, "0");
+    const transactionCode = `TRX-${currentYear}-${sequence}`;
+
+    // 4. إنشاء المعاملة
     const newTransaction = await prisma.transaction.create({
       data: {
-        transactionCode: generatedTransactionCode,
-        title,
-        clientId,
-        transactionTypeId: type || null,
-        priority: priority || 'متوسط',
-        description,
-        category,
-        projectClassification,
-        status: status || 'Draft',
-        statusColor: statusColor || '#6b7280',
-        location,
-        deedNumber,
-        progress: progress ? parseFloat(progress) : 0,
-        projectId,
-        contractId,
-        // القيم المالية
-        totalFees: finalTotal,
-        paidAmount: finalPaid,
-        remainingAmount: finalRemaining,
-        fees: finalFees, // ✅ هذا هو الحقل الأهم
+        transactionCode,
+        title: title || "معاملة جديدة",
+        status: "Pending",
+        priority,
+
+        // الربط بالعميل
+        client: { connect: { id: clientId } },
+
+        // الربط بالنوع (فقط إذا وجدنا الـ ID)
+        ...(typeIdToConnect && {
+          transactionType: { connect: { id: typeIdToConnect } },
+        }),
+
+        // الربط بالملكية (فقط إذا كانت القيمة موجودة وليست فارغة)
+        ...(ownershipId &&
+          ownershipId !== "" && {
+            ownership: { connect: { id: ownershipId } },
+          }),
+
+        // تخزين رقم العقد والملاحظات
+        notes: {
+          content: notes || "",
+          internalContractRef: internalContractNumber || "",
+        },
+
+        // إنشاء مهمة أولية تلقائية
+        tasks: {
+          create: {
+            title: "إعداد ملف المعاملة",
+            status: "Pending",
+            priority: "High",
+          },
+        },
       },
-      include: {
-        client: { select: { name: true, clientCode: true } }
-      }
     });
-    res.status(201).json(newTransaction);
+
+    res.status(201).json({
+      success: true,
+      message: "تم إنشاء المعاملة بنجاح",
+      data: newTransaction,
+    });
   } catch (error) {
-    if (error.code === 'P2002') { 
-      return res.status(400).json({ message: `خطأ: بيانات مكررة` });
-    }
-    res.status(500).json({ message: 'خطأ في الخادم' });
+    console.error("Create Transaction Error:", error);
+    res.status(500).json({
+      success: false,
+      message: "فشل في إنشاء المعاملة",
+      error: error.message, // أرسل تفاصيل الخطأ للفرونت اند
+    });
   }
 };
 
@@ -302,7 +508,7 @@ const getTransactionById = async (req, res) => {
       transaction.transactionType.fees
     ) {
       finalCosts = convertFlatFeesToCategories(
-        transaction.transactionType.fees
+        transaction.transactionType.fees,
       );
     }
 
@@ -344,72 +550,73 @@ const updateTransaction = async (req, res) => {
 
     // 1. سيناريو تغيير نوع المعاملة
     if (newTypeId) {
-        updateData.transactionTypeId = newTypeId;
+      updateData.transactionTypeId = newTypeId;
 
-        if (!costDetails) {
-            
-            // ✅ التعديل هنا: طلبنا fees فقط لأن defaultCosts غير موجود في قاعدة البيانات
-            const transactionType = await prisma.transactionType.findUnique({
-                where: { id: newTypeId },
-                select: { fees: true } 
-            });
+      if (!costDetails) {
+        // ✅ التعديل هنا: طلبنا fees فقط لأن defaultCosts غير موجود في قاعدة البيانات
+        const transactionType = await prisma.transactionType.findUnique({
+          where: { id: newTypeId },
+          select: { fees: true },
+        });
 
-            if (transactionType && transactionType.fees) {
-                let templateFees = [];
-                const feesData = transactionType.fees;
+        if (transactionType && transactionType.fees) {
+          let templateFees = [];
+          const feesData = transactionType.fees;
 
-                // التحقق من شكل البيانات داخل fees
-                if (Array.isArray(feesData) && feesData.length > 0) {
-                    // هل البيانات بالشكل الجديد (فئات)؟
-                    if (feesData[0].items) {
-                        templateFees = feesData;
-                    } 
-                    // أم بالشكل القديم (مسطح)؟
-                    else {
-                        templateFees = convertFlatFeesToCategories(feesData);
-                    }
-                }
+          // التحقق من شكل البيانات داخل fees
+          if (Array.isArray(feesData) && feesData.length > 0) {
+            // هل البيانات بالشكل الجديد (فئات)؟
+            if (feesData[0].items) {
+              templateFees = feesData;
+            }
+            // أم بالشكل القديم (مسطح)؟
+            else {
+              templateFees = convertFlatFeesToCategories(feesData);
+            }
+          }
 
-                if (templateFees.length > 0) {
-                    updateData.fees = templateFees;
-                    
-                    const calculated = calculateTotalsFromFees(templateFees);
-                    updateData.totalFees = calculated.total;
-                    updateData.paidAmount = calculated.paid;
-                    updateData.remainingAmount = calculated.remaining;
-                } 
-            } 
+          if (templateFees.length > 0) {
+            updateData.fees = templateFees;
+
+            const calculated = calculateTotalsFromFees(templateFees);
+            updateData.totalFees = calculated.total;
+            updateData.paidAmount = calculated.paid;
+            updateData.remainingAmount = calculated.remaining;
+          }
         }
+      }
     }
 
     // 2. سيناريو تحديث التكاليف يدوياً
     if (costDetails) {
-       updateData.fees = costDetails;
-       const calculated = calculateTotalsFromFees(costDetails);
-       updateData.totalFees = calculated.total;
-       updateData.paidAmount = calculated.paid;
-       updateData.remainingAmount = calculated.remaining;
+      updateData.fees = costDetails;
+      const calculated = calculateTotalsFromFees(costDetails);
+      updateData.totalFees = calculated.total;
+      updateData.paidAmount = calculated.paid;
+      updateData.remainingAmount = calculated.remaining;
     }
 
     // تنظيف البيانات
-    delete updateData.id; 
-    delete updateData.client; 
+    delete updateData.id;
+    delete updateData.client;
     delete updateData.clientId;
-    delete updateData.transactionCode; 
-    delete updateData.transactionType; 
-    
-    if (updateData.progress) updateData.progress = parseFloat(updateData.progress);
-    if (updateData.totalFees) updateData.totalFees = parseFloat(updateData.totalFees);
+    delete updateData.transactionCode;
+    delete updateData.transactionType;
+
+    if (updateData.progress)
+      updateData.progress = parseFloat(updateData.progress);
+    if (updateData.totalFees)
+      updateData.totalFees = parseFloat(updateData.totalFees);
 
     const updatedTransaction = await prisma.transaction.update({
       where: { id: id },
       data: updateData,
     });
     res.status(200).json(updatedTransaction);
-
   } catch (error) {
-    if (error.code === 'P2025') return res.status(404).json({ message: 'المعاملة غير موجودة' });
-    res.status(500).json({ message: 'خطأ في الخادم', error: error.message });
+    if (error.code === "P2025")
+      return res.status(404).json({ message: "المعاملة غير موجودة" });
+    res.status(500).json({ message: "خطأ في الخادم", error: error.message });
   }
 };
 // ===============================================
@@ -441,14 +648,15 @@ const deleteTransaction = async (req, res) => {
       await tx.transaction.delete({ where: { id: id } });
     });
 
-    res.status(200).json({ message: 'تم حذف المعاملة وكل البيانات المرتبطة بها بنجاح' });
-
+    res
+      .status(200)
+      .json({ message: "تم حذف المعاملة وكل البيانات المرتبطة بها بنجاح" });
   } catch (error) {
     console.error("Error deleting transaction:", error);
-    if (error.code === 'P2025') {
-        return res.status(404).json({ message: 'المعاملة غير موجودة' });
+    if (error.code === "P2025") {
+      return res.status(404).json({ message: "المعاملة غير موجودة" });
     }
-    res.status(500).json({ message: 'خطأ في الخادم', details: error.message });
+    res.status(500).json({ message: "خطأ في الخادم", details: error.message });
   }
 };
 
@@ -557,7 +765,7 @@ const createTransactionType = async (req, res) => {
 
     const generatedCode = await generateNextTransactionTypeCode();
     console.log(
-      `📦 Creating TransactionType with data: { code: '${generatedCode}', name: '${name}', ... }`
+      `📦 Creating TransactionType with data: { code: '${generatedCode}', name: '${name}', ... }`,
     );
 
     const newType = await prisma.transactionType.create({
@@ -713,7 +921,7 @@ const getTemplateFees = async (req, res) => {
     // 3. عرض النتيجة الخام من قاعدة البيانات
     console.log(
       "🔍 DB Result (transactionType):",
-      transactionType ? "Found" : "Null"
+      transactionType ? "Found" : "Null",
     );
     if (transactionType) {
       console.log("   - Has defaultCosts?", !!transactionType.defaultCosts);
@@ -721,14 +929,14 @@ const getTemplateFees = async (req, res) => {
         "   - defaultCosts Length:",
         Array.isArray(transactionType.defaultCosts)
           ? transactionType.defaultCosts.length
-          : "N/A"
+          : "N/A",
       );
       console.log("   - Has fees?", !!transactionType.fees);
       console.log(
         "   - fees Length:",
         Array.isArray(transactionType.fees)
           ? transactionType.fees.length
-          : "N/A"
+          : "N/A",
       );
     }
 
@@ -748,7 +956,7 @@ const getTemplateFees = async (req, res) => {
       console.log("✅ SUCCESS: Returning 'defaultCosts' from DB");
       console.log(
         "📦 Payload:",
-        JSON.stringify(transactionType.defaultCosts, null, 2)
+        JSON.stringify(transactionType.defaultCosts, null, 2),
       ); // طباعة البيانات المرسلة
       return res.json(transactionType.defaultCosts);
     }
@@ -760,7 +968,7 @@ const getTemplateFees = async (req, res) => {
       transactionType.fees.length > 0
     ) {
       console.log(
-        "⚠️ INFO: 'defaultCosts' is empty. Falling back to simple 'fees'."
+        "⚠️ INFO: 'defaultCosts' is empty. Falling back to simple 'fees'.",
       );
 
       const mappedFees = [
@@ -783,7 +991,7 @@ const getTemplateFees = async (req, res) => {
 
     // الحالة ج: لا يوجد بيانات
     console.log(
-      "⚠️ WARNING: No fees found in either 'defaultCosts' or 'fees'. Returning empty array."
+      "⚠️ WARNING: No fees found in either 'defaultCosts' or 'fees'. Returning empty array.",
     );
     return res.json([]);
   } catch (error) {
@@ -832,8 +1040,8 @@ const updateTransactionTasks = async (req, res) => {
             task.status === "in-progress"
               ? "In Progress"
               : task.status === "completed"
-              ? "Completed"
-              : "Pending",
+                ? "Completed"
+                : "Pending",
           // إذا كان الموظف مسنداً
           assignedToId: task.assignedToId || null,
           transactionId: id,

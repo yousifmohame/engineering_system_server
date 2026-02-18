@@ -11,7 +11,8 @@ const app = express();
 app.use(cors());
 app.use(helmet());
 app.use(morgan('dev'));
-app.use(express.json());
+app.use(express.json({ limit: '100mb' })); 
+app.use(express.urlencoded({ limit: '100mb', extended: true }));
 
 const authRoutes = require('./routes/authRoutes');
 app.use('/api/auth', authRoutes);
@@ -50,6 +51,9 @@ app.use('/api/attachments', attachmentRoutes);
 
 const documentRoutes = require('./routes/documentRoutes');
 app.use('/api/documents', documentRoutes);
+
+const documentTypeRoutes = require('./routes/documentTypeRoutes');
+app.use('/api/document-types', documentTypeRoutes);
 
 const docClassificationRoutes = require('./routes/docClassificationRoutes');
 app.use('/api/document-classifications', docClassificationRoutes);

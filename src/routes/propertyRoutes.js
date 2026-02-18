@@ -1,9 +1,13 @@
-const express = require('express');
+const express = require("express");
 const router = express.Router();
-const propertyController = require('../controllers/propertyController');
-const upload = require('../middleware/uploadMiddleware'); // تأكد من وجوده (Multer)
+const propertyController = require("../controllers/propertyController");
+const upload = require("../middleware/uploadMiddleware");
 
-router.get('/', propertyController.getAllPropertyFiles);
-router.post('/extract-ai', upload.single('file'), propertyController.processPropertyAI);
+router.get("/", propertyController.getAllProperties); // الدوال المحدثة
+router.post("/", propertyController.createProperty); // الدالة المصححة
+router.get("/:id", propertyController.getPropertyById);
+router.put('/:id', propertyController.updateProperty);
+
+router.post('/analyze-ai', propertyController.analyzeDeedAI);
 
 module.exports = router;

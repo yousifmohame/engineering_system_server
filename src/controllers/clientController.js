@@ -10,7 +10,26 @@ const prisma = require("../utils/prisma");
 // دالة مساعدة لحساب الاسم الكامل
 const getFullName = (name) => {
   if (!name) return "";
-  return `${name.firstName || ""} ${name.fatherName || ""} ${name.grandFatherName || ""} ${name.familyName || ""}`.trim();
+
+  // حالة 1: الاسم نص عادي
+  if (typeof name === "string") return name;
+
+  // حالة 2: الاسم مخزن بصيغة { ar: "...", en: "..." } (النموذج السريع)
+  if (name.ar) return name.ar;
+
+  // حالة 3: الاسم مجزأ { firstName, familyName... }
+  const parts = [
+    name.firstName,
+    name.fatherName,
+    name.grandFatherName,
+    name.familyName,
+  ];
+
+  // دمج الأجزاء الموجودة فقط
+  const fullName = parts.filter(Boolean).join(" ").trim();
+
+  // إذا فشل كل شيء، نرجع نص فارغ أو الاسم الانجليزي إن وجد
+  return fullName || name.en || "";
 };
 
 // دالة حساب نسبة اكتمال الملف (من ملفك الأصلي)
@@ -134,58 +153,45 @@ const generateNextClientCode = async () => {
 // جلب جميع العملاء
 const getAllClients = async (req, res) => {
   try {
+    const { search, limit } = req.query;
+    const where = {};
+
+    if (search) {
+      where.OR = [
+        { mobile: { contains: search } },
+        { idNumber: { contains: search } },
+        { clientCode: { contains: search } },
+        { name: { path: ["ar"], string_contains: search } }, // بحث في الاسم الموحد
+        { name: { path: ["firstName"], string_contains: search } }, // بحث في الاسم الأول
+        { name: { path: ["familyName"], string_contains: search } }, // بحث في العائلة
+      ];
+    }
+
     const clients = await prisma.client.findMany({
+      where,
+      take: limit ? parseInt(limit) : undefined,
+      orderBy: { createdAt: "desc" },
       include: {
-        transactions: {
-          include: {
-            payments: true,
-          },
-        },
-        contracts: true,
-        quotations: true,
-        attachments: true,
-        activityLogs: {
-          include: {
-            performedBy: {
-              select: {
-                id: true,
-                name: true,
-              },
-            },
-          },
-          orderBy: {
-            date: "desc",
-          },
-        },
-        _count: {
-          // جلب العدد
-          select: {
-            transactions: true,
-            contracts: true,
-            quotations: true,
-          },
-        },
-      },
-      orderBy: {
-        createdAt: "desc",
+        transactions: { select: { id: true } }, // تقليل البيانات المطلوبة للأداء
       },
     });
+
     res.json(clients);
   } catch (error) {
-    res
-      .status(500)
-      .json({ message: "فشل في جلب العملاء", error: error.message });
+    console.error("Get Clients Error:", error);
+    res.json([]);
   }
 };
 
-// إنشاء عميل جديد
+// 2. إنشاء عميل جديد
 const createClient = async (req, res) => {
   try {
-    const {
+    let {
       mobile,
       email,
       idNumber,
       name,
+      nameAr,
       contact,
       address,
       identification,
@@ -201,32 +207,48 @@ const createClient = async (req, res) => {
       isActive,
     } = req.body;
 
-    // ✅ الفحص المحدث
-    if (!mobile || !idNumber || !name || !type) {
-      // ✅ تم إضافة 'type' للفحص
-      return res
-        .status(400)
-        .json({ message: "الجوال، رقم الهوية، الاسم، والنوع مطلوبات" });
+    // ✅ تحسين منطق الاسم
+    if (!name) {
+      if (nameAr) {
+        // إذا جاء من النموذج السريع (اسم واحد)
+        name = { ar: nameAr, en: nameAr };
+      } else {
+        // إذا لم يتم إرسال أي اسم
+        return res.status(400).json({ message: "اسم العميل مطلوب" });
+      }
     }
 
-    // ✅ خطوة 1: توليد الكود
+    if (!mobile || !idNumber || !type) {
+      return res
+        .status(400)
+        .json({ message: "الجوال، رقم الهوية، والنوع مطلوبات" });
+    }
+
     const generatedClientCode = await generateNextClientCode();
 
-    // خطوة 2: حساب النسبة والدرجة (باستخدام الدوال المحلية)
-    const completionPercentage = calculateCompletionPercentage(req.body);
-    const gradeInfo = calculateClientGrade(req.body, completionPercentage);
+    // قيم افتراضية لتجنب الـ null
+    const finalContact = contact || { mobile, email };
+    const finalIdentification = identification || {
+      idNumber,
+      type: "NationalID",
+    };
 
-    // خطوة 3: إنشاء العميل
+    // حسابات الدرجات (يمكن تجاهلها للإضافة السريعة أو وضع قيم افتراضية)
+    const completionPercentage = calculateCompletionPercentage({
+      ...req.body,
+      name,
+    });
+
     const newClient = await prisma.client.create({
       data: {
-        clientCode: generatedClientCode, // ✅ استخدام الكود المولّد
+        clientCode: generatedClientCode,
         mobile,
         email,
         idNumber,
-        name,
-        contact,
-        address,
-        identification,
+        name, // سيتم حفظه كـ JSON
+        contact: finalContact,
+        address: address || {},
+        identification: finalIdentification,
         type,
         category,
         nationality,
@@ -238,59 +260,20 @@ const createClient = async (req, res) => {
         notes,
         isActive: isActive ?? true,
         completionPercentage,
-        grade: gradeInfo.grade,
-        gradeScore: gradeInfo.score,
-        // createdBy: req.user ? req.user.id : null,
-      },
-      include: {
-        // إرجاع نفس البيانات التي يطلبها getAllClients
-        transactions: { include: { payments: true } },
-        contracts: true,
-        quotations: true,
-        attachments: true,
-        activityLogs: {
-          include: { performedBy: { select: { id: true, name: true } } },
-        },
-        _count: {
-          select: {
-            transactions: true,
-            contracts: true,
-            quotations: true,
-          },
-        },
+        grade: "ج", // قيمة افتراضية للسرعة
+        gradeScore: 0,
       },
     });
 
-    // خطوة 4: تسجيل النشاط (اختياري، إذا كان المستخدم مسجل دخول)
-    if (newClient && req.user) {
-      try {
-        await prisma.activityLog.create({
-          data: {
-            action: "إنشاء عميل",
-            description: `تم إنشاء العميل الجديد "${getFullName(newClient.name)}" برقم كود ${newClient.clientCode}.`,
-            category: "عميل",
-            clientId: newClient.id,
-            performedById: req.user.id,
-          },
-        });
-      } catch (logError) {
-        console.error("Failed to create activity log:", logError);
-      }
-    }
-
-    res.status(201).json(newClient);
+    res.status(201).json({ success: true, data: newClient });
   } catch (error) {
     if (error.code === "P2002") {
-      return res.status(400).json({
-        message: "فشل الإنشاء: تضارب في البيانات",
-        error: `البيانات (مثل الجوال أو الإيميل أو رقم الهوية) مستخدمة مسبقاً.`,
-        details: error.meta.target,
-      });
+      return res
+        .status(400)
+        .json({ message: "البيانات (الجوال أو الهوية) مسجلة مسبقاً." });
     }
-    console.error("Error creating client:", error);
-    res
-      .status(500)
-      .json({ message: "فشل في إنشاء العميل", error: error.message });
+    console.error("Create Client Error:", error);
+    res.status(500).json({ message: "فشل الإنشاء", error: error.message });
   }
 };
 
@@ -477,41 +460,50 @@ const getClientById = async (req, res) => {
 // ==================================================
 const getSimpleClients = async (req, res) => {
   try {
+    const { search } = req.query;
+    const where = { isActive: true };
+
+    if (search) {
+      where.OR = [
+        { mobile: { contains: search } },
+        { idNumber: { contains: search } },
+        { name: { path: ["ar"], string_contains: search } },
+        { name: { path: ["firstName"], string_contains: search } },
+      ];
+    }
+
     const clients = await prisma.client.findMany({
       select: {
         id: true,
-        name: true, // (Json)
+        name: true,
         clientCode: true,
+        mobile: true,
+        idNumber: true,
       },
-      where: {
-        isActive: true, // جلب العملاء النشطين فقط
-      },
-      orderBy: {
-        clientCode: "asc",
-      },
+      where,
+      orderBy: { clientCode: "asc" },
+      take: 50,
     });
 
-    // تحويل الاسم إلى نص مقروء
     const simpleList = clients.map((client) => {
-      // هنا نفترض هيكل JSON مثل { firstName, familyName } كما في دالة getFullName
-      const firstName = client.name?.firstName || client.name?.ar || "";
-      const lastName = client.name?.familyName || "";
-      const fullName = `${firstName} ${lastName}`.trim() || "بدون اسم";
+      // ✅ استخدام الدالة المحدثة لضمان عدم عودة نص فارغ
+      const fullName = getFullName(client.name);
 
-      const displayName = `${fullName} (${client.clientCode})`;
       return {
         id: client.id,
-        name: displayName,
+        name: `${fullName} (${client.clientCode})`, // الاسم للعرض في القائمة
+        // بيانات إضافية قد تحتاجها الواجهة
+        clientCode: client.clientCode,
+        mobile: client.mobile,
+        idNumber: client.idNumber,
+        fullNameRaw: fullName,
       };
     });
+
     res.json(simpleList);
   } catch (error) {
-    res
-      .status(500)
-      .json({
-        message: "فشل في جلب قائمة العملاء المبسطة",
-        error: error.message,
-      });
+    console.error("Simple Clients Error:", error);
+    res.status(500).json({ message: "فشل الجلب", error: error.message });
   }
 };
 

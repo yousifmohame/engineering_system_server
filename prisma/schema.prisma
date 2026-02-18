@@ -297,37 +297,83 @@ model ClientClassification {
   isActive    Boolean @default(true)
 }
 
+
 // ===============================================
-// 3. نموذج الملكيات (Ownership Files Module - Screen 310)
+// 3. نموذج الملكيات (Ownership / Deeds Module)
 // ===============================================
-// (تمت إضافته ليتوافق مع WMS Spec)
 
 model OwnershipFile {
   id                String             @id @default(cuid())
-  code              String             @unique // OWN-2026-0001
-  clientId          String             
+  code              String             @unique // كود مرجعي للنظام OWN-2026-xxx
   
-  // Deed Details
-  documentType      String             @default("DEED") // DEED, CONTRACT...
-  documentNo        String?            
-  issuingAuthority  String?            
-  documentDate      DateTime?          @db.Date
+  // --- تفاصيل الصك (Deed Details) ---
+  deedNumber        String?            @unique // رقم الصك (مهم للبحث)
+  deedDate          DateTime?          @db.Date
+  issuingAuthority  String?            // الجهة المصدرة (كتابة العدل الأولى بالرياض مثلاً)
+  status            String             @default("Active") // Active, Sold, Mortgage
   
-  // Location Data
+  // --- البيانات المكانية (Spatial Data) ---
   city              String?
   district          String?
-  planNo            String?            
-  parcelNo          String?            
-  areaSqm           Float?             
+  planNumber        String?            // رقم المخطط
+  blockNumber       String?            // رقم البلوك (تمت إضافته)
+  plotNumber        String?            // رقم القطعة
+  area              Float?             // المساحة بالمتر المربع
   
-  status            String             @default("DRAFT") // DRAFT, VERIFIED...
+  // --- إحداثيات (لخرائط جوجل أو GIS) ---
+  centerLat         Float?
+  centerLng         Float?
+  
+  notes             String?
+
+  documents   Json? @default("[]") // الوثائق
+  plots       Json? @default("[]") // القطع
+  owners      Json? @default("[]") // الملاك والحصص
+  boundaries  Json? @default("[]") // الحدود والأطوال
+  aiData      Json?                // بيانات الذكاء الاصطناعي المستخرجة
+  attachments Json? @default("[]") // المرفقات
+  
+  // --- العلاقات ---
+  clientId          String
+  client            Client             @relation(fields: [clientId], references: [id])
+  
+  transactions      Transaction[]      // المعاملات المرتبطة بهذا الصك
+  
+  aiLogs            AIAnalysisLog[]    // سجل عمليات التحليل لهذا الصك
 
   createdAt         DateTime           @default(now())
   updatedAt         DateTime           @updatedAt
+  
+  @@index([deedNumber])
+  @@index([district])
+  @@index([clientId])
+}
 
-  // Relations
-  client            Client             @relation(fields: [clientId], references: [id])
-  transactions      Transaction[]      // المعاملات المرتبطة بهذه الملكية
+// ===============================================
+// *. نموذج جديد: سجل تحليل الذكاء الاصطناعي
+// ===============================================
+
+model AIAnalysisLog {
+  id                String         @id @default(cuid())
+  
+  fileName          String         // اسم الملف المرفوع
+  filePath          String         // مسار الملف
+  fileSize          Int
+  
+  status            String         // Success, Failed
+  confidenceScore   Float?         // نسبة الدقة (0-100)
+  
+  extractedData     Json           // البيانات الخام المستخرجة (Raw JSON)
+  
+  // هل تم اعتماد هذه البيانات وإنشاء صك بها؟
+  isApproved        Boolean        @default(false)
+  
+  // ربط اختياري بالصك الذي تم إنشاؤه
+  ownershipId       String?
+  ownership         OwnershipFile? @relation(fields: [ownershipId], references: [id])
+  
+  performedBy       String?        // معرف الموظف الذي قام بالعملية
+  createdAt         DateTime       @default(now())
 }
 
 // ===============================================
@@ -689,6 +735,30 @@ model Document {
   @@index([classificationId])
 }
 
+// ===============================================
+// *. إعدادات أنواع المستندات (Document Types Config)
+// ===============================================
+
+model DocumentType {
+  id                 String   @id @default(cuid())
+  code               String   @unique // DOC-001
+  name               String
+  nameEn             String?
+  
+  classification     String   // "مالي", "فني", "إداري", "قانوني"
+  allowedExtensions  String[] // ["PDF", "JPG", "DWG"]
+  maxSizeMB          Int      @default(5)
+  
+  requiresSignature  Boolean  @default(false)
+  confidentiality    String   @default("General") // "General", "Confidential", "TopSecret"
+  allowMultiple      Boolean  @default(false) // هل يسمح برفع أكثر من ملف لهذا النوع في المعاملة الواحدة؟
+  
+  status             String   @default("Active")
+  
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
 model DocumentPermission {
   id               String    @id @default(cuid())
   permissionNumber String    @unique @default(cuid())
@@ -926,3 +996,4 @@ model Message {
   sender          Employee     @relation("SenderToMessage", fields: [senderId], references: [id])
   senderId        String
 }
+
