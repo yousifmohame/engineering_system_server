@@ -307,7 +307,7 @@ model OwnershipFile {
   code              String             @unique // كود مرجعي للنظام OWN-2026-xxx
   
   // --- تفاصيل الصك (Deed Details) ---
-  deedNumber        String?            @unique // رقم الصك (مهم للبحث)
+  deedNumber        String?            
   deedDate          DateTime?          @db.Date
   issuingAuthority  String?            // الجهة المصدرة (كتابة العدل الأولى بالرياض مثلاً)
   status            String             @default("Active") // Active, Sold, Mortgage

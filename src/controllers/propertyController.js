@@ -219,66 +219,146 @@ exports.getAllProperties = async (req, res) => {
   }
 };
 
-// 2. إنشاء صك جديد (تم التصحيح ليتوافق مع السكيما الجديدة)
 exports.createProperty = async (req, res) => {
   try {
     const {
       deedNumber,
       deedDate,
       district,
-      city, // 👈 1. إضافة استقبال المدينة
+      city,
       plotNumber,
       blockNumber,
       planNumber,
       area,
       clientId,
       notes,
+      documents = [],
+      plots = [],
+      owners = [],
+      boundaries = [],
+      attachments = [],
     } = req.body;
 
     if (!clientId) {
       return res
         .status(400)
-        .json({ success: false, message: "يجب اختيار العميل" });
+        .json({ success: false, message: "يجب إدخال اسم أو معرّف العميل" });
     }
 
-    // 1. توليد كود الصك
+    // ==========================================
+    // 0. معالجة رقم الصك (منع التكرار ومنع مشكلة النصوص الفارغة)
+    // ==========================================
+    // ==========================================
+    // 0. معالجة رقم الصك (دعم الصكوك المتعددة)
+    // ==========================================
+    const validDeedNumber =
+      deedNumber && String(deedNumber).trim() !== ""
+        ? String(deedNumber).trim()
+        : null;
+
+    if (validDeedNumber) {
+      // نستخدم findFirst بدلاً من findUnique لأن الحقل لم يعد Unique
+      const existingDeed = await prisma.ownershipFile.findFirst({
+        where: { deedNumber: validDeedNumber },
+      });
+
+      // يمكنك إزالة هذا الشرط تماماً إذا أردت السماح بحفظ نفس الأرقام في ملفات مختلفة
+      if (existingDeed) {
+        return res.status(400).json({
+          success: false,
+          message: `عفواً، الصك المرجعي (${validDeedNumber}) مرتبط بملف آخر مسبقاً.`,
+        });
+      }
+    }
+
+    // ==========================================
+    // 1. معالجة التاريخ بأمان (Safe Date Parsing)
+    // ==========================================
+    let validDeedDate = null;
+    if (deedDate) {
+      const parsedDate = new Date(deedDate);
+      if (!isNaN(parsedDate.getTime())) {
+        validDeedDate = parsedDate;
+      } else {
+        console.log(
+          `⚠️ التاريخ المدخل غير صالح كـ Date ميلادي: ${deedDate} (سيتم تركه فارغاً)`,
+        );
+      }
+    }
+
+    // ==========================================
+    // 2. معالجة العميل (Smart Client Connection)
+    // ==========================================
+    let finalClientId = clientId;
+    if (clientId.includes(" ") || /[\u0600-\u06FF]/.test(clientId)) {
+      console.log(`👤 جاري إنشاء عميل جديد تلقائياً باسم: ${clientId}`);
+
+      const clientsCount = await prisma.client.count();
+      const newClientCode = `C-${String(clientsCount + 1).padStart(5, "0")}`;
+
+      const tempIdNumber =
+        "10" +
+        Math.floor(Math.random() * 100000000)
+          .toString()
+          .padStart(8, "0");
+      const tempMobile =
+        "05" +
+        Math.floor(Math.random() * 100000000)
+          .toString()
+          .padStart(8, "0");
+
+      const newClient = await prisma.client.create({
+        data: {
+          clientCode: newClientCode,
+          name: { ar: clientId },
+          mobile: tempMobile,
+          idNumber: tempIdNumber,
+          type: "Individual",
+          contact: {},
+          identification: {},
+        },
+      });
+      finalClientId = newClient.id;
+    }
+
+    // ==========================================
+    // 3. توليد الكود والحفظ
+    // ==========================================
     const currentYear = new Date().getFullYear();
     const count = await prisma.ownershipFile.count();
     const sequence = String(count + 1).padStart(4, "0");
-    const code = `PRO-800-${sequence}`; // 👈 (اختياري) تعديل البادئة لتطابق التصميم
+    const code = `PRO-800-${sequence}`;
 
-    // 2. الحفظ في قاعدة البيانات
     const newDeed = await prisma.ownershipFile.create({
       data: {
         code,
-        deedNumber,
-        deedDate: deedDate ? new Date(deedDate) : null,
+        deedNumber: validDeedNumber, // 👈 استخدام الرقم المعالج هنا
+        deedDate: validDeedDate,
         district,
-        city: city || "الرياض", // 👈 حفظ المدينة مع قيمة افتراضية
-
+        city: city || "الرياض",
         planNumber: planNumber || null,
         plotNumber: plotNumber || null,
         blockNumber: blockNumber || null,
         area: area ? parseFloat(area) : 0,
-
         status: "Active",
         notes,
 
-        // ✅ 2. تهيئة حقول الـ JSON لتعمل الشاشة التفصيلية بدون أخطاء
-        documents: [],
-        plots: [],
-        owners: [],
-        boundaries: [],
-        attachments: [],
+        // حفظ بيانات الذكاء الاصطناعي
+        documents,
+        plots,
+        owners,
+        boundaries,
+        attachments,
 
-        client: { connect: { id: clientId } },
+        // ربط العميل بالمعرّف الآمن
+        client: { connect: { id: finalClientId } },
       },
     });
 
     res.status(201).json({
       success: true,
-      message: "تم حفظ الصك بنجاح",
-      data: newDeed, // يجب إرجاع newDeed داخل data
+      message: "تم حفظ الصك وبيانات الـ AI بنجاح!",
+      data: newDeed,
     });
   } catch (error) {
     console.error("Create Property Error:", error);
@@ -289,31 +369,49 @@ exports.createProperty = async (req, res) => {
 };
 
 // تحديث بيانات ملف الملكية (الصك)
-// تحديث بيانات ملف الملكية (الصك)
 exports.updateProperty = async (req, res) => {
   try {
     const { id } = req.params;
     const {
+      // 1. المصفوفات (JSON)
       documents,
       plots,
       owners,
       boundaries,
       attachments,
-      // الحقول الأساسية التي قد تتحدث من الذكاء الاصطناعي
+
+      // 2. الحقول الأساسية
       area,
       city,
       district,
       planNumber,
+      deedNumber, // 👈 تمت الإضافة
+      deedDate, // 👈 تمت الإضافة
+      status, // 👈 تمت الإضافة (لتاب التحقق)
+      notes, // 👈 تمت الإضافة (لتاب الملاحظات)
     } = req.body;
+
+    // معالجة التاريخ إذا تم إرسال تاريخ جديد
+    let validDeedDate = undefined;
+    if (deedDate) {
+      const parsedDate = new Date(deedDate);
+      if (!isNaN(parsedDate.getTime())) {
+        validDeedDate = parsedDate;
+      }
+    }
 
     const updatedProperty = await prisma.ownershipFile.update({
       where: { id },
       data: {
-        // تحديث الحقول الأساسية
+        // تحديث الحقول الأساسية (نستخدم !== undefined للسماح بحفظ القيم الفارغة إذا مسحها المستخدم)
         ...(area !== undefined && { area: parseFloat(area) }),
-        ...(city && { city }),
-        ...(district && { district }),
-        ...(planNumber && { planNumber }),
+        ...(city !== undefined && { city }),
+        ...(district !== undefined && { district }),
+        ...(planNumber !== undefined && { planNumber }),
+        ...(deedNumber !== undefined && { deedNumber }),
+        ...(validDeedDate !== undefined && { deedDate: validDeedDate }),
+        ...(status !== undefined && { status }), // ✅ حفظ تغيير الحالة
+        ...(notes !== undefined && { notes }), // ✅ حفظ الملاحظات
 
         // تحديث حقول الـ JSON
         ...(documents && { documents }),
