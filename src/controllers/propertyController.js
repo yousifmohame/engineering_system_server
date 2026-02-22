@@ -8,6 +8,32 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+const generateNextClientCode = async () => {
+  const year = new Date().getFullYear();
+  const prefix = `CLT-${year}-`;
+
+  const lastClient = await prisma.client.findFirst({
+    where: { clientCode: { startsWith: prefix } },
+    orderBy: { clientCode: "desc" },
+  });
+
+  let nextNumber = 1;
+
+  if (lastClient) {
+    try {
+      const lastNumberStr = lastClient.clientCode.split("-")[2];
+      const lastNumber = parseInt(lastNumberStr, 10);
+      nextNumber = lastNumber + 1;
+    } catch (e) {
+      console.error("Failed to parse last client code, defaulting to 1", e);
+      nextNumber = 1;
+    }
+  }
+
+  const paddedNumber = String(nextNumber).padStart(3, "0");
+  return `${prefix}${paddedNumber}`; // النتيجة: CLT-2026-001
+};
+
 exports.analyzeDeedAI = async (req, res) => {
   try {
     const { imageBase64 } = req.body;
@@ -246,10 +272,7 @@ exports.createProperty = async (req, res) => {
     }
 
     // ==========================================
-    // 0. معالجة رقم الصك (منع التكرار ومنع مشكلة النصوص الفارغة)
-    // ==========================================
-    // ==========================================
-    // 0. معالجة رقم الصك (دعم الصكوك المتعددة)
+    // 1. معالجة رقم الصك (منع التكرار)
     // ==========================================
     const validDeedNumber =
       deedNumber && String(deedNumber).trim() !== ""
@@ -257,12 +280,9 @@ exports.createProperty = async (req, res) => {
         : null;
 
     if (validDeedNumber) {
-      // نستخدم findFirst بدلاً من findUnique لأن الحقل لم يعد Unique
       const existingDeed = await prisma.ownershipFile.findFirst({
         where: { deedNumber: validDeedNumber },
       });
-
-      // يمكنك إزالة هذا الشرط تماماً إذا أردت السماح بحفظ نفس الأرقام في ملفات مختلفة
       if (existingDeed) {
         return res.status(400).json({
           success: false,
@@ -272,29 +292,21 @@ exports.createProperty = async (req, res) => {
     }
 
     // ==========================================
-    // 1. معالجة التاريخ بأمان (Safe Date Parsing)
+    // 2. معالجة التاريخ
     // ==========================================
     let validDeedDate = null;
     if (deedDate) {
       const parsedDate = new Date(deedDate);
-      if (!isNaN(parsedDate.getTime())) {
-        validDeedDate = parsedDate;
-      } else {
-        console.log(
-          `⚠️ التاريخ المدخل غير صالح كـ Date ميلادي: ${deedDate} (سيتم تركه فارغاً)`,
-        );
-      }
+      if (!isNaN(parsedDate.getTime())) validDeedDate = parsedDate;
     }
 
     // ==========================================
-    // 2. معالجة العميل (Smart Client Connection)
+    // 3. معالجة العميل التلقائية (Smart Client)
     // ==========================================
     let finalClientId = clientId;
     if (clientId.includes(" ") || /[\u0600-\u06FF]/.test(clientId)) {
-      console.log(`👤 جاري إنشاء عميل جديد تلقائياً باسم: ${clientId}`);
-
-      const clientsCount = await prisma.client.count();
-      const newClientCode = `C-${String(clientsCount + 1).padStart(5, "0")}`;
+      // استخدام دالة توليد الكود لتوحيد النسق
+      const newClientCode = await generateNextClientCode();
 
       const tempIdNumber =
         "10" +
@@ -313,7 +325,7 @@ exports.createProperty = async (req, res) => {
           name: { ar: clientId },
           mobile: tempMobile,
           idNumber: tempIdNumber,
-          type: "Individual",
+          type: "فرد سعودي",
           contact: {},
           identification: {},
         },
@@ -322,9 +334,8 @@ exports.createProperty = async (req, res) => {
     }
 
     // ==========================================
-    // 3. توليد الكود والحفظ
+    // 4. توليد كود الملكية والحفظ النهائي
     // ==========================================
-    const currentYear = new Date().getFullYear();
     const count = await prisma.ownershipFile.count();
     const sequence = String(count + 1).padStart(4, "0");
     const code = `PRO-800-${sequence}`;
@@ -332,7 +343,7 @@ exports.createProperty = async (req, res) => {
     const newDeed = await prisma.ownershipFile.create({
       data: {
         code,
-        deedNumber: validDeedNumber, // 👈 استخدام الرقم المعالج هنا
+        deedNumber: validDeedNumber,
         deedDate: validDeedDate,
         district,
         city: city || "الرياض",
@@ -343,28 +354,29 @@ exports.createProperty = async (req, res) => {
         status: "Active",
         notes,
 
-        // حفظ بيانات الذكاء الاصطناعي
+        // 🚀 حفظ كل المصفوفات كـ JSON مباشرة كما هو محدد في Schema
         documents,
         plots,
         owners,
         boundaries,
         attachments,
 
-        // ربط العميل بالمعرّف الآمن
         client: { connect: { id: finalClientId } },
       },
     });
 
     res.status(201).json({
       success: true,
-      message: "تم حفظ الصك وبيانات الـ AI بنجاح!",
+      message: "تم حفظ الصك والبيانات بنجاح!",
       data: newDeed,
     });
   } catch (error) {
-    console.error("Create Property Error:", error);
-    res
-      .status(400)
-      .json({ success: false, message: "فشل الحفظ: " + error.message });
+    console.error("🔥 Create Property Error:", error);
+    res.status(500).json({
+      success: false,
+      message: "فشل الحفظ",
+      error: error.message,
+    });
   }
 };
 

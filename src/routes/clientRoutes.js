@@ -10,7 +10,8 @@ const {
   updateClient,
   deleteClient,
   getSimpleClients, // ✅ 1. استيراد الدالة الجديدة
-  analyzeIdentityImage
+  analyzeIdentityImage,
+  analyzeAddressDocument
 } = require('../controllers/clientController');
 
 
@@ -23,6 +24,7 @@ router.route('/simple')
   .get(getSimpleClients);
 
 router.post('/analyze-identity', analyzeIdentityImage);
+router.post("/analyze-address", analyzeAddressDocument);
 
 router.route('/:id')
   .get(getClientById)

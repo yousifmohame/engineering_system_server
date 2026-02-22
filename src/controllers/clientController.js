@@ -1,7 +1,13 @@
 // server/src/controllers/clientController.js
 
-// ✅ التعديل الوحيد: استيراد prisma من المكان الصحيح في مشروعك
+const { OpenAI } = require("openai");
+const { fromBuffer } = require("pdf2pic");
+const { PDFDocument } = require("pdf-lib");
 const prisma = require("../utils/prisma");
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
 // ==================================================
 // 1. الدوال المساعدة (Helpers)
@@ -151,9 +157,11 @@ const generateNextClientCode = async () => {
 // ==================================================
 
 // جلب جميع العملاء
+// جلب جميع العملاء (مُحدث لدعم جلب المرفقات عند الحاجة)
 const getAllClients = async (req, res) => {
   try {
-    const { search, limit } = req.query;
+    // 1. استلام includeAttachments من الـ query
+    const { search, limit, includeAttachments } = req.query;
     const where = {};
 
     if (search) {
@@ -161,9 +169,9 @@ const getAllClients = async (req, res) => {
         { mobile: { contains: search } },
         { idNumber: { contains: search } },
         { clientCode: { contains: search } },
-        { name: { path: ["ar"], string_contains: search } }, // بحث في الاسم الموحد
-        { name: { path: ["firstName"], string_contains: search } }, // بحث في الاسم الأول
-        { name: { path: ["familyName"], string_contains: search } }, // بحث في العائلة
+        { name: { path: ["ar"], string_contains: search } },
+        { name: { path: ["firstName"], string_contains: search } },
+        { name: { path: ["familyName"], string_contains: search } },
       ];
     }
 
@@ -172,7 +180,11 @@ const getAllClients = async (req, res) => {
       take: limit ? parseInt(limit) : undefined,
       orderBy: { createdAt: "desc" },
       include: {
-        transactions: { select: { id: true } }, // تقليل البيانات المطلوبة للأداء
+        transactions: { select: { id: true } },
+        // 2. الشرط الجديد: جلب المرفقات فقط إذا كانت includeAttachments تساوي 'true'
+        ...(includeAttachments === "true" && {
+          attachments: true,
+        }),
       },
     });
 
@@ -205,17 +217,14 @@ const createClient = async (req, res) => {
       secretRating,
       notes,
       isActive,
+      attachments, // 👈 إضافة استقبال المرفقات
+      profilePictureBase64, // 👈 إضافة استقبال الصورة الشخصية
     } = req.body;
 
-    // ✅ تحسين منطق الاسم
+    // تحسين منطق الاسم
     if (!name) {
-      if (nameAr) {
-        // إذا جاء من النموذج السريع (اسم واحد)
-        name = { ar: nameAr, en: nameAr };
-      } else {
-        // إذا لم يتم إرسال أي اسم
-        return res.status(400).json({ message: "اسم العميل مطلوب" });
-      }
+      if (nameAr) name = { ar: nameAr, en: nameAr };
+      else return res.status(400).json({ message: "اسم العميل مطلوب" });
     }
 
     if (!mobile || !idNumber || !type) {
@@ -226,18 +235,54 @@ const createClient = async (req, res) => {
 
     const generatedClientCode = await generateNextClientCode();
 
-    // قيم افتراضية لتجنب الـ null
+    // 👈 حفظ الصورة الشخصية داخل الـ contact JSON (بما أنه لا يوجد حقل مخصص لها في الـ DB)
     const finalContact = contact || { mobile, email };
+    if (profilePictureBase64) {
+      finalContact.profilePicture = profilePictureBase64;
+    }
+
     const finalIdentification = identification || {
       idNumber,
       type: "NationalID",
     };
 
-    // حسابات الدرجات (يمكن تجاهلها للإضافة السريعة أو وضع قيم افتراضية)
     const completionPercentage = calculateCompletionPercentage({
       ...req.body,
       name,
     });
+
+    let uploaderId = req.user?.id;
+
+    // (حماية إضافية): إذا لم يكن هناك مستخدم مسجل الدخول، نجلب أي موظف من القاعدة لتجنب الخطأ
+    if (!uploaderId && attachments && attachments.length > 0) {
+      const defaultEmployee = await prisma.employee.findFirst();
+      if (defaultEmployee) {
+        uploaderId = defaultEmployee.id;
+      } else {
+        return res.status(400).json({
+          message: "يجب وجود موظف واحد على الأقل في النظام لرفع المرفقات",
+        });
+      }
+    }
+
+    // ==========================================
+    // 2. تجهيز المرفقات لـ Prisma وتعبئة كل الحقول الإجبارية
+    // ==========================================
+    const attachmentsData =
+      attachments && attachments.length > 0
+        ? {
+            create: attachments.map((doc, index) => ({
+              fileName: doc.name || "مستند بدون اسم",
+
+              // نضع مسار فريد وهمي لتجنب خطأ الـ @unique (لا تضع الـ Base64 هنا لأنه سيسبب Crash للـ DB)
+              filePath: `/uploads/clients/temp_${Date.now()}_${index}_${Math.floor(Math.random() * 1000)}`,
+
+              fileType: doc.type || "عام",
+              fileSize: doc.size ? parseInt(doc.size) : 0,
+              uploadedById: uploaderId, // ربط الملف بالموظف
+            })),
+          }
+        : undefined;
 
     const newClient = await prisma.client.create({
       data: {
@@ -245,7 +290,7 @@ const createClient = async (req, res) => {
         mobile,
         email,
         idNumber,
-        name, // سيتم حفظه كـ JSON
+        name,
         contact: finalContact,
         address: address || {},
         identification: finalIdentification,
@@ -260,8 +305,11 @@ const createClient = async (req, res) => {
         notes,
         isActive: isActive ?? true,
         completionPercentage,
-        grade: "ج", // قيمة افتراضية للسرعة
+        grade: "ج",
         gradeScore: 0,
+
+        // 👈 ربط وإنشاء المرفقات في نفس خطوة إنشاء العميل
+        ...(attachmentsData && { attachments: attachmentsData }),
       },
     });
 
@@ -277,6 +325,7 @@ const createClient = async (req, res) => {
   }
 };
 
+// تحديث عميل
 // تحديث عميل
 const updateClient = async (req, res) => {
   const { id: clientId } = req.params;
@@ -309,9 +358,13 @@ const updateClient = async (req, res) => {
         : existingClient.identification,
     };
 
-    // 3. إعادة حساب النسبة والدرجة
+    // 3. إعادة حساب النسبة والدرجة التلقائية
     const completionPercentage = calculateCompletionPercentage(mergedData);
     const gradeInfo = calculateClientGrade(mergedData, completionPercentage);
+
+    // ✅ إعطاء الأولوية للتقييم المرسل يدوياً، وإلا استخدم المحسوب آلياً
+    const finalGrade =
+      req.body.grade !== undefined ? req.body.grade : gradeInfo.grade;
 
     // 4. تنفيذ التحديث
     const updatedClient = await prisma.client.update({
@@ -331,6 +384,9 @@ const updateClient = async (req, res) => {
         notes: req.body.notes,
         isActive: req.body.isActive,
 
+        // ✅ إضافة مستوى المخاطرة ليتم حفظه في قاعدة البيانات
+        riskTier: req.body.riskTier,
+
         name: req.body.name ? req.body.name : undefined,
         contact: req.body.contact ? req.body.contact : undefined,
         address: req.body.address ? req.body.address : undefined,
@@ -339,20 +395,27 @@ const updateClient = async (req, res) => {
           : undefined,
 
         completionPercentage,
-        grade: gradeInfo.grade,
+        grade: finalGrade, // ✅ استخدام التقييم النهائي المدمج
         gradeScore: gradeInfo.score,
       },
       include: {
+        // نستخدم include بشكل آمن (تأكد من مطابقة هذه الحقول لما هو موجود في مخططك)
         transactions: { include: { payments: true } },
         contracts: true,
         quotations: true,
         attachments: true,
+        ownerships: true, // في حال أضفتها مسبقاً
         activityLogs: {
           include: { performedBy: { select: { id: true, name: true } } },
-          orderBy: { date: "desc" },
         },
         _count: {
-          select: { transactions: true, contracts: true, quotations: true },
+          select: {
+            transactions: true,
+            contracts: true,
+            quotations: true,
+            ownerships: true,
+            attachments: true,
+          },
         },
       },
     });
@@ -421,34 +484,48 @@ const deleteClient = async (req, res) => {
 };
 
 // جلب عميل واحد
+// ==================================================
+// جلب عميل واحد (نسخة آمنة 100%)
+// ==================================================
 const getClientById = async (req, res) => {
   const { id: clientId } = req.params;
   try {
     const client = await prisma.client.findUnique({
       where: { id: clientId },
       include: {
+        // جلب العلاقات الأساسية
         transactions: { include: { payments: true } },
         contracts: true,
         quotations: true,
         attachments: true,
+        ownerships: true, // ✅ جلب الملكيات (الصكوك)
+
+        // جلب سجل النشاط (بدون ترتيب لتجنب أخطاء حقل التاريخ)
         activityLogs: {
           include: { performedBy: { select: { id: true, name: true } } },
         },
+
+        // عدّاد العلاقات للإحصائيات السريعة
         _count: {
           select: {
             transactions: true,
             contracts: true,
             quotations: true,
+            ownerships: true, // ✅ عد الملكيات
+            attachments: true, // ✅ عد الوثائق
           },
         },
       },
     });
+
     if (client) {
       res.json(client);
     } else {
       res.status(404).json({ message: "لم يتم العثور على العميل" });
     }
   } catch (error) {
+    // 🔴 هذه الأسطر ستطبع الخطأ الدقيق في شاشة الـ Terminal لديك في الباك إند
+    console.error("🔥 Prisma Error in getClientById:", error.message);
     res
       .status(500)
       .json({ message: "فشل في جلب العميل", error: error.message });
@@ -509,73 +586,223 @@ const getSimpleClients = async (req, res) => {
 
 const analyzeIdentityImage = async (req, res) => {
   try {
-    const { base64Image, documentType } = req.body;
+    const { imageBase64, documentType } = req.body;
 
-    if (!base64Image) {
-      return res.status(400).json({ message: "صورة الهوية مطلوبة" });
+    if (!imageBase64) {
+      return res
+        .status(400)
+        .json({ success: false, message: "لم يتم إرسال أي وثيقة" });
     }
 
-    // تأكد من وضع المفتاح في ملف .env الخاص بالـ Backend
-    const apiKey = process.env.OPENAI_API_KEY; 
-    if (!apiKey) {
-      return res.status(500).json({ message: "مفتاح OpenAI غير متوفر في الخادم" });
+    const mimeType = imageBase64.substring(
+      imageBase64.indexOf(":") + 1,
+      imageBase64.indexOf(";"),
+    );
+    const base64Data = imageBase64.split(",")[1];
+    const fileBuffer = Buffer.from(base64Data, "base64");
+
+    let imagesToSend = [];
+
+    // ==========================================
+    // 1. معالجة الـ PDF (الأسلوب المؤسسي)
+    // ==========================================
+    if (mimeType === "application/pdf") {
+      const pdfDoc = await PDFDocument.load(fileBuffer);
+      const totalPages = pdfDoc.getPageCount();
+
+      // للهويات والسجلات التجارية، نكتفي بأول صفحتين لتوفير التكلفة والوقت
+      const pagesToProcess = Math.min(totalPages, 2);
+
+      console.log(
+        `🚀 رصد وثيقة عميل PDF. جاري معالجة ${pagesToProcess} صفحة...`,
+      );
+
+      const options = {
+        density: 150,
+        format: "jpeg",
+        width: 1240,
+        height: 1754,
+      };
+
+      const convert = fromBuffer(fileBuffer, options);
+
+      for (let i = 1; i <= pagesToProcess; i++) {
+        const image = await convert(i, { responseType: "base64" });
+        imagesToSend.push(`data:image/jpeg;base64,${image.base64}`);
+      }
+    }
+    // ==========================================
+    // 2. معالجة الصور المباشرة
+    // ==========================================
+    else if (mimeType.startsWith("image/")) {
+      imagesToSend.push(imageBase64);
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: "نوع الملف غير مدعوم. يرجى رفع PDF أو صورة.",
+      });
     }
 
-    // إرسال الطلب إلى OpenAI من السيرفر
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: "gpt-4o",
-        messages: [
-          {
-            role: "user",
-            content: [
-              {
-                type: "text",
-                text: `Analyze this Saudi identity document (${documentType || 'identity document'}). Extract the exact text for:
-                1. First Name (Arabic)
-                2. Father Name (Arabic)
-                3. Grandfather Name (Arabic)
-                4. Family Name (Arabic)
-                5. Full Name (English)
-                6. ID Number (National ID, Iqama, or CR Number depending on document type)
-                7. Date of Birth (Hijri or Gregorian as written)
-                8. Nationality
-                
-                Respond ONLY with a valid JSON object matching this structure perfectly:
-                {
-                  "firstName": "...", "fatherName": "...", "grandFatherName": "...", "familyName": "...", "englishName": "...",
-                  "idNumber": "...", "birthDate": "...", "nationality": "..."
-                }
-                If a field is missing or not applicable, return an empty string "".`
-              },
-              {
-                type: "image_url",
-                image_url: { url: `data:image/jpeg;base64,${base64Image}` },
-              },
-            ],
-          },
-        ],
-        response_format: { type: "json_object" },
-        max_tokens: 500,
-      }),
+    // ==========================================
+    // 3. البرومبت المتخصص لاستخراج بيانات العميل
+    // ==========================================
+    const prompt = `
+    أنت خبير في قراءة الوثائق الرسمية السعودية (هوية وطنية، إقامة، سجل تجاري، جواز سفر، شهادة رقم موحد).
+    مهمتك قراءة الصورة/الصور المرفقة واستخراج البيانات بدقة متناهية وإعادتها كـ JSON صالح 100%.
+
+    نوع الوثيقة المتوقع: ${documentType || "غير محدد"}
+
+    القواعد:
+    - إذا كانت الوثيقة "سجل تجاري" أو "شركة": ضع اسم الشركة بالكامل في "firstAr" واترك باقي أجزاء الاسم فارغة.
+    - إذا كانت "هوية" أو "إقامة": قم بتفكيك الاسم إلى 4 أجزاء (أول، أب، جد، عائلة) بالعربية والإنجليزية إن وجد.
+    - إذا لم تجد المعلومة، أرجع نصاً فارغاً "".
+
+    التركيبة المطلوبة للـ JSON:
+    {
+      "firstAr": "الاسم الأول بالعربية (أو اسم الشركة كاملاً)",
+      "fatherAr": "اسم الأب بالعربية",
+      "grandAr": "اسم الجد بالعربية",
+      "familyAr": "اسم العائلة بالعربية",
+      "firstEn": "First Name",
+      "fatherEn": "Father Name",
+      "grandEn": "Grandfather Name",
+      "familyEn": "Family Name",
+      "idNumber": "رقم الهوية أو الإقامة أو السجل التجاري (أرقام فقط)",
+      "birthDate": "تاريخ الميلاد (هجري أو ميلادي حسب الموجود)",
+      "nationality": "الجنسية",
+      "confidence": نسبة دقة الاستخراج من 0 إلى 100 (Number)
+    }
+    `;
+
+    const contentArray = [{ type: "text", text: prompt }];
+    imagesToSend.forEach((imgUrl) => {
+      contentArray.push({
+        type: "image_url",
+        image_url: { url: imgUrl, detail: "high" },
+      });
     });
 
-    const data = await response.json();
-    if (data.error) throw new Error(data.error.message);
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o",
+      messages: [{ role: "user", content: contentArray }],
+      response_format: { type: "json_object" },
+      temperature: 0.0,
+    });
 
-    // تحويل النص العائد من الذكاء الاصطناعي إلى كائن JSON
-    const parsedResult = JSON.parse(data.choices[0].message.content);
+    const parsedData = JSON.parse(response.choices[0].message.content);
+    console.log("✅ تم تحليل وثيقة العميل بنجاح!");
 
-    res.status(200).json({ success: true, data: parsedResult });
-
+    res.json({ success: true, data: parsedData });
   } catch (error) {
     console.error("AI Analysis Error:", error);
-    res.status(500).json({ message: "فشل تحليل الصورة", error: error.message });
+    res.status(500).json({
+      success: false,
+      message: "فشل تحليل الوثيقة بالذكاء الاصطناعي",
+      details: error.message,
+    });
+  }
+};
+
+// أضف هذه الدالة في clientController.js
+
+const analyzeAddressDocument = async (req, res) => {
+  try {
+    const { imageBase64 } = req.body;
+
+    if (!imageBase64) {
+      return res
+        .status(400)
+        .json({ success: false, message: "لم يتم إرسال أي وثيقة" });
+    }
+
+    const mimeType = imageBase64.substring(
+      imageBase64.indexOf(":") + 1,
+      imageBase64.indexOf(";"),
+    );
+    const base64Data = imageBase64.split(",")[1];
+    const fileBuffer = Buffer.from(base64Data, "base64");
+
+    let imagesToSend = [];
+
+    // معالجة الـ PDF
+    if (mimeType === "application/pdf") {
+      const pdfDoc = await PDFDocument.load(fileBuffer);
+      const totalPages = pdfDoc.getPageCount();
+      const pagesToProcess = Math.min(totalPages, 2); // عادة وثيقة العنوان صفحة واحدة
+
+      const options = {
+        density: 150,
+        format: "jpeg",
+        width: 1240,
+        height: 1754,
+      };
+      const convert = fromBuffer(fileBuffer, options);
+
+      for (let i = 1; i <= pagesToProcess; i++) {
+        const image = await convert(i, { responseType: "base64" });
+        imagesToSend.push(`data:image/jpeg;base64,${image.base64}`);
+      }
+    }
+    // معالجة الصور
+    else if (mimeType.startsWith("image/")) {
+      imagesToSend.push(imageBase64);
+    } else {
+      return res
+        .status(400)
+        .json({ success: false, message: "نوع الملف غير مدعوم." });
+    }
+
+    const prompt = `
+    أنت خبير في قراءة وثيقة "العنوان الوطني" السعودي (National Address) الصادرة من سبل (البريد السعودي).
+    استخرج البيانات التالية بدقة متناهية وأعدها كـ JSON.
+
+    القواعد:
+    - رقم المبنى: يتكون من 4 أرقام.
+    - الرقم الإضافي: يتكون من 4 أرقام.
+    - الرمز البريدي: يتكون من 5 أرقام.
+    - الرمز المختصر: يتكون من 8 خانات (مثال: RRAM3456).
+    - إذا لم تجد المعلومة أرجع نصاً فارغاً "".
+
+    التركيبة المطلوبة للـ JSON:
+    {
+      "city": "المدينة (مثال: الرياض)",
+      "district": "الحي (مثال: العليا)",
+      "street": "اسم الشارع",
+      "buildingNo": "رقم المبنى",
+      "unitNo": "رقم الوحدة (إن وجد)",
+      "zipCode": "الرمز البريدي",
+      "additionalNo": "الرقم الإضافي",
+      "shortCodeAr": "الرمز المختصر باللغة العربية إن وجد",
+      "shortCodeEn": "الرمز المختصر باللغة الإنجليزية إن وجد"
+    }
+    `;
+
+    const contentArray = [{ type: "text", text: prompt }];
+    imagesToSend.forEach((imgUrl) => {
+      contentArray.push({
+        type: "image_url",
+        image_url: { url: imgUrl, detail: "high" },
+      });
+    });
+
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o",
+      messages: [{ role: "user", content: contentArray }],
+      response_format: { type: "json_object" },
+      temperature: 0.0,
+    });
+
+    const parsedData = JSON.parse(response.choices[0].message.content);
+    console.log("✅ تم تحليل وثيقة العنوان بنجاح!", parsedData);
+
+    res.json({ success: true, data: parsedData });
+  } catch (error) {
+    console.error("Address Analysis Error:", error);
+    res.status(500).json({
+      success: false,
+      message: "فشل تحليل وثيقة العنوان",
+      details: error.message,
+    });
   }
 };
 
@@ -587,4 +814,5 @@ module.exports = {
   getClientById,
   getSimpleClients,
   analyzeIdentityImage,
+  analyzeAddressDocument,
 };
