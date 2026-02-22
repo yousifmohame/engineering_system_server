@@ -30,7 +30,8 @@
     "pdf-parse": "^2.4.5",
     "pdf2pic": "^3.2.0",
     "pg": "^8.17.2",
-    "resend": "^6.9.1"
+    "resend": "^6.9.1",
+    "systeminformation": "^5.31.1"
   },
   "devDependencies": {
     "@prisma/client": "^5.19.0",
