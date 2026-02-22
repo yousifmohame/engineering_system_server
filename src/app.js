@@ -73,6 +73,9 @@ app.use('/api/riyadh-streets', riyadhStreetsRoutes);
 const propertyRoutes = require('./routes/propertyRoutes');
 app.use('/api/properties', propertyRoutes);
 
+const serverRoutes = require('./routes/serverRoutes');
+app.use('/api/server', serverRoutes);
+
 
 // فحص صحة السيرفر
 app.get('/', (req, res) => {
