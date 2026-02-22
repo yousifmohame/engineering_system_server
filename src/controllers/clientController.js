@@ -585,40 +585,21 @@ const getSimpleClients = async (req, res) => {
 };
 
 const analyzeIdentityImage = async (req, res) => {
-  console.log("==========================================");
-  console.log("🚀 [START] analyzeIdentityImage request received");
-  console.log("📦 [HEADERS]: Content-Type =", req.headers['content-type']);
-  console.log("📦 [BODY KEYS]:", Object.keys(req.body)); // لنرى إذا كان Express قد قرأ الـ Body أصلاً
-  console.log("==========================================");
-
   try {
-    // 1. استقبال البيانات (ندعم كلا الاسمين تجنباً لأي خطأ من الواجهة)
-    const base64DataInput = req.body.imageBase64 || req.body.base64Image;
-    const documentType = req.body.documentType;
+    const { imageBase64, documentType } = req.body;
 
-    console.log("📄 Document Type:", documentType);
-
-    if (!base64DataInput) {
-      console.warn("⚠️ [VALIDATION FAILED]: No image base64 data found in req.body!");
-      console.log("💡 تلميح: إذا كانت المصفوفة [BODY KEYS] فارغة، فهذا يعني أن حجم الملف تجاوز الحد المسموح به في Express أو Nginx.");
-      return res.status(400).json({ success: false, message: "لم يتم إرسال أي وثيقة (أو حجم الملف كبير جداً)" });
+    if (!imageBase64) {
+      return res
+        .status(400)
+        .json({ success: false, message: "لم يتم إرسال أي وثيقة" });
     }
 
-    console.log(`✅ Base64 string received. Length: ${base64DataInput.length} characters.`);
-
-    // 2. استخراج الـ MIME Type بأمان
-    const mimeTypeMatch = base64DataInput.match(/^data:(.*?);base64,/);
-    if (!mimeTypeMatch) {
-        console.warn("⚠️ [VALIDATION FAILED]: Invalid Base64 format!");
-        return res.status(400).json({ success: false, message: "صيغة الملف غير صالحة" });
-    }
-    
-    const mimeType = mimeTypeMatch[1];
-    console.log(`🔍 Detected MIME Type: ${mimeType}`);
-
-    const cleanBase64 = base64DataInput.replace(/^data:.*?;base64,/, "");
-    const fileBuffer = Buffer.from(cleanBase64, "base64");
-    console.log(`📦 Buffer created successfully. Size: ${(fileBuffer.length / 1024).toFixed(2)} KB`);
+    const mimeType = imageBase64.substring(
+      imageBase64.indexOf(":") + 1,
+      imageBase64.indexOf(";"),
+    );
+    const base64Data = imageBase64.split(",")[1];
+    const fileBuffer = Buffer.from(base64Data, "base64");
 
     let imagesToSend = [];
 
@@ -626,53 +607,45 @@ const analyzeIdentityImage = async (req, res) => {
     // 1. معالجة الـ PDF (الأسلوب المؤسسي)
     // ==========================================
     if (mimeType === "application/pdf") {
-      console.log("📚 Processing PDF file...");
-      try {
-        const pdfDoc = await PDFDocument.load(fileBuffer);
-        const totalPages = pdfDoc.getPageCount();
-        const pagesToProcess = Math.min(totalPages, 2);
+      const pdfDoc = await PDFDocument.load(fileBuffer);
+      const totalPages = pdfDoc.getPageCount();
 
-        console.log(`🚀 PDF loaded. Total pages: ${totalPages}. Processing ${pagesToProcess} pages...`);
+      // للهويات والسجلات التجارية، نكتفي بأول صفحتين لتوفير التكلفة والوقت
+      const pagesToProcess = Math.min(totalPages, 2);
 
-        const options = {
-          density: 150,
-          format: "jpeg",
-          width: 1240,
-          height: 1754,
-        };
+      console.log(
+        `🚀 رصد وثيقة عميل PDF. جاري معالجة ${pagesToProcess} صفحة...`,
+      );
 
-        const convert = fromBuffer(fileBuffer, options);
+      const options = {
+        density: 150,
+        format: "jpeg",
+        width: 1240,
+        height: 1754,
+      };
 
-        for (let i = 1; i <= pagesToProcess; i++) {
-          console.log(`📸 Converting PDF page ${i} to image...`);
-          const image = await convert(i, { responseType: "base64" });
-          imagesToSend.push(`data:image/jpeg;base64,${image.base64}`);
-          console.log(`✅ Page ${i} converted successfully.`);
-        }
-      } catch (pdfError) {
-        console.error("🔥 [PDF ERROR]:", pdfError.message);
-        throw new Error("فشل في معالجة الـ PDF. هل مكتبة Ghostscript مثبتة على السيرفر؟");
+      const convert = fromBuffer(fileBuffer, options);
+
+      for (let i = 1; i <= pagesToProcess; i++) {
+        const image = await convert(i, { responseType: "base64" });
+        imagesToSend.push(`data:image/jpeg;base64,${image.base64}`);
       }
     }
     // ==========================================
     // 2. معالجة الصور المباشرة
     // ==========================================
     else if (mimeType.startsWith("image/")) {
-      console.log("🖼️ Processing direct image file...");
-      imagesToSend.push(base64DataInput);
+      imagesToSend.push(imageBase64);
     } else {
-      console.warn(`⚠️ Unsupported MIME Type: ${mimeType}`);
       return res.status(400).json({
         success: false,
-        message: `نوع الملف غير مدعوم (${mimeType}). يرجى رفع PDF أو صورة.`,
+        message: "نوع الملف غير مدعوم. يرجى رفع PDF أو صورة.",
       });
     }
 
     // ==========================================
-    // 3. إرسال البيانات للذكاء الاصطناعي
+    // 3. البرومبت المتخصص لاستخراج بيانات العميل
     // ==========================================
-    console.log(`🧠 Sending ${imagesToSend.length} images to OpenAI for analysis...`);
-    
     const prompt = `
     أنت خبير في قراءة الوثائق الرسمية السعودية (هوية وطنية، إقامة، سجل تجاري، جواز سفر، شهادة رقم موحد).
     مهمتك قراءة الصورة/الصور المرفقة واستخراج البيانات بدقة متناهية وإعادتها كـ JSON صالح 100%.
@@ -709,7 +682,6 @@ const analyzeIdentityImage = async (req, res) => {
       });
     });
 
-    console.log("⏳ Waiting for OpenAI response...");
     const response = await openai.chat.completions.create({
       model: "gpt-4o",
       messages: [{ role: "user", content: contentArray }],
@@ -718,12 +690,11 @@ const analyzeIdentityImage = async (req, res) => {
     });
 
     const parsedData = JSON.parse(response.choices[0].message.content);
-    console.log("✅ OpenAI Analysis Successful!");
-    console.log("📋 Extracted Data:", parsedData);
+    console.log("✅ تم تحليل وثيقة العميل بنجاح!");
 
     res.json({ success: true, data: parsedData });
   } catch (error) {
-    console.error("🔥 [FATAL ERROR] AI Analysis Error:", error);
+    console.error("AI Analysis Error:", error);
     res.status(500).json({
       success: false,
       message: "فشل تحليل الوثيقة بالذكاء الاصطناعي",
