@@ -806,6 +806,38 @@ const analyzeAddressDocument = async (req, res) => {
   }
 };
 
+// ===============================================
+// جلب الإحصائيات لداشبورد العملاء
+// GET /api/clients/stats
+// ===============================================
+const getClientStats = async (req, res) => {
+  try {
+    // جلب جميع العملاء (مع بيانات التقييم إذا احتجت لاحقاً)
+    const allClients = await prisma.client.findMany();
+
+    // حساب الإحصائيات
+    const stats = {
+      totalClients: allClients.length,
+      defaulters: 0, // يمكنك ربطها لاحقاً بجدول الدفعات (Payments) أو الحسابات المالية
+      missingDocs: 0,
+    };
+
+    allClients.forEach((client) => {
+      // إذا كان العميل لا يمتلك رقم هوية أو جوال، نعتبر وثائقه ناقصة كمثال
+      if (!client.idNumber || !client.mobile) {
+        stats.missingDocs++;
+      }
+
+      // يمكنك إضافة منطق المتعثرين الماليين هنا (مثلاً إذا كان رصيده بالسالب)
+    });
+
+    res.status(200).json({ success: true, data: stats });
+  } catch (error) {
+    console.error("Client Stats Error:", error);
+    res.status(500).json({ success: false, message: "خطأ في جلب الإحصائيات" });
+  }
+};
+
 module.exports = {
   getAllClients,
   createClient,
@@ -815,4 +847,5 @@ module.exports = {
   getSimpleClients,
   analyzeIdentityImage,
   analyzeAddressDocument,
+  getClientStats,
 };

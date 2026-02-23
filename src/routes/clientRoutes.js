@@ -1,5 +1,5 @@
 // routes/clientRoutes.js
-const express = require('express');
+const express = require("express");
 const router = express.Router();
 
 // استيراد الوظائف الجديدة
@@ -11,24 +11,20 @@ const {
   deleteClient,
   getSimpleClients, // ✅ 1. استيراد الدالة الجديدة
   analyzeIdentityImage,
-  analyzeAddressDocument
-} = require('../controllers/clientController');
+  analyzeAddressDocument,
+  getClientStats,
+} = require("../controllers/clientController");
 
-
-router.route('/')
-  .get(getAllClients)
-  .post(createClient);
+router.route("/").get(getAllClients).post(createClient);
 
 // ✅ 2. إضافة المسار المبسط الجديد هنا (قبل :id)
-router.route('/simple')
-  .get(getSimpleClients);
+router.route("/simple").get(getSimpleClients);
 
-router.post('/analyze-identity', analyzeIdentityImage);
+router.get("/stats", getClientStats);
+
+router.post("/analyze-identity", analyzeIdentityImage);
 router.post("/analyze-address", analyzeAddressDocument);
 
-router.route('/:id')
-  .get(getClientById)
-  .put(updateClient)
-  .delete(deleteClient); 
+router.route("/:id").get(getClientById).put(updateClient).delete(deleteClient);
 
 module.exports = router;

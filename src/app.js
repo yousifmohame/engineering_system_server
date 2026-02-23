@@ -43,6 +43,12 @@ app.use('/api/contracts', contractRoutes);
 const quotationRoutes = require('./routes/quotationRoutes');
 app.use('/api/quotations', quotationRoutes);
 
+const templateRoutes = require('./routes/quotationTemplateRoutes');
+app.use('/api/quotation-templates', templateRoutes);
+
+const quotationLibraryRoutes = require('./routes/quotationLibraryRoutes');
+app.use('/api/quotation-library', quotationLibraryRoutes);
+
 const appointmentRoutes = require('./routes/appointmentRoutes');
 app.use('/api/appointments', appointmentRoutes);
 

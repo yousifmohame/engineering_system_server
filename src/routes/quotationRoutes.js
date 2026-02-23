@@ -10,6 +10,10 @@ const {
   getQuotationById,
   updateQuotation,
   deleteQuotation,
+  getQuotationStats,
+  recordPayment,
+  stampQuotation,
+  signQuotation
 } = require('../controllers/quotationController');
 
 // حماية جميع مسارات عروض الأسعار
@@ -20,6 +24,12 @@ router.use(protect);
 router.route('/')
   .get(getAllQuotations)
   .post(createQuotation);
+
+router.get('/stats', getQuotationStats);
+
+router.post('/:id/payments', recordPayment);
+router.patch('/:id/stamp', stampQuotation);
+router.patch('/:id/sign', signQuotation);
 
 // GET /api/quotations/:id    -> جلب عرض سعر واحد
 // PUT /api/quotations/:id    -> تحديث عرض سعر

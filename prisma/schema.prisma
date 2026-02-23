@@ -340,6 +340,7 @@ model OwnershipFile {
   transactions      Transaction[]      // المعاملات المرتبطة بهذا الصك
   
   aiLogs            AIAnalysisLog[]    // سجل عمليات التحليل لهذا الصك
+  quotations        Quotation[]
 
   createdAt         DateTime           @default(now())
   updatedAt         DateTime           @updatedAt
@@ -498,6 +499,7 @@ model TransactionType {
   notes          String[] 
 
   transactions   Transaction[]
+  quotations     Quotation[]
 }
 
 // ------ سجل الموظفين العاملين على المعاملة ------
@@ -644,17 +646,224 @@ model Contract {
   attachments    Attachment[]
 }
 
+// --- Enums الخاصة بعروض الأسعار ---
+enum TemplateType {
+  SUMMARY
+  DETAILED
+}
+
+enum QuotationStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  SENT
+  ACCEPTED
+  PARTIALLY_PAID
+  REJECTED
+  EXPIRED
+  CANCELLED           // 👈 تم إضافة (ملغى)
+  REFUND_IN_PROGRESS  // 👈 تم إضافة (استرجاع جارٍ)
+  REFUNDED            // 👈 تم إضافة (مسترد بالكامل)
+}
+
+enum DiscountType {
+  PERCENTAGE
+  FIXED
+}
+
+enum ClientTitle {
+  MR
+  MRS
+  SIR_COMPANY
+  SIR_ENTITY
+  SIR_WAQF
+  PRINCE
+  PRINCESS
+  ROYAL_PRINCE
+  ROYAL_PRINCESS
+  CUSTOM
+}
+
+enum HandlingMethod {
+  DIRECT
+  AUTHORIZED
+  AGENT
+}
+
+// --- النماذج (Models) الخاصة بعروض الأسعار ---
 model Quotation {
-  id             String    @id @default(cuid())
-  quotationCode  String    @unique
-  status         String    @default("Pending")
-  totalValue     Float
-  createdAt      DateTime  @default(now())
+  id              String           @id @default(cuid())
+  number          String           @unique  // QT-26-02-0012
+  
+  clientId        String?
+  client          Client?          @relation(fields: [clientId], references: [id])
+  
+  // تم تغيير Property إلى OwnershipFile لتطابق قاعدة بياناتك الفعالة
+  ownershipId     String?
+  ownership       OwnershipFile?   @relation(fields: [ownershipId], references: [id])
+  
+  // البيانات الأساسية
+  issueDate       DateTime         @default(now())
+  validityDays    Int              @default(30)
+  expiryDate      DateTime
+  isRenewable     Boolean          @default(false)
+  
+  // نموذج العرض
+  templateType    TemplateType     @default(SUMMARY)
+  templateId      String?
+  showClientCode  Boolean          @default(true)
+  showPropertyCode Boolean         @default(true)
+  
+  // بيانات الخدمة
+  transactionTypeId String?
+  transactionType   TransactionType? @relation(fields: [transactionTypeId], references: [id])
+  serviceNumber   String?
+  serviceYear     String?
+  licenseNumber   String?
+  licenseYear     String?
 
-  client         Client     @relation(fields: [clientId], references: [id])
-  clientId       String
+  // حقول الاعتمادات والأختام
+  isStamped      Boolean   @default(false)
+  stampedAt      DateTime?
+  stampedBy      String?   // ID المستخدم الذي قام بالختم
+  
+  isSigned       Boolean   @default(false)
+  signedAt       DateTime?
+  signedBy       String?
+  signatureHash  String?   // رمز التشفير للتوقيع الإلكتروني (إن وُجد)
+  
+  // البنود والتسعير
+  items           QuotationItem[]
+  subtotal        Float            @default(0) // استخدام Float ليتوافق مع باقي النظام
+  taxRate         Float            @default(0.15)
+  officeTaxBearing Int             @default(0)
+  taxAmount       Float            @default(0)
+  total           Float            @default(0)
+  collectedAmount Float            @default(0)
+  currency        String           @default("SAR")
+  
+  // الدفعات
+  payments        QuotationPayment[] // تم تغيير الاسم لمنع التضارب مع الدفعات العادية
+  acceptedMethods Json?            
+  
+  // المرفقات والنواقص
+  attachments     Attachment[]     
+  missingDocs     String?          @db.Text
+  showMissingDocs Boolean          @default(false)
+  
+  // الشروط
+  terms           String?          @db.Text
+  notes           String?          @db.Text
+  clientTitle     ClientTitle      @default(MR)
+  handlingMethod  HandlingMethod   @default(DIRECT)
+  
+  // الحالة والربط
+  status          QuotationStatus  @default(DRAFT)
+  contract        Contract?
+  
+  qrCodeData      String?
+  
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  createdBy       String?          
+}
 
-  contract       Contract?
+model QuotationItem {
+  id            String    @id @default(cuid())
+  quotationId   String
+  quotation     Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+  
+  order         Int
+  title         String
+  description   String?
+  category      String?   
+  
+  quantity      Float     @default(1)
+  unit          String    @default("خدمة")
+  unitPrice     Float
+  discount      Float     @default(0)
+  discountType  DiscountType @default(PERCENTAGE)
+  
+  subtotal      Float
+  
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+model QuotationPayment {
+  id                String    @id @default(cuid())
+  quotationId       String
+  quotation         Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+  
+  installmentNumber Int
+  percentage        Float   
+  amount            Float   
+  dueCondition      String  
+  
+  createdAt         DateTime  @default(now())
+}
+
+model QuotationTemplate {
+  id              String       @id @default(cuid())
+  code            String       @unique // TPL-001
+  title           String
+  description     String?      @db.Text
+  type            TemplateType @default(SUMMARY)
+  
+  // هل هو النموذج الافتراضي
+  isDefault       Boolean      @default(false)
+  status          String       @default("active") // "active", "disabled"
+  
+  // JSON لتخزين خيارات الأقسام (cover, header, items...)
+  sectionsConfig  Json         @default("{}")
+  // JSON لتخزين خيارات العرض الإضافية (showClientCode...)
+  displayOptions  Json         @default("{}")
+  
+  defaultTerms    String?      @db.Text
+  
+  // عداد الاستخدام
+  usesCount       Int          @default(0)
+
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+}
+
+// بند مفرد في المكتبة
+model QuotationLibraryItem {
+  id           String   @id @default(cuid())
+  code         String   @unique // ITM-001
+  title        String
+  description  String?  @db.Text
+  category     String   // "خدمات هندسية", "خدمات قانونية"
+  subCategory  String?  // "رخص وأمانة"
+  unit         String   @default("خدمة")
+  price        Float    @default(0)
+  
+  isEditable   Boolean  @default(true)
+  isActive     Boolean  @default(true)
+  warningText  String?  @db.Text // ملاحظات قانونية/استثناءات
+  usesCount    Int      @default(0)
+  
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+// مجموعة بنود في المكتبة
+model QuotationBundle {
+  id           String   @id @default(cuid())
+  code         String   @unique // BDL-001
+  title        String
+  description  String?  @db.Text
+  icon         String?  @default("📦") // رمز تعبيري (Emoji)
+  color        String?  @default("blue") // اللون في الواجهة
+  
+  itemsIds     String[] // مصفوفة تحتوي على أكواد البنود [ITM-001, ITM-002]
+  
+  isActive     Boolean  @default(true)
+  usesCount    Int      @default(0)
+  
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 }
 
 model Payment {
@@ -838,6 +1047,8 @@ model Attachment {
 
   employee       Employee?    @relation("EmployeeAttachments", fields: [employeeId], references: [id], onDelete: Cascade)
   employeeId     String?
+  quotation      Quotation?   @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+  quotationId    String?
 }
 
 // ===============================================
