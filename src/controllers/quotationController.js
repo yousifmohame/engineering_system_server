@@ -281,30 +281,35 @@ const deleteQuotation = async (req, res) => {
 // ===============================================
 const getQuotationStats = async (req, res) => {
   try {
-    // جلب جميع عروض الأسعار لإجراء الإحصائيات عليها
     const allQuotes = await prisma.quotation.findMany();
 
+    // 1. تعريف القيم الافتراضية (أصفار)
     let stats = {
-      totalQuotations: allQuotes.length,
+      totalQuotations: allQuotes?.length || 0,
       pendingApproval: 0,
       awaitingSignature: 0,
       approvedPendingPayment: 0,
-      partiallyPaid: 0, // تم التفعيل
+      partiallyPaid: 0,
       fullyPaid: 0,
       expired: 0,
-      cancelled: 0, // ستشمل الملغاة والمسترجعة
+      cancelled: 0,
       totalValue: 0,
-      totalCollected: 0, // تم الربط بالداتابيز الحقيقية
-      avgApprovalDays: 2,
+      totalCollected: 0,
+      avgApprovalDays: 0,
       approvalRate: 0,
       noResponseRate: 0,
       totalSent: 0,
     };
 
+    // 🚀 الحماية الأساسية: إذا كانت قاعدة البيانات فارغة، أرجع الأصفار فوراً وتوقف هنا
+    if (!allQuotes || allQuotes.length === 0) {
+      return res.status(200).json({ success: true, data: stats });
+    }
+
     let approvedCount = 0;
 
+    // 2. إذا كان هناك بيانات، قم بحسابها
     allQuotes.forEach((q) => {
-      // 1. تصنيف الحالات بشكل دقيق بناءً على الـ Enum الجديد
       if (q.status === "PENDING_APPROVAL") {
         stats.pendingApproval++;
       } else if (q.status === "SENT") {
@@ -313,7 +318,7 @@ const getQuotationStats = async (req, res) => {
       } else if (q.status === "APPROVED") {
         stats.approvedPendingPayment++;
         approvedCount++;
-        stats.totalSent++; // يُعتبر مُرسل لأنه تم الموافقة عليه
+        stats.totalSent++;
       } else if (q.status === "PARTIALLY_PAID") {
         stats.partiallyPaid++;
         approvedCount++;
@@ -331,10 +336,9 @@ const getQuotationStats = async (req, res) => {
         )
       ) {
         stats.cancelled++;
-        if (q.status === "REJECTED") stats.totalSent++; // العرض المرفوض يُعتبر أنه قد أُرسل للعميل
+        if (q.status === "REJECTED") stats.totalSent++;
       }
 
-      // 2. المبالغ المالية (نجمع العروض النشطة والموافق عليها)
       if (
         [
           "PENDING_APPROVAL",
@@ -347,11 +351,10 @@ const getQuotationStats = async (req, res) => {
         stats.totalValue += Number(q.total) || 0;
       }
 
-      // 3. جمع المبالغ المحصلة فعلياً من الحقل الجديد في الداتابيز
       stats.totalCollected += Number(q.collectedAmount) || 0;
     });
 
-    // 4. حساب النسب
+    // 3. حساب النسب بشكل آمن (لتجنب القسمة على صفر)
     if (stats.totalSent > 0) {
       stats.approvalRate = Math.round((approvedCount / stats.totalSent) * 100);
       stats.noResponseRate = Math.round(
@@ -434,13 +437,11 @@ const stampQuotation = async (req, res) => {
       },
     });
 
-    res
-      .status(200)
-      .json({
-        success: true,
-        message: "تم ختم العرض بنجاح",
-        data: updatedQuotation,
-      });
+    res.status(200).json({
+      success: true,
+      message: "تم ختم العرض بنجاح",
+      data: updatedQuotation,
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: "فشل ختم العرض" });
   }
@@ -466,13 +467,11 @@ const signQuotation = async (req, res) => {
       },
     });
 
-    res
-      .status(200)
-      .json({
-        success: true,
-        message: "تم التوقيع الإلكتروني بنجاح",
-        data: updatedQuotation,
-      });
+    res.status(200).json({
+      success: true,
+      message: "تم التوقيع الإلكتروني بنجاح",
+      data: updatedQuotation,
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: "فشل التوقيع" });
   }
