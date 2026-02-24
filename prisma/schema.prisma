@@ -1031,6 +1031,7 @@ model Attachment {
   filePath       String    @unique
   fileType       String
   fileSize       Int
+  notes         String?   @db.Text
   createdAt      DateTime  @default(now())
 
   uploadedBy     Employee  @relation(fields: [uploadedById], references: [id])

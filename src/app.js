@@ -8,6 +8,15 @@ const path = require('path');
 
 const app = express();
 
+app.use('/uploads', express.static(path.join(__dirname, '../uploads'), {
+  setHeaders: function (res, path, stat) {
+    res.set('Access-Control-Allow-Origin', '*'); // السماح للواجهة بالوصول للملفات
+    res.set('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.set('Cross-Origin-Resource-Policy', 'cross-origin');
+  }
+}));
+
 app.use(cors());
 app.use(helmet());
 app.use(morgan('dev'));

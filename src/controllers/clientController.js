@@ -195,19 +195,24 @@ const getAllClients = async (req, res) => {
   }
 };
 
-// 2. إنشاء عميل جديد
+// ===============================================
+// 2. إنشاء عميل جديد (موحد مع رفع الملفات الحقيقية)
+// POST /api/clients
+// ===============================================
 const createClient = async (req, res) => {
   try {
+    // 1. استخراج البيانات النصية من req.body (التي أرسلها FormData)
     let {
       mobile,
       email,
       idNumber,
+      type,
+      officialNameAr,
       name,
-      nameAr,
       contact,
       address,
       identification,
-      type,
+      isActive,
       category,
       nationality,
       occupation,
@@ -216,16 +221,17 @@ const createClient = async (req, res) => {
       rating,
       secretRating,
       notes,
-      isActive,
-      attachments, // 👈 إضافة استقبال المرفقات
-      profilePictureBase64, // 👈 إضافة استقبال الصورة الشخصية
     } = req.body;
 
-    // تحسين منطق الاسم
-    if (!name) {
-      if (nameAr) name = { ar: nameAr, en: nameAr };
-      else return res.status(400).json({ message: "اسم العميل مطلوب" });
-    }
+    // 2. تحويل البيانات المتداخلة من نص (String) إلى كائنات (Objects)
+    const parsedName = name
+      ? JSON.parse(name)
+      : { ar: officialNameAr || "غير محدد" };
+    const parsedContact = contact ? JSON.parse(contact) : { mobile, email };
+    const parsedAddress = address ? JSON.parse(address) : {};
+    const parsedIdentification = identification
+      ? JSON.parse(identification)
+      : { idNumber, type: "NationalID" };
 
     if (!mobile || !idNumber || !type) {
       return res
@@ -234,66 +240,55 @@ const createClient = async (req, res) => {
     }
 
     const generatedClientCode = await generateNextClientCode();
-
-    // 👈 حفظ الصورة الشخصية داخل الـ contact JSON (بما أنه لا يوجد حقل مخصص لها في الـ DB)
-    const finalContact = contact || { mobile, email };
-    if (profilePictureBase64) {
-      finalContact.profilePicture = profilePictureBase64;
-    }
-
-    const finalIdentification = identification || {
-      idNumber,
-      type: "NationalID",
-    };
-
     const completionPercentage = calculateCompletionPercentage({
       ...req.body,
-      name,
+      name: parsedName,
     });
 
+    // تحديد الموظف الذي قام برفع الملفات
     let uploaderId = req.user?.id;
-
-    // (حماية إضافية): إذا لم يكن هناك مستخدم مسجل الدخول، نجلب أي موظف من القاعدة لتجنب الخطأ
-    if (!uploaderId && attachments && attachments.length > 0) {
+    if (!uploaderId && req.files && req.files.length > 0) {
       const defaultEmployee = await prisma.employee.findFirst();
-      if (defaultEmployee) {
-        uploaderId = defaultEmployee.id;
-      } else {
-        return res.status(400).json({
-          message: "يجب وجود موظف واحد على الأقل في النظام لرفع المرفقات",
-        });
-      }
+      uploaderId = defaultEmployee?.id;
     }
 
     // ==========================================
-    // 2. تجهيز المرفقات لـ Prisma وتعبئة كل الحقول الإجبارية
+    // 3. معالجة المرفقات (الملفات الحقيقية من req.files)
     // ==========================================
-    const attachmentsData =
-      attachments && attachments.length > 0
-        ? {
-            create: attachments.map((doc, index) => ({
-              fileName: doc.name || "مستند بدون اسم",
+    let attachmentsData = undefined;
 
-              // نضع مسار فريد وهمي لتجنب خطأ الـ @unique (لا تضع الـ Base64 هنا لأنه سيسبب Crash للـ DB)
-              filePath: `/uploads/clients/temp_${Date.now()}_${index}_${Math.floor(Math.random() * 1000)}`,
+    if (req.files && req.files.length > 0) {
+      const attachmentsArray = req.files.map((file, index) => {
+        // استخراج البيانات الوصفية (Metadata) التي أرسلناها من الواجهة
+        const metaType = req.body[`fileMeta_${index}_type`] || "عام";
+        const metaName =
+          req.body[`fileMeta_${index}_name`] || file.originalname;
+        const metaPrivacy = req.body[`fileMeta_${index}_privacy`] || "internal";
 
-              fileType: doc.type || "عام",
-              fileSize: doc.size ? parseInt(doc.size) : 0,
-              uploadedById: uploaderId, // ربط الملف بالموظف
-            })),
-          }
-        : undefined;
+        return {
+          fileName: metaName,
+          filePath: `/uploads/clients/${file.filename}`, // 👈 المسار الحقيقي الذي أنشأه Multer!
+          fileType: file.mimetype,
+          fileSize: file.size,
+          uploadedById: uploaderId,
+          notes: `تصنيف: ${metaType} - السرية: ${metaPrivacy}`, // دمج البيانات في الملاحظات
+        };
+      });
 
+      attachmentsData = { create: attachmentsArray };
+    }
+
+    // 4. إنشاء العميل مع ربط الملفات في قاعدة البيانات
     const newClient = await prisma.client.create({
       data: {
         clientCode: generatedClientCode,
         mobile,
         email,
         idNumber,
-        name,
-        contact: finalContact,
-        address: address || {},
-        identification: finalIdentification,
+        name: parsedName,
+        contact: parsedContact,
+        address: parsedAddress,
+        identification: parsedIdentification,
         type,
         category,
         nationality,
@@ -301,14 +296,14 @@ const createClient = async (req, res) => {
         company,
         taxNumber,
         rating,
-        secretRating,
+        secretRating: secretRating ? parseInt(secretRating) : null,
         notes,
-        isActive: isActive ?? true,
+        isActive: isActive === "true" || isActive === true, // تحويل النص لـ boolean
         completionPercentage,
         grade: "ج",
         gradeScore: 0,
 
-        // 👈 ربط وإنشاء المرفقات في نفس خطوة إنشاء العميل
+        // 👈 ربط المرفقات في حال وجودها
         ...(attachmentsData && { attachments: attachmentsData }),
       },
     });
@@ -838,6 +833,70 @@ const getClientStats = async (req, res) => {
   }
 };
 
+// ===============================================
+// رفع وثيقة جديدة لعميل موجود
+// POST /api/clients/:id/documents
+// ===============================================
+const uploadClientDocument = async (req, res) => {
+  try {
+    const { id: clientId } = req.params;
+    const { name, notes } = req.body;
+    const file = req.file;
+
+    // 1. التحقق من وجود العميل
+    const client = await prisma.client.findUnique({ where: { id: clientId } });
+    if (!client) {
+      return res
+        .status(404)
+        .json({ success: false, message: "العميل غير موجود" });
+    }
+
+    // 2. التحقق من رفع الملف فعلياً
+    if (!file) {
+      return res
+        .status(400)
+        .json({ success: false, message: "يرجى إرفاق ملف صالح" });
+    }
+
+    // (حماية إضافية): جلب موظف لربط الملف به في حال لم يوجد req.user
+    let uploaderId = req.user?.id;
+    if (!uploaderId) {
+      const defaultEmployee = await prisma.employee.findFirst();
+      if (defaultEmployee) {
+        uploaderId = defaultEmployee.id;
+      } else {
+        return res
+          .status(400)
+          .json({ message: "يجب وجود موظف واحد على الأقل لرفع المرفقات" });
+      }
+    }
+
+    // 3. إنشاء المرفق في قاعدة البيانات
+    const newAttachment = await prisma.attachment.create({
+      data: {
+        fileName: name || file.originalname,
+        filePath: `/uploads/clients/${file.filename}`, // المسار الذي سيتم حفظه فيه بواسطة Multer
+        fileType: file.mimetype,
+        fileSize: file.size,
+        clientId: client.id,
+        uploadedById: uploaderId,
+        notes: notes || null,
+      },
+    });
+
+    res
+      .status(201)
+      .json({
+        success: true,
+        message: "تم رفع الوثيقة بنجاح",
+        data: newAttachment,
+      });
+  } catch (error) {
+    console.error("Upload Document Error:", error);
+    res.status(500).json({ success: false, message: "فشل رفع الوثيقة" });
+  }
+};
+
 module.exports = {
   getAllClients,
   createClient,
@@ -848,4 +907,5 @@ module.exports = {
   analyzeIdentityImage,
   analyzeAddressDocument,
   getClientStats,
+  uploadClientDocument,
 };
