@@ -308,60 +308,83 @@ const updateRolePermissions = async (req, res) => {
 };
 
 // ===============================================
-// إضافة صلاحية ديناميكية لدور وظيفي (Visual Builder)
+// إضافة/إزالة صلاحية ديناميكية لدور وظيفي (Visual Builder Toggle)
 // POST /api/roles/:id/assign-permission
 // ===============================================
 const assignPermissionToRole = async (req, res) => {
   try {
-    const { id } = req.params; // معرف الدور (Role ID)
-    const { permission } = req.body; // بيانات الصلاحية القادمة من الفرونت إند
+    const { id } = req.params;
+    const { permission } = req.body;
 
     if (!permission || !permission.code) {
-      return res
-        .status(400)
-        .json({ message: "بيانات الصلاحية (الكود) غير مكتملة" });
+      return res.status(400).json({ message: "بيانات الصلاحية غير مكتملة" });
     }
 
-    // التحقق من وجود الدور أولاً
-    const roleExists = await prisma.jobRole.findUnique({ where: { id } });
-    if (!roleExists) {
-      return res.status(404).json({ message: "الدور الوظيفي غير موجود" });
-    }
-
-    // تحديث الدور: نربط الصلاحية به، وإذا لم تكن الصلاحية موجودة في الداتابيز، ننشئها!
-    const updatedRole = await prisma.jobRole.update({
+    // جلب الدور مع صلاحياته الحالية
+    const role = await prisma.jobRole.findUnique({
       where: { id },
-      data: {
-        permissions: {
-          connectOrCreate: {
-            where: { code: permission.code },
-            create: {
-              code: permission.code,
-              name: permission.name || permission.code,
-              screenName: permission.screenName || "عام",
-              tabName: permission.tabName || "عام",
-              level: permission.level || "action",
-              status: "active",
+      include: { permissions: true },
+    });
+
+    if (!role) return res.status(404).json({ message: "الدور غير موجود" });
+
+    // التحقق هل الصلاحية موجودة بالفعل لدى هذا الدور؟
+    const hasPermission = role.permissions.some(
+      (p) => p.code === permission.code,
+    );
+
+    let updatedRole;
+
+    if (hasPermission) {
+      // 🔴 الصلاحية موجودة -> إذن نقوم بحذفها (Disconnect)
+      updatedRole = await prisma.jobRole.update({
+        where: { id },
+        data: {
+          permissions: { disconnect: { code: permission.code } },
+        },
+        include: { permissions: true },
+      });
+      res
+        .status(200)
+        .json({
+          success: true,
+          action: "removed",
+          message: "تم سحب الصلاحية بنجاح",
+          role: updatedRole,
+        });
+    } else {
+      // 🟢 الصلاحية غير موجودة -> نقوم بإنشائها وربطها (ConnectOrCreate)
+      updatedRole = await prisma.jobRole.update({
+        where: { id },
+        data: {
+          permissions: {
+            connectOrCreate: {
+              where: { code: permission.code },
+              create: {
+                code: permission.code,
+                name: permission.name || permission.code,
+                screenName: permission.screenName || "عام",
+                tabName: permission.tabName || "عام",
+                level: permission.level || "action",
+                status: "active",
+              },
             },
           },
         },
-      },
-      include: { permissions: true }, // لجلب البيانات بعد التحديث
-    });
-
-    res.status(200).json({
-      success: true,
-      message: "تم تسجيل الصلاحية وربطها بالدور بنجاح",
-      role: updatedRole,
-    });
+        include: { permissions: true },
+      });
+      res
+        .status(200)
+        .json({
+          success: true,
+          action: "added",
+          message: "تم منح الصلاحية بنجاح",
+          role: updatedRole,
+        });
+    }
   } catch (error) {
     console.error("Assign Permission Error:", error);
-    res
-      .status(500)
-      .json({
-        message: "خطأ في الخادم أثناء ربط الصلاحية",
-        error: error.message,
-      });
+    res.status(500).json({ message: "خطأ في الخادم أثناء التعديل" });
   }
 };
 

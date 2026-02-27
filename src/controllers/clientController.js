@@ -220,7 +220,7 @@ const createClient = async (req, res) => {
       rating,
       secretRating,
       notes,
-      representative
+      representative,
     } = req.body;
 
     if (mobile === "غير متوفر") {
@@ -237,7 +237,9 @@ const createClient = async (req, res) => {
       ? JSON.parse(identification)
       : { idNumber, type: "NationalID" };
 
-    const parsedRepresentative = representative ? JSON.parse(representative) : null;
+    const parsedRepresentative = representative
+      ? JSON.parse(representative)
+      : null;
     if (!mobile || !idNumber || !type) {
       return res
         .status(400)
@@ -644,8 +646,9 @@ const analyzeIdentityImage = async (req, res) => {
     }
 
     // ==========================================
-    // 3. البرومبت المتخصص لاستخراج بيانات العميل
+    // 3. البرومبت المتخصص لاستخراج بيانات العميل (محدث)
     // ==========================================
+    // أضفنا تعليمات صريحة لاستخراج مكان الميلاد، التواريخ، وحساب العمر
     const prompt = `
     أنت خبير في قراءة الوثائق الرسمية السعودية (هوية وطنية، إقامة، سجل تجاري، جواز سفر، شهادة رقم موحد).
     مهمتك قراءة الصورة/الصور المرفقة واستخراج البيانات بدقة متناهية وإعادتها كـ JSON صالح 100%.
@@ -655,7 +658,10 @@ const analyzeIdentityImage = async (req, res) => {
     القواعد:
     - إذا كانت الوثيقة "سجل تجاري" أو "شركة": ضع اسم الشركة بالكامل في "firstAr" واترك باقي أجزاء الاسم فارغة.
     - إذا كانت "هوية" أو "إقامة": قم بتفكيك الاسم إلى 4 أجزاء (أول، أب، جد، عائلة) بالعربية والإنجليزية إن وجد.
-    - إذا لم تجد المعلومة، أرجع نصاً فارغاً "".
+    - ابحث بدقة عن "محل الميلاد" أو "مكان الميلاد".
+    - ابحث عن تاريخ الميلاد. الهوية السعودية عادة تحتوي على التاريخ بالهجري والميلادي معاً.
+    - قم بحساب عمر الشخص الحالي بالسنوات بناءً على تاريخ ميلاده (قم بإجراء العملية الحسابية وأرجع الرقم).
+    - إذا لم تجد المعلومة، أرجع نصاً فارغاً "". بالنسبة للعمر إذا لم تستطع حسابه أرجع null.
 
     التركيبة المطلوبة للـ JSON:
     {
@@ -668,7 +674,11 @@ const analyzeIdentityImage = async (req, res) => {
       "grandEn": "Grandfather Name",
       "familyEn": "Family Name",
       "idNumber": "رقم الهوية أو الإقامة أو السجل التجاري (أرقام فقط)",
-      "birthDate": "تاريخ الميلاد (هجري أو ميلادي حسب الموجود)",
+      "birthDate": "تاريخ الميلاد الأساسي المكتوب (للتوافق)",
+      "birthDateHijri": "تاريخ الميلاد بالهجري (مثال: 1405/06/15)",
+      "birthDateGregorian": "تاريخ الميلاد بالميلادي (مثال: 1985/02/05)",
+      "placeOfBirth": "مكان الميلاد / محل الميلاد",
+      "age": عمر الشخص بالسنوات (Number),
       "nationality": "الجنسية",
       "confidence": نسبة دقة الاستخراج من 0 إلى 100 (Number)
     }
@@ -686,11 +696,10 @@ const analyzeIdentityImage = async (req, res) => {
       model: "gpt-4o",
       messages: [{ role: "user", content: contentArray }],
       response_format: { type: "json_object" },
-      temperature: 0.0,
+      temperature: 0.0, // صفر لضمان الدقة وعدم التأليف
     });
 
     const parsedData = JSON.parse(response.choices[0].message.content);
-    console.log("✅ تم تحليل وثيقة العميل بنجاح!");
 
     res.json({ success: true, data: parsedData });
   } catch (error) {
@@ -700,6 +709,112 @@ const analyzeIdentityImage = async (req, res) => {
       message: "فشل تحليل الوثيقة بالذكاء الاصطناعي",
       details: error.message,
     });
+  }
+};
+
+// ==========================================
+// استخراج بيانات الوكيل/المفوض والوكالة بالذكاء الاصطناعي
+// POST /api/clients/analyze-representative
+// ===============================================
+const analyzeRepresentative = async (req, res) => {
+  try {
+    const { imageBase64, docType } = req.body; // docType: "وكالة" أو "هوية"
+
+    if (!imageBase64) {
+      return res
+        .status(400)
+        .json({ success: false, message: "لم يتم إرسال أي وثيقة" });
+    }
+
+    const mimeType = imageBase64.substring(
+      imageBase64.indexOf(":") + 1,
+      imageBase64.indexOf(";"),
+    );
+    const base64Data = imageBase64.split(",")[1];
+    const fileBuffer = Buffer.from(base64Data, "base64");
+
+    let imagesToSend = [];
+
+    // معالجة PDF (أول صفحتين كحد أقصى)
+    if (mimeType === "application/pdf") {
+      const pdfDoc = await PDFDocument.load(fileBuffer);
+      const pagesToProcess = Math.min(pdfDoc.getPageCount(), 2);
+      const options = {
+        density: 150,
+        format: "jpeg",
+        width: 1240,
+        height: 1754,
+      };
+      const convert = fromBuffer(fileBuffer, options);
+      for (let i = 1; i <= pagesToProcess; i++) {
+        const image = await convert(i, { responseType: "base64" });
+        imagesToSend.push(`data:image/jpeg;base64,${image.base64}`);
+      }
+    } else if (mimeType.startsWith("image/")) {
+      imagesToSend.push(imageBase64);
+    } else {
+      return res
+        .status(400)
+        .json({ success: false, message: "نوع الملف غير مدعوم." });
+    }
+
+    // بناء التلقين (Prompt) ذكي بناءً على نوع المستند
+    let prompt = "";
+
+    if (docType === "وكالة") {
+      prompt = `
+      أنت خبير قانوني في قراءة الوكالات الشرعية لوزارة العدل السعودية وخطابات التفويض.
+      استخرج البيانات التالية من الوثيقة المرفقة وأعدها كـ JSON صالح 100%:
+      1. ابحث عن "رقم الوكالة" أو "رقم التفويض".
+      2. ابحث عن "تاريخ الانتهاء". إذا وجدته بالميلادي، حوله لصيغة "YYYY-MM-DD". إذا كان هجري فقط، حوله للميلادي التقريبي بصيغة "YYYY-MM-DD".
+      3. ابحث في جدول الأطراف عن الشخص الذي صفته "وكيل". استخرج اسمه و رقم هويته.
+      4. لخص "النطاق" و "البنود" في جملة واحدة مختصرة وضعها في powersScope.
+      
+      التركيبة المطلوبة:
+      {
+        "authNumber": "رقم الوكالة أو التفويض",
+        "authExpiry": "تاريخ الانتهاء بصيغة YYYY-MM-DD (مهم جداً للبرمجة)",
+        "agentName": "اسم الوكيل",
+        "agentIdNumber": "رقم هوية الوكيل",
+        "powersScope": "ملخص نطاق الوكالة والبنود",
+        "confidence": نسبة الدقة من 0 إلى 100
+      }
+      `;
+    } else {
+      prompt = `
+      أنت خبير في قراءة الهوية الوطنية السعودية أو الإقامة.
+      استخرج بيانات الوكيل (الاسم ورقم الهوية وتاريخ الانتهاء) وأعدها كـ JSON صالح 100%:
+      
+      التركيبة المطلوبة:
+      {
+        "agentName": "الاسم الكامل",
+        "agentIdNumber": "رقم الهوية",
+        "idExpiry": "تاريخ انتهاء الهوية بصيغة YYYY-MM-DD (إذا لم يوجد اتركها فارغة)",
+        "confidence": نسبة الدقة
+      }
+      `;
+    }
+
+    const contentArray = [{ type: "text", text: prompt }];
+    imagesToSend.forEach((imgUrl) => {
+      contentArray.push({
+        type: "image_url",
+        image_url: { url: imgUrl, detail: "high" },
+      });
+    });
+
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o",
+      messages: [{ role: "user", content: contentArray }],
+      response_format: { type: "json_object" },
+      temperature: 0.0,
+    });
+
+    const parsedData = JSON.parse(response.choices[0].message.content);
+    res.json({ success: true, data: parsedData });
+  } catch (error) {
+    console.error("Rep Analysis Error:", error);
+    res.status(500).json({ success: false, message: "فشل تحليل مستند الممثل" });
   }
 };
 
@@ -911,4 +1026,5 @@ module.exports = {
   analyzeAddressDocument,
   getClientStats,
   uploadClientDocument,
+  analyzeRepresentative,
 };
