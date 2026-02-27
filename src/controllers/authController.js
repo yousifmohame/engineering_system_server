@@ -68,42 +68,56 @@ exports.register = async (req, res) => {
 };
 
 // 2. تسجيل الدخول
+// 2. تسجيل الدخول
 exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    // البحث عن الموظف
+    // 👈 التعديل الأول: جلب الموظف مع أدواره وصلاحياته
     const employee = await prisma.employee.findUnique({
-      where: { email }
+      where: { email },
+      include: {
+        roles: {
+          include: { permissions: true } // جلب صلاحيات كل دور
+        },
+        specialPermissions: true // جلب الصلاحيات الاستثنائية إن وجدت
+      }
     });
 
     if (!employee) {
       return res.status(401).json({ message: 'البريد الإلكتروني أو كلمة المرور غير صحيحة' });
     }
 
-    // التحقق من صحة كلمة المرور
     const isMatch = await bcrypt.compare(password, employee.password);
     if (!isMatch) {
       return res.status(401).json({ message: 'البريد الإلكتروني أو كلمة المرور غير صحيحة' });
     }
 
-    // التحقق من حالة الحساب
     if (employee.status !== 'active') {
       return res.status(403).json({ message: 'هذا الحساب غير نشط، يرجى مراجعة الإدارة' });
     }
 
-    // إنشاء التوكن (JWT)
     const token = jwt.sign(
-      { 
-        id: employee.id, 
-        role: employee.position,
-        department: employee.department 
-      },
+      { id: employee.id, role: employee.position, department: employee.department },
       process.env.JWT_SECRET || 'fallback_secret',
       { expiresIn: '12h' }
     );
 
-    // إرسال الرد
+    // 👈 التعديل الثاني: تجميع كل أكواد الصلاحيات في مصفوفة واحدة (بدون تكرار)
+    const permissionCodes = new Set();
+    
+    if (employee.roles) {
+      employee.roles.forEach(role => {
+        if (role.permissions) {
+          role.permissions.forEach(perm => permissionCodes.add(perm.code));
+        }
+      });
+    }
+    
+    if (employee.specialPermissions) {
+      employee.specialPermissions.forEach(perm => permissionCodes.add(perm.code));
+    }
+
     res.json({
       message: 'تم تسجيل الدخول بنجاح',
       token,
@@ -112,7 +126,9 @@ exports.login = async (req, res) => {
         name: employee.name,
         email: employee.email,
         position: employee.position,
-        department: employee.department
+        department: employee.department,
+        // 👈 التعديل الثالث: إرسال الصلاحيات للفرونت إند!
+        permissions: Array.from(permissionCodes) 
       }
     });
 

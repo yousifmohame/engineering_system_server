@@ -1,16 +1,15 @@
 // controllers/employeeController.js
 const { PrismaClient } = require("@prisma/client");
 const prisma = new PrismaClient();
-const bcrypt = require('bcryptjs');
+const bcrypt = require("bcryptjs");
 // ===============================================
 // 1. جلب الموظف الحالي (من الـ Token)
 // GET /api/employees/me
 // ===============================================
 const getMe = (req, res) => {
-  // هذه الوظيفة نأخذها من (protect middleware)
-  // req.employee تم إرفاقه في الوسيط
-  if (req.employee) {
-    res.status(200).json(req.employee);
+  // 👈 تم تغيير req.employee إلى req.user
+  if (req.user) {
+    res.status(200).json(req.user);
   } else {
     res.status(404).json({ message: "لم يتم العثور على الموظف" });
   }
@@ -64,6 +63,10 @@ const getAllEmployees = async (req, res) => {
   }
 };
 
+// ===============================================
+// 2. إنشاء موظف جديد
+// POST /api/employees
+// ===============================================
 const createEmployee = async (req, res) => {
   try {
     const {
@@ -81,30 +84,38 @@ const createEmployee = async (req, res) => {
       status,
       nationality,
       gosiNumber,
-      iqamaNumber
+      iqamaNumber,
+      roleId, // 👈 1. استخراج الـ roleId من الطلب
     } = req.body;
 
-    // التحقق من الحقول الإلزامية
-    if (!name || !nationalId || !email || !phone || !password || !position || !department || !hireDate || !type) {
-      return res.status(400).json({ message: 'الرجاء إدخال جميع الحقول الإلزامية' });
+    if (
+      !name ||
+      !nationalId ||
+      !email ||
+      !phone ||
+      !password ||
+      !position ||
+      !department ||
+      !hireDate ||
+      !type
+    ) {
+      return res
+        .status(400)
+        .json({ message: "الرجاء إدخال جميع الحقول الإلزامية" });
     }
 
-    // التحقق من وجود الموظف (برقم الهوية أو الإيميل أو الجوال)
     const employeeExists = await prisma.employee.findFirst({
-      where: {
-        OR: [
-          { nationalId: nationalId },
-          { email: email },
-          { phone: phone }
-        ]
-      }
+      where: { OR: [{ nationalId }, { email }, { phone }] },
     });
 
     if (employeeExists) {
-      return res.status(400).json({ message: 'موظف مسجل بالفعل بنفس رقم الهوية أو الإيميل أو الجوال' });
+      return res
+        .status(400)
+        .json({
+          message: "موظف مسجل بالفعل بنفس رقم الهوية أو الإيميل أو الجوال",
+        });
     }
 
-    // تشفير كلمة المرور
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
@@ -119,56 +130,99 @@ const createEmployee = async (req, res) => {
         password: hashedPassword,
         position,
         department,
-        // تحويل تاريخ التعيين من نص إلى كائن تاريخ
-        hireDate: new Date(hireDate), 
-        baseSalary: baseSalary ? parseFloat(baseSalary) : null,
         type,
-        status: status || 'active', // قيمة افتراضية
+        status: status || "active",
         nationality,
         gosiNumber,
         iqamaNumber,
-        // (يمكن إضافة باقي الحقول هنا)
-      }
+        hireDate: new Date(hireDate),
+        baseSalary: baseSalary ? parseFloat(baseSalary) : null,
+
+        // 👈 2. ربط الموظف بالدور الوظيفي إذا تم اختياره
+        ...(roleId && {
+          roles: {
+            connect: { id: roleId },
+          },
+        }),
+      },
     });
 
-    // حذف كلمة المرور قبل إرسال الرد
     delete newEmployee.password;
-
-    res.status(201).json({ message: "تم إنشاء الموظف بنجاح", employee: newEmployee });
-
+    res
+      .status(201)
+      .json({ message: "تم إنشاء الموظف بنجاح", employee: newEmployee });
   } catch (error) {
     console.error("Error creating employee:", error);
-    if (error.code === 'P2002') {
-      // خطأ في حالة تكرار حقل فريد
-      return res.status(400).json({ message: `الحقل ${error.meta.target.join(', ')} مستخدم بالفعل` });
+    if (error.code === "P2002") {
+      return res.status(400).json({ message: `البيانات مستخدمة بالفعل` });
     }
-    res.status(500).json({ message: 'خطأ في الخادم' });
+    res.status(500).json({ message: "خطأ في الخادم" });
   }
 };
+
 // ===============================================
-// 3. تحديث بيانات موظف (لشاشة 817 - تعديل)
+// 3. تحديث بيانات موظف
 // PUT /api/employees/:id
 // ===============================================
 const updateEmployee = async (req, res) => {
   try {
     const { id } = req.params;
-    const data = req.body;
 
-    // (ملاحظة: لا نسمح بتحديث كلمة المرور من هنا)
-    delete data.password;
-    // (ولا نسمح بتحديث البريد أو الرقم القومي بسهولة)
-    delete data.email;
-    delete data.nationalId;
+    // 👈 3. نأخذ فقط الحقول التي نحتاجها للتعديل لنتجنب تمرير حقول تسبب أخطاء في Prisma (مثل _count)
+    const {
+      name,
+      nameEn,
+      phone,
+      position,
+      department,
+      hireDate,
+      baseSalary,
+      type,
+      status,
+      nationality,
+      gosiNumber,
+      iqamaNumber,
+      roleId,
+    } = req.body;
+
+    // تجهيز بيانات التحديث
+    const updateData = {
+      name,
+      nameEn,
+      phone,
+      position,
+      department,
+      type,
+      status,
+      nationality,
+      gosiNumber,
+      iqamaNumber,
+    };
+
+    if (hireDate) updateData.hireDate = new Date(hireDate);
+    if (baseSalary !== undefined)
+      updateData.baseSalary = baseSalary ? parseFloat(baseSalary) : null;
+
+    // 👈 4. التحديث السحري للأدوار الوظيفية (إزالة القديم ووضع الجديد)
+    if (roleId) {
+      updateData.roles = { set: [{ id: roleId }] }; // set تقوم بتبديل الدور القديم بالجديد
+    } else {
+      updateData.roles = { set: [] }; // إذا تم تفريغ الدور
+    }
 
     const updatedEmployee = await prisma.employee.update({
       where: { id: id },
-      data: data,
+      data: updateData,
+      include: { roles: true }, // نرجع الأدوار المحدثة لتظهر في الفرونت إند مباشرة
     });
+
+    // حذف الباسورد قبل الرد
+    delete updatedEmployee.password;
+
     res.status(200).json(updatedEmployee);
   } catch (error) {
-    if (error.code === "P2025") {
+    if (error.code === "P2025")
       return res.status(404).json({ message: "الموظف غير موجود" });
-    }
     console.error(error);
     res.status(500).json({ message: "خطأ في الخادم" });
   }
@@ -224,12 +278,10 @@ const getEmployeeAttendance = async (req, res) => {
 
     res.status(200).json(attendanceRecords);
   } catch (error) {
-    res
-      .status(500)
-      .json({
-        message: "Error fetching attendance records",
-        error: error.message,
-      });
+    res.status(500).json({
+      message: "Error fetching attendance records",
+      error: error.message,
+    });
   }
 };
 
@@ -252,7 +304,6 @@ const getEmployeeLeaveRequests = async (req, res) => {
   }
 };
 
-
 // --- تاب 817-08 ---
 const getEmployeeSkills = async (req, res) => {
   try {
@@ -261,7 +312,9 @@ const getEmployeeSkills = async (req, res) => {
     });
     res.status(200).json(skills);
   } catch (error) {
-    res.status(500).json({ message: 'Error fetching skills', error: error.message });
+    res
+      .status(500)
+      .json({ message: "Error fetching skills", error: error.message });
   }
 };
 
@@ -272,7 +325,9 @@ const getEmployeeCertifications = async (req, res) => {
     });
     res.status(200).json(certifications);
   } catch (error) {
-    res.status(500).json({ message: 'Error fetching certifications', error: error.message });
+    res
+      .status(500)
+      .json({ message: "Error fetching certifications", error: error.message });
   }
 };
 
@@ -281,11 +336,13 @@ const getEmployeeEvaluations = async (req, res) => {
   try {
     const evaluations = await prisma.employeeEvaluation.findMany({
       where: { employeeId: req.params.id },
-      orderBy: { date: 'desc' },
+      orderBy: { date: "desc" },
     });
     res.status(200).json(evaluations);
   } catch (error) {
-    res.status(500).json({ message: 'Error fetching evaluations', error: error.message });
+    res
+      .status(500)
+      .json({ message: "Error fetching evaluations", error: error.message });
   }
 };
 
@@ -294,11 +351,13 @@ const getEmployeePromotions = async (req, res) => {
   try {
     const promotions = await prisma.employeePromotion.findMany({
       where: { employeeId: req.params.id },
-      orderBy: { date: 'desc' },
+      orderBy: { date: "desc" },
     });
     res.status(200).json(promotions);
   } catch (error) {
-    res.status(500).json({ message: 'Error fetching promotions', error: error.message });
+    res
+      .status(500)
+      .json({ message: "Error fetching promotions", error: error.message });
   }
 };
 
@@ -307,12 +366,14 @@ const getEmployeeAttachments = async (req, res) => {
   try {
     // نموذج المرفقات لديك يستخدم uploadedById بدلاً من employeeId
     const attachments = await prisma.attachment.findMany({
-      where: { uploadedById: req.params.id }, 
-      orderBy: { createdAt: 'desc' },
+      where: { uploadedById: req.params.id },
+      orderBy: { createdAt: "desc" },
     });
     res.status(200).json(attachments);
   } catch (error) {
-    res.status(500).json({ message: 'Error fetching attachments', error: error.message });
+    res
+      .status(500)
+      .json({ message: "Error fetching attachments", error: error.message });
   }
 };
 
@@ -324,7 +385,8 @@ const getEmployeePermissions = async (req, res) => {
       where: { id: req.params.id },
       include: {
         specialPermissions: true, // الصلاحيات المباشرة
-        roles: { // الأدوار
+        roles: {
+          // الأدوار
           include: {
             permissions: true, // صلاحيات كل دور
           },
@@ -333,21 +395,24 @@ const getEmployeePermissions = async (req, res) => {
     });
 
     if (!employee) {
-      return res.status(404).json({ message: 'Employee not found' });
+      return res.status(404).json({ message: "Employee not found" });
     }
 
     // دمج الصلاحيات ومنع التكرار
     const permissionsMap = new Map();
-    employee.specialPermissions.forEach(perm => permissionsMap.set(perm.id, perm));
-    employee.roles.forEach(role => {
-      role.permissions.forEach(perm => permissionsMap.set(perm.id, perm));
+    employee.specialPermissions.forEach((perm) =>
+      permissionsMap.set(perm.id, perm),
+    );
+    employee.roles.forEach((role) => {
+      role.permissions.forEach((perm) => permissionsMap.set(perm.id, perm));
     });
 
     const allPermissions = Array.from(permissionsMap.values());
     res.status(200).json(allPermissions);
-
   } catch (error) {
-    res.status(500).json({ message: 'Error fetching permissions', error: error.message });
+    res
+      .status(500)
+      .json({ message: "Error fetching permissions", error: error.message });
   }
 };
 
@@ -367,7 +432,12 @@ const updateEmployeeStatus = async (req, res) => {
     });
     res.status(200).json(updatedEmployee);
   } catch (error) {
-    res.status(500).json({ message: 'Error updating employee status', error: error.message });
+    res
+      .status(500)
+      .json({
+        message: "Error updating employee status",
+        error: error.message,
+      });
   }
 };
 
@@ -376,11 +446,11 @@ const updateEmployeePromotion = async (req, res) => {
   try {
     const { id } = req.params;
     // 'newLevel' و 'newPosition' و 'notes' تأتي من الواجهة
-    const { newLevel, newPosition, notes } = req.body; 
+    const { newLevel, newPosition, notes } = req.body;
 
     const employee = await prisma.employee.findUnique({ where: { id } });
     if (!employee) {
-      return res.status(404).json({ message: 'Employee not found' });
+      return res.status(404).json({ message: "Employee not found" });
     }
 
     // 1. تحديث الموظف نفسه
@@ -407,7 +477,9 @@ const updateEmployeePromotion = async (req, res) => {
 
     res.status(200).json(updatedEmployee);
   } catch (error) {
-    res.status(500).json({ message: 'Error processing promotion', error: error.message });
+    res
+      .status(500)
+      .json({ message: "Error processing promotion", error: error.message });
   }
 };
 const getEmployeesWithStats = async (req, res) => {
@@ -423,27 +495,29 @@ const getEmployeesWithStats = async (req, res) => {
         // (الآن نجلب حالات المهام فقط، وهو خفيف جداً)
         assignedTasks: {
           select: {
-            status: true
-          }
-        }
-      }
+            status: true,
+          },
+        },
+      },
     });
 
     // 💡 (نقوم بحساب الإحصائيات هنا في الـ Backend)
-    const stats = employees.map(emp => {
-      
+    const stats = employees.map((emp) => {
       // (حساب المهام النشطة - يمكن تعديل هذه الحالات)
       const activeTasks = emp.assignedTasks.filter(
-        t => t.status === 'in-progress' || t.status === 'pending' || t.status === 'not-received'
+        (t) =>
+          t.status === "in-progress" ||
+          t.status === "pending" ||
+          t.status === "not-received",
       ).length;
-      
+
       // (حساب المهام المكتملة)
       const completedTasks = emp.assignedTasks.filter(
-        t => t.status === 'completed'
+        (t) => t.status === "completed",
       ).length;
 
       const totalTasks = activeTasks + completedTasks;
-      
+
       return {
         id: emp.id,
         code: emp.employeeCode,
@@ -453,17 +527,21 @@ const getEmployeesWithStats = async (req, res) => {
         activeTasks: activeTasks,
         completedTasks: completedTasks,
         // (منطق أداء افتراضي محسن)
-        performance: totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 100,
+        performance:
+          totalTasks > 0
+            ? Math.round((completedTasks / totalTasks) * 100)
+            : 100,
         // (منطق "متاح" افتراضي محسن)
-        available: emp.status === 'active' && activeTasks < 5, // (افترض أن الموظف مشغول إذا كان لديه 5 مهام أو أكثر)
-      }
+        available: emp.status === "active" && activeTasks < 5, // (افترض أن الموظف مشغول إذا كان لديه 5 مهام أو أكثر)
+      };
     });
 
     res.status(200).json(stats);
-
   } catch (error) {
     console.error(error); // (مهم لطباعة الخطأ الحقيقي في الـ console)
-    res.status(500).json({ message: 'Error fetching employee stats', error: error.message });
+    res
+      .status(500)
+      .json({ message: "Error fetching employee stats", error: error.message });
   }
 };
 

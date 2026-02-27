@@ -12,7 +12,8 @@ const {
   getAssignmentLists,
   getRoleNotifications,
   getRoleById,            // ✅ إضافة
-  updateRolePermissions   // ✅ إضافة
+  updateRolePermissions ,  // ✅ إضافة
+  assignPermissionToRole
 } = require('../controllers/roleController');
 
 // حماية جميع المسارات التالية
@@ -45,5 +46,7 @@ router.route('/:id')
 
 router.route('/:id/permissions')
   .put(updateRolePermissions); // PUT /api/roles/ROLE_ID_HERE/permissions
+
+router.post('/:id/assign-permission', assignPermissionToRole);
   
 module.exports = router;

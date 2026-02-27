@@ -2,30 +2,22 @@ const jwt = require('jsonwebtoken');
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
-// (لقد استخدمت الاسم 'protect' بناءً على ملفك الأصلي)
 const protect = async (req, res, next) => {
   let token;
 
   if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
     try {
-      // 1. استخراج التوكن
       token = req.headers.authorization.split(' ')[1];
+      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'fallback_secret');
 
-      // 2. التحقق من التوكن
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
-
-      // 3. جلب الموظف (بدون كلمة المرور)
+      // 👈 التعديل هنا: استخدام include بدلاً من select لجلب العلاقات
       const employee = await prisma.employee.findUnique({
         where: { id: decoded.id },
-        select: {
-          id: true,
-          employeeCode: true,
-          name: true,
-          email: true,
-          phone: true,
-          position: true,
-          department: true,
-          // (أضف أي حقول أخرى تحتاجها أن تكون متاحة في 'req.user')
+        include: {
+          roles: {
+            include: { permissions: true }
+          },
+          specialPermissions: true
         }
       });
 
@@ -33,32 +25,37 @@ const protect = async (req, res, next) => {
         return res.status(401).json({ message: 'غير مصرح لك، لم يتم العثور على الموظف' });
       }
 
-      // 4. إرفاق بيانات الموظف بالـ request
-      req.user = employee;
+      // تجميع الصلاحيات
+      const permissionCodes = new Set();
+      employee.roles.forEach(role => {
+        role.permissions.forEach(perm => permissionCodes.add(perm.code));
+      });
+      employee.specialPermissions.forEach(perm => permissionCodes.add(perm.code));
+
+      // إزالة الباسورد لأسباب أمنية
+      delete employee.password;
+
+      // 👈 إرفاق الموظف مع مصفوفة الصلاحيات النظيفة بالـ request
+      req.user = {
+        ...employee,
+        permissions: Array.from(permissionCodes)
+      };
+
       next();
 
     } catch (error) {
-      console.error(error); // (لأغراض التصحيح)
-
-      // --- 💡 هذا هو التعديل المطلوب ---
-      // (إذا انتهت صلاحية التوكن، أرسل 401)
+      console.error("Auth Middleware Error:", error); 
       if (error.name === 'TokenExpiredError') {
         return res.status(401).json({ message: 'غير مصرح لك، انتهت صلاحية التوكن' });
       }
-      // (إذا كان التوكن غير صالح لأي سبب آخر)
       if (error.name === 'JsonWebTokenError') {
         return res.status(401).json({ message: 'غير مصرح لك، التوكن غير صالح' });
       }
-      
-      // لأي أخطاء أخرى
       return res.status(500).json({ message: 'خطأ في الخادم' });
     }
-  }
-
-  if (!token) {
+  } else {
     res.status(401).json({ message: 'غير مصرح لك، لا يوجد توكن' });
   }
 };
 
-// (التصدير كما في ملفك الأصلي)
 module.exports = { protect };
