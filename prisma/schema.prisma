@@ -274,6 +274,7 @@ model Client {
   completionPercentage Float?
   isActive         Boolean @default(true)
   notes            String?
+  representative  Json?
   createdBy        String?
 
   createdAt        DateTime @default(now())

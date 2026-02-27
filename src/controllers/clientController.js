@@ -153,17 +153,14 @@ const generateNextClientCode = async () => {
 };
 
 // ==================================================
-// 2. دوال الـ API (Controllers)
+// جلب جميع العملاء (مُحدث ليتوافق مع ClientsLog)
 // ==================================================
-
-// جلب جميع العملاء
-// جلب جميع العملاء (مُحدث لدعم جلب المرفقات عند الحاجة)
 const getAllClients = async (req, res) => {
   try {
-    // 1. استلام includeAttachments من الـ query
-    const { search, limit, includeAttachments } = req.query;
+    const { search, limit } = req.query;
     const where = {};
 
+    // فلترة البحث من الباك إند (تعمل جنباً إلى جنب مع بحث الفرونت إند)
     if (search) {
       where.OR = [
         { mobile: { contains: search } },
@@ -180,18 +177,20 @@ const getAllClients = async (req, res) => {
       take: limit ? parseInt(limit) : undefined,
       orderBy: { createdAt: "desc" },
       include: {
-        transactions: { select: { id: true } },
-        // 2. الشرط الجديد: جلب المرفقات فقط إذا كانت includeAttachments تساوي 'true'
-        ...(includeAttachments === "true" && {
-          attachments: true,
-        }),
+        // 👈 هذا هو الجزء المفقود والمهم جداً للواجهة (ClientsLog)
+        _count: {
+          select: {
+            transactions: true, // لعمود "المعاملات" في الجدول
+            attachments: true, // لعمود "الوثائق" في الجدول
+          },
+        },
       },
     });
 
     res.json(clients);
   } catch (error) {
     console.error("Get Clients Error:", error);
-    res.json([]);
+    res.status(500).json([]);
   }
 };
 
@@ -221,7 +220,12 @@ const createClient = async (req, res) => {
       rating,
       secretRating,
       notes,
+      representative
     } = req.body;
+
+    if (mobile === "غير متوفر") {
+      mobile = `غير متوفر-${Date.now()}`;
+    }
 
     // 2. تحويل البيانات المتداخلة من نص (String) إلى كائنات (Objects)
     const parsedName = name
@@ -233,6 +237,7 @@ const createClient = async (req, res) => {
       ? JSON.parse(identification)
       : { idNumber, type: "NationalID" };
 
+    const parsedRepresentative = representative ? JSON.parse(representative) : null;
     if (!mobile || !idNumber || !type) {
       return res
         .status(400)
@@ -289,6 +294,7 @@ const createClient = async (req, res) => {
         contact: parsedContact,
         address: parsedAddress,
         identification: parsedIdentification,
+        representative: parsedRepresentative,
         type,
         category,
         nationality,
@@ -320,7 +326,6 @@ const createClient = async (req, res) => {
   }
 };
 
-// تحديث عميل
 // تحديث عميل
 const updateClient = async (req, res) => {
   const { id: clientId } = req.params;
@@ -884,13 +889,11 @@ const uploadClientDocument = async (req, res) => {
       },
     });
 
-    res
-      .status(201)
-      .json({
-        success: true,
-        message: "تم رفع الوثيقة بنجاح",
-        data: newAttachment,
-      });
+    res.status(201).json({
+      success: true,
+      message: "تم رفع الوثيقة بنجاح",
+      data: newAttachment,
+    });
   } catch (error) {
     console.error("Upload Document Error:", error);
     res.status(500).json({ success: false, message: "فشل رفع الوثيقة" });
