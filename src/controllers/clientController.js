@@ -152,6 +152,35 @@ const generateNextClientCode = async () => {
   return `${prefix}${paddedNumber}`; // CLT-2025-001
 };
 
+// ===============================================
+// التحقق من وجود رقم الهوية مسبقاً
+// GET /api/clients/check-id?idNumber=10XXXXXXX
+// ===============================================
+const checkClientId = async (req, res) => {
+  try {
+    const { idNumber } = req.query;
+    if (!idNumber) return res.status(400).json({ message: "رقم الهوية مطلوب" });
+
+    const existingClient = await prisma.client.findUnique({
+      where: { idNumber }
+    });
+
+    if (existingClient) {
+      // إرجاع اسم العميل المسجل لتنبيه المستخدم
+      const clientName = existingClient.officialNameAr || existingClient.name?.ar || "عميل مسجل";
+      return res.json({ exists: true, clientName });
+    }
+
+    return res.json({ exists: false });
+  } catch (error) {
+    console.error("Check ID Error:", error);
+    res.status(500).json({ message: "خطأ في الخادم" });
+  }
+};
+
+// لا تنسَ تصديرها وإضافتها في clientRoutes.js
+// router.get('/check-id', checkClientId);
+
 // ==================================================
 // جلب جميع العملاء (مُحدث ليتوافق مع ClientsLog)
 // ==================================================
@@ -1053,6 +1082,7 @@ module.exports = {
   deleteClient,
   getClientById,
   getSimpleClients,
+  checkClientId,
   analyzeIdentityImage,
   analyzeAddressDocument,
   getClientStats,

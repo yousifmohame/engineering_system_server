@@ -17,6 +17,7 @@ const {
   getClientStats,
   uploadClientDocument,
   analyzeRepresentative,
+  checkClientId
 } = require("../controllers/clientController");
 
 // ==========================================
@@ -55,6 +56,7 @@ router
 router.route("/simple").get(getSimpleClients);
 
 router.get("/stats", getClientStats);
+router.get('/check-id', checkClientId);
 
 router.post("/:id/documents", upload.single("file"), uploadClientDocument);
 
