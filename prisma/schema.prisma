@@ -242,27 +242,30 @@ model PermissionGroup {
 
 // ------ نموذج العميل (شاشة 300) ------
 model Client {
-  id             String  @id @default(cuid())
-  clientCode     String  @unique 
+  id               String  @id @default(cuid())
+  clientCode       String  @unique 
 
   // --- بيانات الاتصال الأساسية ---
-  mobile         String  @unique
-  email          String? @unique
-  idNumber       String  @unique // الهوية الوطنية
+  mobile           String  @unique
+  email            String? @unique
+  idNumber         String  @unique // الهوية الوطنية / السجل / رقم الوقف
 
   // --- بيانات JSON للمرونة ---
-  name             Json  // { ar: "...", en: "..." }
+  name             Json  // { ar: "...", en: "...", details: {...} }
   contact          Json 
   address          Json? 
-  identification   Json 
+  identification   Json  // (تحتوي على العمر، مكان الميلاد، التاريخ الهجري والميلادي)
+  representative   Json? // (بيانات الوكيل/الناظر/المفوض)
+  heirs            Json? // 👈 1. الإضافة الجديدة: مصفوفة بيانات الورثة 
 
   // --- حقول WMS الصريحة (للسرعة والفلترة) ---
-  officialNameAr   String? @map("official_name_ar") // مهم جداً للبحث
-  riskTier         String  @default("LOW")          // LOW, MEDIUM, HIGH
+  officialNameAr   String? @map("official_name_ar") 
+  riskTier         String  @default("LOW")          
+  profilePicture   String? // 👈 2. الإضافة الجديدة: مسار صورة العميل / شعار الوقف أو الشركة
   
   // --- التفاصيل ---
-  type             String // (فرد، شركة، جهة حكومية)
-  category         String? // (VIP, مؤسسة, عادي)
+  type             String // (فرد، شركة، جهة حكومية، ورثة، وقف، مكتب هندسي)
+  category         String? 
   nationality      String?
   occupation       String?
   company          String?
@@ -274,14 +277,13 @@ model Client {
   completionPercentage Float?
   isActive         Boolean @default(true)
   notes            String?
-  representative  Json?
   createdBy        String?
 
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
   // --- العلاقات ---
-  ownerships   OwnershipFile[] // علاقة جديدة (شاشة 310)
+  ownerships   OwnershipFile[] 
   transactions Transaction[]
   contracts    Contract[]
   quotations   Quotation[]

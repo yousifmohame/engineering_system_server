@@ -195,12 +195,12 @@ const getAllClients = async (req, res) => {
 };
 
 // ===============================================
-// 2. إنشاء عميل جديد (موحد مع رفع الملفات الحقيقية)
+// 2. إنشاء عميل جديد (موحد وشامل لكل البيانات والصور)
 // POST /api/clients
 // ===============================================
 const createClient = async (req, res) => {
   try {
-    // 1. استخراج البيانات النصية من req.body (التي أرسلها FormData)
+    // 1. استخراج البيانات النصية من req.body (شاملة الورثة)
     let {
       mobile,
       email,
@@ -221,6 +221,7 @@ const createClient = async (req, res) => {
       secretRating,
       notes,
       representative,
+      heirs, // 👈 1. إضافة استخراج الورثة
     } = req.body;
 
     if (mobile === "غير متوفر") {
@@ -236,10 +237,11 @@ const createClient = async (req, res) => {
     const parsedIdentification = identification
       ? JSON.parse(identification)
       : { idNumber, type: "NationalID" };
-
     const parsedRepresentative = representative
       ? JSON.parse(representative)
       : null;
+    const parsedHeirs = heirs ? JSON.parse(heirs) : null; // 👈 2. تحليل بيانات الورثة
+
     if (!mobile || !idNumber || !type) {
       return res
         .status(400)
@@ -247,26 +249,51 @@ const createClient = async (req, res) => {
     }
 
     const generatedClientCode = await generateNextClientCode();
+    // تأكد من تحديث دالة حساب النسبة لتشمل الورثة إن أردت
     const completionPercentage = calculateCompletionPercentage({
       ...req.body,
       name: parsedName,
     });
 
-    // تحديد الموظف الذي قام برفع الملفات
     let uploaderId = req.user?.id;
-    if (!uploaderId && req.files && req.files.length > 0) {
+    if (!uploaderId && req.files) {
       const defaultEmployee = await prisma.employee.findFirst();
       uploaderId = defaultEmployee?.id;
     }
 
     // ==========================================
-    // 3. معالجة المرفقات (الملفات الحقيقية من req.files)
+    // 3. الفرز الذكي للملفات (الصورة الشخصية vs المرفقات العامة)
     // ==========================================
-    let attachmentsData = undefined;
+    let profilePicPath = null;
+    let generalAttachments = [];
 
-    if (req.files && req.files.length > 0) {
-      const attachmentsArray = req.files.map((file, index) => {
-        // استخراج البيانات الوصفية (Metadata) التي أرسلناها من الواجهة
+    // يعتمد هذا على طريقة إعداد Multer في الـ Routes (يفضل استخدام upload.any() للتعامل مع هذا)
+    if (req.files) {
+      // إذا كان Multer يرجع مصفوفة (upload.any)
+      if (Array.isArray(req.files)) {
+        req.files.forEach((file) => {
+          if (file.fieldname === "profilePicture") {
+            profilePicPath = `/uploads/clients/${file.filename}`; // 👈 عزل الصورة الشخصية
+          } else if (file.fieldname === "files") {
+            generalAttachments.push(file); // 👈 تجميع باقي الملفات
+          }
+        });
+      }
+      // إذا كان Multer يرجع كائن (upload.fields)
+      else {
+        if (req.files["profilePicture"]) {
+          profilePicPath = `/uploads/clients/${req.files["profilePicture"][0].filename}`;
+        }
+        if (req.files["files"]) {
+          generalAttachments = req.files["files"];
+        }
+      }
+    }
+
+    // تجهيز المرفقات العامة للـ Prisma
+    let attachmentsData = undefined;
+    if (generalAttachments.length > 0) {
+      const attachmentsArray = generalAttachments.map((file, index) => {
         const metaType = req.body[`fileMeta_${index}_type`] || "عام";
         const metaName =
           req.body[`fileMeta_${index}_name`] || file.originalname;
@@ -274,18 +301,20 @@ const createClient = async (req, res) => {
 
         return {
           fileName: metaName,
-          filePath: `/uploads/clients/${file.filename}`, // 👈 المسار الحقيقي الذي أنشأه Multer!
+          filePath: `/uploads/clients/${file.filename}`,
           fileType: file.mimetype,
           fileSize: file.size,
           uploadedById: uploaderId,
-          notes: `تصنيف: ${metaType} - السرية: ${metaPrivacy}`, // دمج البيانات في الملاحظات
+          notes: `تصنيف: ${metaType} - السرية: ${metaPrivacy}`,
         };
       });
 
       attachmentsData = { create: attachmentsArray };
     }
 
-    // 4. إنشاء العميل مع ربط الملفات في قاعدة البيانات
+    // ==========================================
+    // 4. الحفظ في قاعدة البيانات
+    // ==========================================
     const newClient = await prisma.client.create({
       data: {
         clientCode: generatedClientCode,
@@ -295,8 +324,10 @@ const createClient = async (req, res) => {
         name: parsedName,
         contact: parsedContact,
         address: parsedAddress,
-        identification: parsedIdentification,
-        representative: parsedRepresentative,
+        identification: parsedIdentification, // (تحتوي الآن على العمر، ومكان الميلاد، والتاريخ الهجري والميلادي)
+        representative: parsedRepresentative, // (يحتوي على بيانات الوكيل المحللة)
+        heirs: parsedHeirs, // 👈 3. حفظ بيانات الورثة كـ JSON في الداتابيز
+        profilePicture: profilePicPath, // 👈 4. حفظ مسار الصورة الشخصية/الشعار
         type,
         category,
         nationality,
@@ -306,12 +337,12 @@ const createClient = async (req, res) => {
         rating,
         secretRating: secretRating ? parseInt(secretRating) : null,
         notes,
-        isActive: isActive === "true" || isActive === true, // تحويل النص لـ boolean
+        isActive: isActive === "true" || isActive === true,
         completionPercentage,
         grade: "ج",
         gradeScore: 0,
 
-        // 👈 ربط المرفقات في حال وجودها
+        // ربط المرفقات في حال وجودها
         ...(attachmentsData && { attachments: attachmentsData }),
       },
     });

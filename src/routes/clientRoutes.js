@@ -49,7 +49,7 @@ const upload = multer({
 router
   .route("/")
   .get(getAllClients)
-  .post(upload.array("files", 10), createClient); // 👈 الـ upload يكون داخل الـ post
+  .post(upload.any(), createClient); // 👈 الـ upload يكون داخل الـ post
 
 // ✅ 2. إضافة المسار المبسط الجديد هنا (قبل :id)
 router.route("/simple").get(getSimpleClients);
