@@ -515,33 +515,43 @@ const updateClient = async (req, res) => {
 };
 
 // حذف عميل
+// ===============================================
+// حذف عميل 
+// DELETE /api/clients/:id
+// ===============================================
 const deleteClient = async (req, res) => {
-  const { id: clientId } = req.params;
   try {
-    // اختياري: تسجيل النشاط قبل الحذف
-    const client = await prisma.client.findUnique({ where: { id: clientId } });
-    if (client && req.user) {
-      await prisma.activityLog.create({
-        data: {
-          action: "حذف عميل",
-          description: `تم حذف العميل "${getFullName(client.name)}" (الكود: ${client.clientCode}).`,
-          category: "حذف",
-          clientId: client.id,
-          performedById: req.user.id,
-        },
+    const { id } = req.params;
+
+    // محاولة الحذف
+    await prisma.client.delete({
+      where: { id: id },
+    });
+
+    res.status(200).json({ success: true, message: "تم حذف العميل بنجاح" });
+
+  } catch (error) {
+    console.error("Error deleting client:", error);
+
+    // 👈 اصطياد خطأ ارتباط المفتاح الأجنبي (Foreign Key Constraint)
+    // P2003 هو كود Prisma القياسي لهذا الخطأ، ونضيف فحص النص للاحتياط
+    if (
+      error.code === 'P2003' || 
+      (error.message && error.message.includes('violates RESTRICT')) ||
+      (error.message && error.message.includes('Foreign key constraint'))
+    ) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "لا يمكن حذف هذا العميل لوجود ارتباطات نشطة به (مثل ملفات ملكية، أو معاملات). يرجى حذف الارتباطات أولاً أو إيقاف حساب العميل بدلاً من حذفه." 
       });
     }
 
-    await prisma.client.delete({
-      where: { id: clientId },
+    // أي خطأ آخر
+    res.status(500).json({ 
+      success: false, 
+      message: "حدث خطأ في السيرفر أثناء محاولة الحذف", 
+      error: error.message 
     });
-
-    res.status(200).json({ message: "تم حذف العميل بنجاح" });
-  } catch (error) {
-    console.error("Error deleting client:", error);
-    res
-      .status(500)
-      .json({ message: "فشل في حذف العميل", error: error.message });
   }
 };
 
