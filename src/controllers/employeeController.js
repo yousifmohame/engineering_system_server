@@ -40,6 +40,7 @@ const getAllEmployees = async (req, res) => {
         baseSalary: true,
         jobLevel: true,
         type: true,
+        qiwaPosition: true, // 👈 الإضافة الجديدة
         status: true,
         nationality: true,
         gosiNumber: true,
@@ -70,6 +71,7 @@ const getAllEmployees = async (req, res) => {
 const createEmployee = async (req, res) => {
   try {
     const {
+      employeeCode, // 👈 1. استقبال الرقم الوظيفي
       name,
       nameEn,
       nationalId,
@@ -77,6 +79,7 @@ const createEmployee = async (req, res) => {
       phone,
       password,
       position,
+      qiwaPosition, // 👈 2. استقبال مسمى قوى
       department,
       hireDate,
       baseSalary,
@@ -85,10 +88,11 @@ const createEmployee = async (req, res) => {
       nationality,
       gosiNumber,
       iqamaNumber,
-      roleId, // 👈 1. استخراج الـ roleId من الطلب
+      roleIds, // 👈 3. استقبال مصفوفة الأدوار بدلاً من دور واحد
     } = req.body;
 
     if (
+      !employeeCode ||
       !name ||
       !nationalId ||
       !email ||
@@ -104,16 +108,16 @@ const createEmployee = async (req, res) => {
         .json({ message: "الرجاء إدخال جميع الحقول الإلزامية" });
     }
 
+    // 👈 التحقق يشمل الآن الرقم الوظيفي أيضاً
     const employeeExists = await prisma.employee.findFirst({
-      where: { OR: [{ nationalId }, { email }, { phone }] },
+      where: { OR: [{ nationalId }, { email }, { phone }, { employeeCode }] },
     });
 
     if (employeeExists) {
-      return res
-        .status(400)
-        .json({
-          message: "موظف مسجل بالفعل بنفس رقم الهوية أو الإيميل أو الجوال",
-        });
+      return res.status(400).json({
+        message:
+          "موظف مسجل بالفعل بنفس رقم الهوية، الإيميل، الجوال، أو الرقم الوظيفي",
+      });
     }
 
     const salt = await bcrypt.genSalt(10);
@@ -122,6 +126,7 @@ const createEmployee = async (req, res) => {
     // إنشاء الموظف
     const newEmployee = await prisma.employee.create({
       data: {
+        employeeCode, // 👈 حفظ الرقم الوظيفي
         name,
         nameEn,
         nationalId,
@@ -129,6 +134,7 @@ const createEmployee = async (req, res) => {
         phone,
         password: hashedPassword,
         position,
+        qiwaPosition, // 👈 حفظ مسمى قوى
         department,
         type,
         status: status || "active",
@@ -138,13 +144,13 @@ const createEmployee = async (req, res) => {
         hireDate: new Date(hireDate),
         baseSalary: baseSalary ? parseFloat(baseSalary) : null,
 
-        // 👈 2. ربط الموظف بالدور الوظيفي إذا تم اختياره
-        ...(roleId && {
-          roles: {
-            connect: { id: roleId },
-          },
-        }),
+        // 👈 4. التحديث السحري لربط أكثر من دور في نفس الوقت
+        roles: {
+          connect:
+            roleIds && roleIds.length > 0 ? roleIds.map((id) => ({ id })) : [],
+        },
       },
+      include: { roles: true }, // لإرجاع الأدوار في الاستجابة
     });
 
     delete newEmployee.password;
@@ -168,12 +174,13 @@ const updateEmployee = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // 👈 3. نأخذ فقط الحقول التي نحتاجها للتعديل لنتجنب تمرير حقول تسبب أخطاء في Prisma (مثل _count)
     const {
+      employeeCode,
       name,
       nameEn,
       phone,
       position,
+      qiwaPosition, // 👈
       department,
       hireDate,
       baseSalary,
@@ -182,15 +189,17 @@ const updateEmployee = async (req, res) => {
       nationality,
       gosiNumber,
       iqamaNumber,
-      roleId,
+      roleIds, // 👈 مصفوفة الأدوار
     } = req.body;
 
     // تجهيز بيانات التحديث
     const updateData = {
+      employeeCode,
       name,
       nameEn,
       phone,
       position,
+      qiwaPosition, // 👈
       department,
       type,
       status,
@@ -203,11 +212,13 @@ const updateEmployee = async (req, res) => {
     if (baseSalary !== undefined)
       updateData.baseSalary = baseSalary ? parseFloat(baseSalary) : null;
 
-    // 👈 4. التحديث السحري للأدوار الوظيفية (إزالة القديم ووضع الجديد)
-    if (roleId) {
-      updateData.roles = { set: [{ id: roleId }] }; // set تقوم بتبديل الدور القديم بالجديد
+    // 👈 التحديث السحري للأدوار الوظيفية المتعددة (إزالة القديم ووضع الجديد)
+    if (roleIds && Array.isArray(roleIds)) {
+      updateData.roles = {
+        set: roleIds.map((roleId) => ({ id: roleId })), // set تقوم بتفريغ الأدوار القديمة وإضافة الجديدة
+      };
     } else {
-      updateData.roles = { set: [] }; // إذا تم تفريغ الدور
+      updateData.roles = { set: [] }; // تفريغ الأدوار إذا أرسل الواجهة مصفوفة فارغة
     }
 
     const updatedEmployee = await prisma.employee.update({
@@ -216,9 +227,7 @@ const updateEmployee = async (req, res) => {
       include: { roles: true }, // نرجع الأدوار المحدثة لتظهر في الفرونت إند مباشرة
     });
 
-    // حذف الباسورد قبل الرد
     delete updatedEmployee.password;
-
     res.status(200).json(updatedEmployee);
   } catch (error) {
     if (error.code === "P2025")
@@ -432,12 +441,10 @@ const updateEmployeeStatus = async (req, res) => {
     });
     res.status(200).json(updatedEmployee);
   } catch (error) {
-    res
-      .status(500)
-      .json({
-        message: "Error updating employee status",
-        error: error.message,
-      });
+    res.status(500).json({
+      message: "Error updating employee status",
+      error: error.message,
+    });
   }
 };
 

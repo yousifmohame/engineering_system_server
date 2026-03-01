@@ -23,6 +23,7 @@ model Employee {
   email             String    @unique
   phone             String    @unique
   position          String
+  qiwaPosition      String?
   department        String
   hireDate          DateTime
   baseSalary        Float?
@@ -663,6 +664,7 @@ enum QuotationStatus {
   ACCEPTED
   PARTIALLY_PAID
   REJECTED
+  TRASHED
   EXPIRED
   CANCELLED           // 👈 تم إضافة (ملغى)
   REFUND_IN_PROGRESS  // 👈 تم إضافة (استرجاع جارٍ)

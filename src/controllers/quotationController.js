@@ -167,12 +167,15 @@ const createQuotation = async (req, res) => {
 };
 
 // ===============================================
-// 2. جلب جميع عروض الأسعار
+// 2. جلب جميع عروض الأسعار (بدون المحذوفة)
 // GET /api/quotations
 // ===============================================
 const getAllQuotations = async (req, res) => {
   try {
     const quotations = await prisma.quotation.findMany({
+      where: {
+        status: { not: "TRASHED" }, // 👈 فلترة: جلب كل شيء ما عدا الموجود في سلة المحذوفات
+      },
       orderBy: { createdAt: "desc" },
       include: {
         client: { select: { name: true, clientCode: true } },
@@ -181,7 +184,7 @@ const getAllQuotations = async (req, res) => {
     });
     res.status(200).json({ success: true, data: quotations });
   } catch (error) {
-    console.error(error);
+    console.error("Get Quotations Error:", error);
     res.status(500).json({ success: false, message: "خطأ في جلب العروض" });
   }
 };
@@ -251,26 +254,34 @@ const updateQuotation = async (req, res) => {
 };
 
 // ===============================================
-// 5. حذف عرض سعر
+// 5. حذف عرض سعر (نقل لسلة المحذوفات - Soft Delete)
 // DELETE /api/quotations/:id
 // ===============================================
 const deleteQuotation = async (req, res) => {
   try {
     const { id } = req.params;
-    await prisma.quotation.delete({
+
+    // 👈 بدلاً من الحذف النهائي، نقوم بتحديث الحالة إلى TRASHED
+    const trashedQuotation = await prisma.quotation.update({
       where: { id: id },
+      data: {
+        status: "TRASHED", // نقل لسلة المحذوفات
+        // notes: "تم نقل هذا العرض لسلة المحذوفات", // اختياري
+      },
     });
-    res.status(200).json({ success: true, message: "تم حذف عرض السعر بنجاح" });
+
+    res.status(200).json({
+      success: true,
+      message: "تم نقل عرض السعر إلى سلة المحذوفات بنجاح",
+      data: trashedQuotation,
+    });
   } catch (error) {
-    if (error.code === "P2025")
+    if (error.code === "P2025") {
       return res
         .status(404)
         .json({ success: false, message: "عرض السعر غير موجود" });
-    if (error.code === "P2003")
-      return res
-        .status(400)
-        .json({ success: false, message: "لا يمكن الحذف لارتباطه بعقد" });
-    console.error(error);
+    }
+    console.error("Trash Quotation Error:", error);
     res.status(500).json({ success: false, message: "خطأ في حذف العرض" });
   }
 };
@@ -281,9 +292,13 @@ const deleteQuotation = async (req, res) => {
 // ===============================================
 const getQuotationStats = async (req, res) => {
   try {
-    const allQuotes = await prisma.quotation.findMany();
+    // 👈 لا تحسب العروض التي في سلة المحذوفات
+    const allQuotes = await prisma.quotation.findMany({
+      where: {
+        status: { not: "TRASHED" },
+      },
+    });
 
-    // 1. تعريف القيم الافتراضية (أصفار)
     let stats = {
       totalQuotations: allQuotes?.length || 0,
       pendingApproval: 0,
@@ -301,15 +316,14 @@ const getQuotationStats = async (req, res) => {
       totalSent: 0,
     };
 
-    // 🚀 الحماية الأساسية: إذا كانت قاعدة البيانات فارغة، أرجع الأصفار فوراً وتوقف هنا
     if (!allQuotes || allQuotes.length === 0) {
       return res.status(200).json({ success: true, data: stats });
     }
 
     let approvedCount = 0;
 
-    // 2. إذا كان هناك بيانات، قم بحسابها
     allQuotes.forEach((q) => {
+      // (باقي كود حساب الإحصائيات يبقى كما هو بدون تغيير)
       if (q.status === "PENDING_APPROVAL") {
         stats.pendingApproval++;
       } else if (q.status === "SENT") {
@@ -354,7 +368,6 @@ const getQuotationStats = async (req, res) => {
       stats.totalCollected += Number(q.collectedAmount) || 0;
     });
 
-    // 3. حساب النسب بشكل آمن (لتجنب القسمة على صفر)
     if (stats.totalSent > 0) {
       stats.approvalRate = Math.round((approvedCount / stats.totalSent) * 100);
       stats.noResponseRate = Math.round(
