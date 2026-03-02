@@ -1,5 +1,23 @@
+const multer = require('multer');
+const fs = require('fs');
+const path = require('path');
 const { PrismaClient } = require("@prisma/client");
 const prisma = new PrismaClient();
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const dir = 'uploads/streets';
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true }); // إنشاء المجلد تلقائياً إذا لم يكن موجوداً
+    }
+    cb(null, dir);
+  },
+  filename: (req, file, cb) => {
+    cb(null, Date.now() + '-' + Math.round(Math.random() * 1E9) + path.extname(file.originalname));
+  }
+});
+
+const upload = multer({ storage });
 
 // توليد كود الشارع تلقائياً
 const generateStreetCode = async () => {
@@ -680,12 +698,10 @@ const deleteSector = async (req, res) => {
     });
 
     if (sectorWithDistricts._count.districts > 0) {
-      return res
-        .status(400)
-        .json({
-          message:
-            "لا يمكن حذف هذا القطاع لارتباطه بأحياء مسجلة. يرجى نقل الأحياء أولاً.",
-        });
+      return res.status(400).json({
+        message:
+          "لا يمكن حذف هذا القطاع لارتباطه بأحياء مسجلة. يرجى نقل الأحياء أولاً.",
+      });
     }
 
     // 2. الحذف الآمن
@@ -743,6 +759,412 @@ const deleteDistrict = async (req, res) => {
   }
 };
 
+// ===================================================
+// 18. جلب بيانات التابات التفصيلية (نسخة محسنة بالـ Relations 🚀)
+// ===================================================
+const getNodeDetails = async (req, res) => {
+  try {
+    const { type, id, tab } = req.params;
+
+    // 💡 فلتر ذكي ومباشر بالاعتماد على العلاقة الجديدة (districtId)
+    // إذا كان نوع العقد "قطاع"، نجلب كل الملكيات التي تنتمي لأحياء تابعة لهذا القطاع (علاقة متداخلة).
+    // إذا كان "حي"، نجلب الملكيات المرتبطة بهذا الحي مباشرة.
+    const ownershipWhere =
+      type === "sector"
+        ? { districtNode: { sectorId: id } }
+        : { districtId: id };
+
+    // ===============================================
+    // 📊 1. تاب الإحصائيات (Stats)
+    // ===============================================
+    if (tab === "stats") {
+      const transactions = await prisma.transaction.findMany({
+        where: { ownership: ownershipWhere }, // 👈 استخدام الفلتر الجديد المباشر
+        select: {
+          status: true,
+          duration: true,
+          clientId: true,
+          ownership: { select: { districtNode: { select: { name: true } } } }, // جلب اسم الحي عبر العلاقة
+        },
+      });
+
+      const totalTxs = transactions.length || 1;
+
+      const statusCounts = {
+        "قيد المعالجة": 0,
+        جديدة: 0,
+        مكتملة: 0,
+        ملغاة: 0,
+        معلقة: 0,
+      };
+      transactions.forEach((t) => {
+        let st = "جديدة";
+        if (t.status === "Pending") st = "قيد المعالجة";
+        if (t.status === "Draft") st = "جديدة";
+        if (t.status === "Completed") st = "مكتملة";
+        if (t.status === "Cancelled") st = "ملغاة";
+        statusCounts[st] = (statusCounts[st] || 0) + 1;
+      });
+
+      const statusDistribution = [
+        {
+          status: "قيد المعالجة",
+          count: statusCounts["قيد المعالجة"],
+          percent: Math.round((statusCounts["قيد المعالجة"] / totalTxs) * 100),
+          color: "rgb(202, 138, 4)",
+        },
+        {
+          status: "جديدة",
+          count: statusCounts["جديدة"],
+          percent: Math.round((statusCounts["جديدة"] / totalTxs) * 100),
+          color: "rgb(37, 99, 235)",
+        },
+        {
+          status: "مكتملة",
+          count: statusCounts["مكتملة"],
+          percent: Math.round((statusCounts["مكتملة"] / totalTxs) * 100),
+          color: "rgb(22, 163, 74)",
+        },
+        {
+          status: "معلقة",
+          count: statusCounts["معلقة"],
+          percent: Math.round((statusCounts["معلقة"] / totalTxs) * 100),
+          color: "rgb(107, 114, 128)",
+        },
+        {
+          status: "ملغاة",
+          count: statusCounts["ملغاة"],
+          percent: Math.round((statusCounts["ملغاة"] / totalTxs) * 100),
+          color: "rgb(220, 38, 38)",
+        },
+      ].sort((a, b) => b.count - a.count);
+
+      const distCounts = {};
+      transactions.forEach((t) => {
+        const dName = t.ownership?.districtNode?.name || "غير محدد"; // 👈 الاسم من الـ Node
+        distCounts[dName] = (distCounts[dName] || 0) + 1;
+      });
+
+      const topDistricts = Object.entries(distCounts)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([name, count]) => ({
+          name,
+          count,
+          percent: Math.round((count / totalTxs) * 100),
+        }));
+
+      const completedTxs = transactions.filter((t) => t.duration);
+      const avgTime = completedTxs.length
+        ? Math.round(
+            completedTxs.reduce((sum, t) => sum + t.duration, 0) /
+              completedTxs.length,
+          )
+        : 0;
+
+      const clientTxCounts = {};
+      transactions.forEach((t) => {
+        clientTxCounts[t.clientId] = (clientTxCounts[t.clientId] || 0) + 1;
+      });
+      const totalClients = Object.keys(clientTxCounts).length;
+      const returningClients = Object.values(clientTxCounts).filter(
+        (count) => count > 1,
+      ).length;
+      const clientReturnRate =
+        totalClients > 0
+          ? Math.round((returningClients / totalClients) * 100)
+          : 0;
+
+      return res.json({
+        avgTime,
+        clientReturnRate,
+        statusDistribution,
+        topDistricts,
+      });
+    }
+
+    // ===============================================
+    // 📄 2. تاب المعاملات (Transactions)
+    // ===============================================
+    if (tab === "transactions") {
+      const transactions = await prisma.transaction.findMany({
+        where: { ownership: ownershipWhere }, // 👈 استخدام الفلتر المباشر
+        include: {
+          client: { select: { name: true } },
+          ownership: {
+            select: {
+              districtNode: { select: { name: true } },
+              planNumber: true,
+            },
+          },
+          transactionEmployees: {
+            include: { employee: { select: { name: true } } },
+            take: 1,
+          },
+        },
+        orderBy: { createdAt: "desc" },
+        take: 50,
+      });
+
+      const formattedData = transactions.map((t) => {
+        let clientName = "غير محدد";
+        if (t.client?.name) {
+          const parsedName =
+            typeof t.client.name === "string"
+              ? JSON.parse(t.client.name)
+              : t.client.name;
+          clientName = parsedName.ar || "غير محدد";
+        }
+
+        let statusAr = "جديدة";
+        if (t.status === "Pending") statusAr = "قيد المعالجة";
+        if (t.status === "Completed") statusAr = "مكتملة";
+        if (t.status === "Cancelled") statusAr = "ملغاة";
+
+        return {
+          id: t.id,
+          date: t.createdAt.toISOString().split("T")[0],
+          ref: t.transactionCode || "بدون مرجع",
+          client: clientName,
+          service: t.category || "عامة",
+          district: t.ownership?.districtNode?.name || "غير محدد", // 👈 من العلاقة
+          street: t.ownership?.planNumber || "غير محدد",
+          status: statusAr,
+          value: t.totalFees ? t.totalFees.toLocaleString("ar-SA") : "0",
+          assignee: t.transactionEmployees?.[0]?.employee?.name || "غير مسند",
+        };
+      });
+
+      return res.json(formattedData);
+    }
+
+    // ===============================================
+    // 🏠 3. تاب الملكيات (Properties)
+    // ===============================================
+    if (tab === "properties") {
+      const properties = await prisma.ownershipFile.findMany({
+        where: ownershipWhere, // 👈 استخدام الفلتر المباشر
+        include: {
+          client: { select: { name: true } },
+          districtNode: { select: { name: true } }, // 👈 جلب اسم الحي
+        },
+        orderBy: { createdAt: "desc" },
+        take: 50,
+      });
+
+      const formattedData = properties.map((p) => {
+        let clientName = "غير محدد";
+        if (p.client?.name) {
+          const parsedName =
+            typeof p.client.name === "string"
+              ? JSON.parse(p.client.name)
+              : p.client.name;
+          clientName = parsedName.ar || "غير محدد";
+        }
+
+        return {
+          id: p.id,
+          deedNumber: p.deedNumber || "لا يوجد صك",
+          owner: clientName,
+          type: p.city ? `صك بمدينة ${p.city}` : "غير محدد",
+          district: p.districtNode?.name || "غير محدد", // 👈 من العلاقة
+          street: p.planNumber || "غير محدد",
+          area: p.area ? p.area.toLocaleString("ar-SA") : "0",
+          status: p.status === "Active" ? "مسجلة" : "معلقة",
+          lastUpdate: p.updatedAt.toISOString().split("T")[0],
+        };
+      });
+
+      return res.json(formattedData);
+    }
+
+    // ===============================================
+    // 👥 4. تاب العملاء (Clients)
+    // ===============================================
+    if (tab === "clients") {
+      const clients = await prisma.client.findMany({
+        where: {
+          ownerships: { some: ownershipWhere }, // 👈 استخدام الفلتر المباشر بكل قوة
+        },
+        include: {
+          _count: { select: { transactions: true } },
+          transactions: {
+            orderBy: { createdAt: "desc" },
+            take: 1,
+            select: { createdAt: true },
+          },
+          ownerships: {
+            select: { districtNode: { select: { name: true } } },
+            take: 1,
+          }, // لمعرفة الحي
+        },
+        take: 50,
+      });
+
+      const formattedData = clients.map((c) => {
+        let clientName = "غير محدد";
+        if (c.name) {
+          const parsedName =
+            typeof c.name === "string" ? JSON.parse(c.name) : c.name;
+          clientName = parsedName.ar || c.officialNameAr || "غير محدد";
+        }
+
+        return {
+          id: c.id,
+          name: clientName,
+          code: c.clientCode,
+          district: c.ownerships[0]?.districtNode?.name || "متعدد", // 👈 اسم الحي من أول ملكية
+          sector: type === "sector" ? "القطاع المحدد" : "قطاع الرياض",
+          txCount: c._count.transactions,
+          lastTxDate:
+            c.transactions.length > 0
+              ? c.transactions[0].createdAt.toISOString().split("T")[0]
+              : "لا يوجد",
+          source: c.category || "مباشر",
+          phone: c.mobile || "غير متوفر",
+        };
+      });
+
+      return res.json(formattedData);
+    }
+    // ===============================================
+    // 🛣️ 5. تاب الشوارع (Streets) الحقيقية
+    // ===============================================
+    if (tab === "streets") {
+      const streets = await prisma.riyadhStreet.findMany({
+        where: type === "sector" ? { sectorId: id } : { districtId: id },
+        orderBy: { createdAt: "desc" },
+      });
+      return res.json(streets);
+    }
+
+    // ===============================================
+    // 📂 6. تاب الوسائط والملفات (Media) الحقيقية
+    // ===============================================
+    if (tab === "media") {
+      const attachments = await prisma.attachment.findMany({
+        where: type === "sector" ? { sectorId: id } : { districtId: id },
+        include: { uploadedBy: { select: { name: true } } },
+        orderBy: { createdAt: "desc" },
+      });
+
+      const formattedMedia = attachments.map((att) => ({
+        id: att.id,
+        name: att.fileName,
+        type: att.fileType.includes("pdf")
+          ? "PDF"
+          : att.fileType.includes("image")
+            ? "صورة"
+            : "ملف",
+        size: (att.fileSize / (1024 * 1024)).toFixed(2), // بالميجا بايت
+        date: att.createdAt.toISOString().split("T")[0],
+        source: att.uploadedBy?.name || "النظام",
+        url: att.filePath,
+      }));
+      return res.json(formattedMedia);
+    }
+
+    // ===============================================
+    // 📝 7. تاب الملاحظات والاشتراطات والسجل
+    // ===============================================
+    const nodeData =
+      type === "sector"
+        ? await prisma.riyadhSector.findUnique({
+            where: { id },
+            select: { notes: true, regulations: true, auditLogs: true },
+          })
+        : await prisma.riyadhDistrict.findUnique({
+            where: { id },
+            select: { notes: true, regulations: true, auditLogs: true },
+          });
+
+    if (tab === "notes") return res.json(nodeData?.notes || []);
+    if (tab === "regulations") return res.json(nodeData?.regulations || []);
+    if (tab === "audit") return res.json(nodeData?.auditLogs || []);
+    res.json([]);
+  } catch (error) {
+    console.error("Node Details Error:", error);
+    res.status(500).json({ message: "فشل جلب التفاصيل", error: error.message });
+  }
+};
+
+// إضافة ملاحظة أو اشتراط أو ملف
+const addNodeDetail = async (req, res) => {
+  try {
+    const { type, id, tab } = req.params; // tab = 'notes' أو 'regulations'
+    const payload = req.body;
+
+    const model = type === 'sector' ? prisma.riyadhSector : prisma.riyadhDistrict;
+    const currentNode = await model.findUnique({ where: { id }, select: { [tab]: true, auditLogs: true } });
+    
+    const currentList = Array.isArray(currentNode[tab]) ? currentNode[tab] : [];
+    const newList = [{ id: Date.now().toString(), ...payload, createdAt: new Date().toISOString() }, ...currentList];
+
+    // تسجيل العملية في سجل التدقيق (Audit Log)
+    const currentAudit = Array.isArray(currentNode.auditLogs) ? currentNode.auditLogs : [];
+    const newAudit = [{
+      id: Date.now().toString(),
+      user: req.user?.name || "مدير النظام",
+      action: tab === 'notes' ? "إضافة ملاحظة" : "إضافة اشتراط",
+      newValue: payload.title || payload.type,
+      date: new Date().toLocaleString('ar-SA'),
+    }, ...currentAudit];
+
+    await model.update({
+      where: { id },
+      data: { [tab]: newList, auditLogs: newAudit }
+    });
+
+    res.json({ message: "تمت الإضافة بنجاح" });
+  } catch (error) {
+    res.status(500).json({ message: "حدث خطأ", error: error.message });
+  }
+};
+
+// ===================================================
+// 19. رفع الملفات والوسائط (Media Upload)
+// ===================================================
+const uploadMedia = async (req, res) => {
+  try {
+    const { sectorId, districtId } = req.body;
+    const file = req.file; // هذا الملف القادم من multer
+
+    if (!file) {
+      return res.status(400).json({ message: "لم يتم إرفاق أي ملف" });
+    }
+
+    // 💡 ملحوظة: جدول Attachment يتطلب uploadedById (رقم الموظف)
+    // إذا لم يكن لديك نظام تسجيل دخول (Auth) يعمل حالياً، سنجلب أول موظف من الداتابيز لتجنب الأخطاء
+    let uploaderId = req.user?.id; 
+    if (!uploaderId) {
+      const defaultEmployee = await prisma.employee.findFirst();
+      if (!defaultEmployee) {
+        return res.status(400).json({ message: "لا يوجد أي موظف مسجل في النظام لربط الملف به!" });
+      }
+      uploaderId = defaultEmployee.id;
+    }
+
+    // إنشاء السجل في قاعدة البيانات
+    const newAttachment = await prisma.attachment.create({
+      data: {
+        fileName: file.originalname,
+        filePath: `/uploads/media/${file.filename}`, // المسار الذي سيتم عرضه في الفرونت إند
+        fileType: file.mimetype,
+        fileSize: file.size,
+        uploadedById: uploaderId, // الموظف الذي قام بالرفع
+        sectorId: sectorId || null,     // ربط بالقطاع إذا تم التمرير
+        districtId: districtId || null, // ربط بالحي إذا تم التمرير
+      }
+    });
+
+    res.status(201).json({ message: "تم الرفع بنجاح", data: newAttachment });
+  } catch (error) {
+    console.error("Upload Error:", error);
+    res.status(500).json({ message: "فشل حفظ الملف", error: error.message });
+  }
+};
+
+
 // لا تنسَ التصدير
 module.exports = {
   createStreet,
@@ -766,4 +1188,7 @@ module.exports = {
   deleteSector,
   getDistrictsList,
   deleteDistrict,
+  getNodeDetails,
+  addNodeDetail,
+  uploadMedia
 };

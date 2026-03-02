@@ -323,6 +323,9 @@ model OwnershipFile {
   blockNumber       String?            // رقم البلوك (تمت إضافته)
   plotNumber        String?            // رقم القطعة
   area              Float?             // المساحة بالمتر المربع
+
+  districtId       String?
+  districtNode     RiyadhDistrict?    @relation(fields: [districtId], references: [id])
   
   // --- إحداثيات (لخرائط جوجل أو GIS) ---
   centerLat         Float?
@@ -352,6 +355,7 @@ model OwnershipFile {
   @@index([deedNumber])
   @@index([district])
   @@index([clientId])
+  @@index([districtId])
 }
 
 // ===============================================
@@ -1051,6 +1055,12 @@ model Attachment {
   client         Client?      @relation(fields: [clientId], references: [id])
   clientId       String?
 
+  sectorId    String?
+  sector      RiyadhSector?   @relation(fields: [sectorId], references: [id], onDelete: Cascade)
+  
+  districtId  String?
+  district    RiyadhDistrict? @relation(fields: [districtId], references: [id], onDelete: Cascade)
+
   employee       Employee?    @relation("EmployeeAttachments", fields: [employeeId], references: [id], onDelete: Cascade)
   employeeId     String?
   quotation      Quotation?   @relation(fields: [quotationId], references: [id], onDelete: Cascade)
@@ -1128,6 +1138,10 @@ model RiyadhSector {
   officialLink   String?
   mapImage       String?
   satelliteImage String?
+  notes       Json? @default("[]") // لتخزين الملاحظات
+  regulations Json? @default("[]") // لتخزين الاشتراطات
+  auditLogs   Json? @default("[]") // لتخزين سجل التعديلات
+  attachments Attachment[]         // ربط المرفقات
 }
 
 model RiyadhPlan {
@@ -1158,10 +1172,15 @@ model RiyadhDistrict {
 
   streets   RiyadhStreet[]
   plans          RiyadhPlan[]
+  ownerships     OwnershipFile[]
   createdAt DateTime       @default(now())
   officialLink   String?
   mapImage       String?
   satelliteImage String?
+  notes       Json? @default("[]") // لتخزين الملاحظات
+  regulations Json? @default("[]") // لتخزين الاشتراطات
+  auditLogs   Json? @default("[]") // لتخزين سجل التعديلات
+  attachments Attachment[]         // ربط المرفقات
 }
 
 model RiyadhStreet {
