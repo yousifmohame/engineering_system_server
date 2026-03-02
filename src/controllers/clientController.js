@@ -340,15 +340,17 @@ const createClient = async (req, res) => {
 
       attachmentsData = { create: attachmentsArray };
     }
-
+    // 💡 هذا هو الحل السحري لمنع مشكلة تكرار الإيميل الفارغ
+    const finalEmail = email && email.trim() !== "" ? email.trim() : null;
     // ==========================================
     // 4. الحفظ في قاعدة البيانات
     // ==========================================
     const newClient = await prisma.client.create({
+      
       data: {
         clientCode: generatedClientCode,
         mobile,
-        email,
+        email: finalEmail,
         idNumber,
         name: parsedName,
         contact: parsedContact,
