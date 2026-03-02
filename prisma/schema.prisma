@@ -247,7 +247,7 @@ model Client {
   clientCode       String  @unique 
 
   // --- بيانات الاتصال الأساسية ---
-  mobile           String  @unique
+  mobile           String 
   email            String? @unique
   idNumber         String  @unique // الهوية الوطنية / السجل / رقم الوقف
 
@@ -1117,49 +1117,81 @@ model FollowUpTask {
   @@index([transactionId])
 }
 
-// وحدة شوارع الرياض
+// وحدة شوارع وتقسيم الرياض
 model RiyadhSector {
-  id        String         @id @default(cuid())
-  name      String         @unique 
+  id        String           @id @default(cuid())
+  code      String           @unique // 👈 جديد: مثل SEC-C
+  name      String           @unique 
+  districts RiyadhDistrict[] // 👈 جديد: القطاع يحتوي على أحياء
   streets   RiyadhStreet[]
-  createdAt DateTime       @default(now())
+  createdAt DateTime         @default(now())
+  officialLink   String?
+  mapImage       String?
+  satelliteImage String?
+}
+
+model RiyadhPlan {
+  id            String   @id @default(cuid())
+  planNumber    String   @unique // رقم المخطط الرسمي (مثال: 2345)
+  oldNumber     String?  // الترقيم القديم
+  internalCode  String   @unique // رمز داخلي (مثال: PLAN-C-001)
+  status        String   // معتمد، قيد المراجعة، ملغى، معدل
+  isWithout     Boolean  @default(false) // هل هو "بدون" مخطط؟
+  properties    Int      @default(0) // عدد الملكيات (للتخزين المؤقت قبل الربط الحقيقي)
+  plots         Int      @default(0) // عدد القطع
+  attachments   Int      @default(0) // عدد المرفقات
+  
+  // علاقة متعدد إلى متعدد مع الأحياء
+  districts     RiyadhDistrict[] 
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 }
 
 model RiyadhDistrict {
   id        String         @id @default(cuid())
+  code      String         @unique // 👈 جديد: مثل NBH-C-001
   name      String         @unique 
+  
+  sector    RiyadhSector   @relation(fields: [sectorId], references: [id]) // 👈 جديد: الحي ينتمي لقطاع
+  sectorId  String
+
   streets   RiyadhStreet[]
+  plans          RiyadhPlan[]
   createdAt DateTime       @default(now())
+  officialLink   String?
+  mapImage       String?
+  satelliteImage String?
 }
 
 model RiyadhStreet {
-  id               String    @id @default(cuid())
-  streetCode       String    @unique 
-  name             String
+  id                 String         @id @default(cuid())
+  streetCode         String         @unique 
+  name               String
 
-  sector           RiyadhSector   @relation(fields: [sectorId], references: [id])
-  sectorId         String
+  sector             RiyadhSector   @relation(fields: [sectorId], references: [id])
+  sectorId           String
   
-  district         RiyadhDistrict @relation(fields: [districtId], references: [id])
-  districtId       String
+  district           RiyadhDistrict @relation(fields: [districtId], references: [id])
+  districtId         String
 
-  type             String    
-  width            Float
-  length           Float
-  lanes            Int
-  status           String    
+  type               String         
+  width              Float
+  length             Float
+  lanes              Int
+  status             String         
   
-  lighting         Boolean  @default(true)
-  sidewalks        Boolean  @default(true)
+  lighting           Boolean  @default(true)
+  sidewalks          Boolean  @default(true)
 
-  centerLat        Float
-  centerLng        Float
+  centerLat          Float
+  centerLng          Float
 
   hasSpecialRegulation Boolean @default(false)
   regulationDetails    Json?    
   
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 
   @@index([sectorId])
   @@index([districtId])
