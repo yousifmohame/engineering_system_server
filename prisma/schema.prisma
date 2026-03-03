@@ -38,13 +38,13 @@ model Employee {
   frozenReason      String?
   password          String
   refreshToken      String?
-  permissionsCount  Int?      // عدد الصلاحيات المخصصة
-  
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
+  permissionsCount  Int? // عدد الصلاحيات المخصصة
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // --- العلاقات الفرعية للموظف ---
-  attachments       Attachment[]       @relation("EmployeeAttachments")
+  attachments       Attachment[]            @relation("EmployeeAttachments")
   attendanceRecords EmployeeAttendance[]
   leaveRequests     EmployeeLeaveRequest[]
   skills            EmployeeSkill[]
@@ -53,39 +53,39 @@ model Employee {
   promotions        EmployeePromotion[]
 
   // --- علاقات العمل والمهام ---
-  roles              JobRole[]           @relation("EmployeeToJobRole")
-  specialPermissions Permission[]        @relation("EmployeeToSpecialPermission")
+  roles              JobRole[]    @relation("EmployeeToJobRole")
+  specialPermissions Permission[] @relation("EmployeeToSpecialPermission")
   managedProjects    Project[]
-  assignedTasks      Task[]              @relation("EmployeeToTask")
-  
+  assignedTasks      Task[]       @relation("EmployeeToTask")
+
   // --- المراسلات ---
-  sentMessages        Message[]           @relation("SenderToMessage")
-  conversations       Conversation[]      @relation("EmployeeToConversation")
-  
+  sentMessages  Message[]      @relation("SenderToMessage")
+  conversations Conversation[] @relation("EmployeeToConversation")
+
   // --- النظام المالي والإداري ---
-  uploadedAttachments    Attachment[]
-  paymentsReceived       Payment[]               @relation("EmployeeToPayment")
-  activitiesPerformed    ActivityLog[]           @relation("EmployeeToActivityLog")
-  
+  uploadedAttachments Attachment[]
+  paymentsReceived    Payment[]     @relation("EmployeeToPayment")
+  activitiesPerformed ActivityLog[] @relation("EmployeeToActivityLog")
+
   // --- إدارة الوثائق ---
-  ownedDocuments         Document[]              @relation("OwnedDocuments")
-  docPermissions         DocumentPermission[]    @relation("GrantedPermissions")
+  ownedDocuments         Document[]               @relation("OwnedDocuments")
+  docPermissions         DocumentPermission[]     @relation("GrantedPermissions")
   documentActivities     DocumentActivity[]
-  documentAccess         DocumentPermission[]    // الصلاحيات الممنوحة للموظف
+  documentAccess         DocumentPermission[] // الصلاحيات الممنوحة للموظف
   createdClassifications DocumentClassification[] @relation("CreatedClassifications")
-  
+
   // --- المعاملات ---
   transactionAssignments TransactionEmployee[]
 }
 
 // نموذج لسجل الحضور
 model EmployeeAttendance {
-  id         String    @id @default(cuid())
-  date       DateTime  @db.Date
-  status     String    // (Present, Absent, On Leave)
-  checkIn    DateTime? @db.Time
-  checkOut   DateTime? @db.Time
-  notes      String?
+  id       String    @id @default(cuid())
+  date     DateTime  @db.Date
+  status   String // (Present, Absent, On Leave)
+  checkIn  DateTime? @db.Time
+  checkOut DateTime? @db.Time
+  notes    String?
 
   employee   Employee @relation(fields: [employeeId], references: [id])
   employeeId String
@@ -95,12 +95,12 @@ model EmployeeAttendance {
 
 // نموذج لطلبات الإجازات
 model EmployeeLeaveRequest {
-  id         String   @id @default(cuid())
-  type       String   // (سنوية, مرضية, ...)
-  startDate  DateTime @db.Date
-  endDate    DateTime @db.Date
-  status     String   @default("Pending") // (Pending, Approved, Rejected)
-  reason     String?
+  id        String   @id @default(cuid())
+  type      String // (سنوية, مرضية, ...)
+  startDate DateTime @db.Date
+  endDate   DateTime @db.Date
+  status    String   @default("Pending") // (Pending, Approved, Rejected)
+  reason    String?
 
   employee   Employee @relation(fields: [employeeId], references: [id])
   employeeId String
@@ -110,10 +110,10 @@ model EmployeeLeaveRequest {
 
 // نموذج لمهارات الموظف
 model EmployeeSkill {
-  id         String @id @default(cuid())
-  category   String // (فنية, إدارية, لغات)
-  skill      String // (AutoCAD, React, إدارة مشاريع)
-  level      String // (مبتدئ, متوسط, خبير)
+  id       String @id @default(cuid())
+  category String // (فنية, إدارية, لغات)
+  skill    String // (AutoCAD, React, إدارة مشاريع)
+  level    String // (مبتدئ, متوسط, خبير)
 
   employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
   employeeId String
@@ -124,8 +124,8 @@ model EmployeeSkill {
 // نموذج لشهادات الموظف
 model EmployeeCertification {
   id         String    @id @default(cuid())
-  name       String    // (PMP, شهادة AWS)
-  authority  String    // (PMI, Amazon)
+  name       String // (PMP, شهادة AWS)
+  authority  String // (PMI, Amazon)
   issueDate  DateTime  @db.Date
   expiryDate DateTime? @db.Date
 
@@ -139,8 +139,8 @@ model EmployeeCertification {
 model EmployeeEvaluation {
   id        String   @id @default(cuid())
   date      DateTime @db.Date
-  evaluator String   // (اسم المُقيّم أو الإدارة)
-  rating    Float    // (التقييم من 5)
+  evaluator String // (اسم المُقيّم أو الإدارة)
+  rating    Float // (التقييم من 5)
   comments  String?
 
   employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
@@ -172,7 +172,7 @@ model JobRole {
   nameAr           String
   nameEn           String?
   description      String?
-  responsibilities String[] 
+  responsibilities String[]
   level            String?
   department       String?
   status           String   @default("active")
@@ -180,59 +180,59 @@ model JobRole {
   allowMultiple    Boolean  @default(true)
   allowMultiRole   Boolean  @default(true)
   order            Int?
-  
-  createdDate      DateTime @default(now())
-  lastModified     DateTime @updatedAt
-  modifiedBy       String?
-  
-  parentRole       JobRole?  @relation("RoleHierarchy", fields: [parentRoleId], references: [id])
-  parentRoleId     String?
-  childRoles       JobRole[] @relation("RoleHierarchy")
 
-  employees        Employee[]   @relation("EmployeeToJobRole")
-  permissions      Permission[] @relation("JobRoleToPermission")
+  createdDate  DateTime @default(now())
+  lastModified DateTime @updatedAt
+  modifiedBy   String?
+
+  parentRole   JobRole?  @relation("RoleHierarchy", fields: [parentRoleId], references: [id])
+  parentRoleId String?
+  childRoles   JobRole[] @relation("RoleHierarchy")
+
+  employees   Employee[]   @relation("EmployeeToJobRole")
+  permissions Permission[] @relation("JobRoleToPermission")
 }
 
 // ------ نموذج الصلاحيات (شاشة 902) ------
 model Permission {
-  id             String    @id @default(cuid())
-  code           String    @unique
-  name           String
-  description    String?
-  level          String
-  screenId       String?
-  screenName     String?
-  tabId          String?
-  tabName        String?
-  actionType     String?
-  status         String    @default("active")
-  
-  frozenType     String?
-  frozenDate     DateTime?
-  frozenUntil    DateTime?
-  frozenBy       String?
-  frozenReason   String?
-  
-  createdDate    DateTime  @default(now())
-  lastModified   DateTime  @updatedAt
-  modifiedBy     String?
-  
-  roles          JobRole[]         @relation("JobRoleToPermission")
-  employees      Employee[]        @relation("EmployeeToSpecialPermission")
-  groups         PermissionGroup[] @relation("GroupToPermission")
+  id          String  @id @default(cuid())
+  code        String  @unique
+  name        String
+  description String?
+  level       String
+  screenId    String?
+  screenName  String?
+  tabId       String?
+  tabName     String?
+  actionType  String?
+  status      String  @default("active")
+
+  frozenType   String?
+  frozenDate   DateTime?
+  frozenUntil  DateTime?
+  frozenBy     String?
+  frozenReason String?
+
+  createdDate  DateTime @default(now())
+  lastModified DateTime @updatedAt
+  modifiedBy   String?
+
+  roles     JobRole[]         @relation("JobRoleToPermission")
+  employees Employee[]        @relation("EmployeeToSpecialPermission")
+  groups    PermissionGroup[] @relation("GroupToPermission")
 }
 
 // ------ نموذج مجموعات الصلاحيات ------
 model PermissionGroup {
-  id          String   @id @default(cuid())
-  code        String   @unique
+  id          String  @id @default(cuid())
+  code        String  @unique
   name        String
   description String?
 
   permissions Permission[] @relation("GroupToPermission")
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([code])
 }
@@ -243,48 +243,48 @@ model PermissionGroup {
 
 // ------ نموذج العميل (شاشة 300) ------
 model Client {
-  id               String  @id @default(cuid())
-  clientCode       String  @unique 
+  id         String @id @default(cuid())
+  clientCode String @unique
 
   // --- بيانات الاتصال الأساسية ---
-  mobile           String 
-  email            String? @unique
-  idNumber         String  @unique // الهوية الوطنية / السجل / رقم الوقف
+  mobile   String
+  email    String? @unique
+  idNumber String  @unique // الهوية الوطنية / السجل / رقم الوقف
 
   // --- بيانات JSON للمرونة ---
-  name             Json  // { ar: "...", en: "...", details: {...} }
-  contact          Json 
-  address          Json? 
-  identification   Json  // (تحتوي على العمر، مكان الميلاد، التاريخ الهجري والميلادي)
-  representative   Json? // (بيانات الوكيل/الناظر/المفوض)
-  heirs            Json? // 👈 1. الإضافة الجديدة: مصفوفة بيانات الورثة 
+  name           Json // { ar: "...", en: "...", details: {...} }
+  contact        Json
+  address        Json?
+  identification Json // (تحتوي على العمر، مكان الميلاد، التاريخ الهجري والميلادي)
+  representative Json? // (بيانات الوكيل/الناظر/المفوض)
+  heirs          Json? // 👈 1. الإضافة الجديدة: مصفوفة بيانات الورثة 
 
   // --- حقول WMS الصريحة (للسرعة والفلترة) ---
-  officialNameAr   String? @map("official_name_ar") 
-  riskTier         String  @default("LOW")          
-  profilePicture   String? // 👈 2. الإضافة الجديدة: مسار صورة العميل / شعار الوقف أو الشركة
-  
-  // --- التفاصيل ---
-  type             String // (فرد، شركة، جهة حكومية، ورثة، وقف، مكتب هندسي)
-  category         String? 
-  nationality      String?
-  occupation       String?
-  company          String?
-  taxNumber        String?
-  rating           Int?    @default(3)
-  secretRating     Int?    @default(50)
-  grade            String? // (أ, ب, ج)
-  gradeScore       Int?
-  completionPercentage Float?
-  isActive         Boolean @default(true)
-  notes            String?
-  createdBy        String?
+  officialNameAr String? @map("official_name_ar")
+  riskTier       String  @default("LOW")
+  profilePicture String? // 👈 2. الإضافة الجديدة: مسار صورة العميل / شعار الوقف أو الشركة
 
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  // --- التفاصيل ---
+  type                 String // (فرد، شركة، جهة حكومية، ورثة، وقف، مكتب هندسي)
+  category             String?
+  nationality          String?
+  occupation           String?
+  company              String?
+  taxNumber            String?
+  rating               Int?    @default(3)
+  secretRating         Int?    @default(50)
+  grade                String? // (أ, ب, ج)
+  gradeScore           Int?
+  completionPercentage Float?
+  isActive             Boolean @default(true)
+  notes                String?
+  createdBy            String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // --- العلاقات ---
-  ownerships   OwnershipFile[] 
+  ownerships   OwnershipFile[]
   transactions Transaction[]
   contracts    Contract[]
   quotations   Quotation[]
@@ -301,57 +301,58 @@ model ClientClassification {
   isActive    Boolean @default(true)
 }
 
-
 // ===============================================
 // 3. نموذج الملكيات (Ownership / Deeds Module)
 // ===============================================
 
 model OwnershipFile {
-  id                String             @id @default(cuid())
-  code              String             @unique // كود مرجعي للنظام OWN-2026-xxx
-  
-  // --- تفاصيل الصك (Deed Details) ---
-  deedNumber        String?            
-  deedDate          DateTime?          @db.Date
-  issuingAuthority  String?            // الجهة المصدرة (كتابة العدل الأولى بالرياض مثلاً)
-  status            String             @default("Active") // Active, Sold, Mortgage
-  
-  // --- البيانات المكانية (Spatial Data) ---
-  city              String?
-  district          String?
-  planNumber        String?            // رقم المخطط
-  blockNumber       String?            // رقم البلوك (تمت إضافته)
-  plotNumber        String?            // رقم القطعة
-  area              Float?             // المساحة بالمتر المربع
+  id   String @id @default(cuid())
+  code String @unique // كود مرجعي للنظام OWN-2026-xxx
 
-  districtId       String?
-  districtNode     RiyadhDistrict?    @relation(fields: [districtId], references: [id])
-  
+  // --- تفاصيل الصك (Deed Details) ---
+  deedNumber       String?
+  deedDate         DateTime? @db.Date
+  issuingAuthority String? // الجهة المصدرة (كتابة العدل الأولى بالرياض مثلاً)
+  status           String    @default("Active") // Active, Sold, Mortgage
+
+  // --- البيانات المكانية (Spatial Data) ---
+  city        String?
+  district    String?
+  planNumber  String? // رقم المخطط
+  blockNumber String? // رقم البلوك (تمت إضافته)
+  plotNumber  String? // رقم القطعة
+  area        Float? // المساحة بالمتر المربع
+
+  districtId   String?
+  districtNode RiyadhDistrict? @relation(fields: [districtId], references: [id])
+
   // --- إحداثيات (لخرائط جوجل أو GIS) ---
-  centerLat         Float?
-  centerLng         Float?
-  
-  notes             String?
+  centerLat Float?
+  centerLng Float?
+
+  contracts Contract[]
+
+  notes String?
 
   documents   Json? @default("[]") // الوثائق
   plots       Json? @default("[]") // القطع
   owners      Json? @default("[]") // الملاك والحصص
   boundaries  Json? @default("[]") // الحدود والأطوال
-  aiData      Json?                // بيانات الذكاء الاصطناعي المستخرجة
+  aiData      Json? // بيانات الذكاء الاصطناعي المستخرجة
   attachments Json? @default("[]") // المرفقات
-  
-  // --- العلاقات ---
-  clientId          String
-  client            Client             @relation(fields: [clientId], references: [id])
-  
-  transactions      Transaction[]      // المعاملات المرتبطة بهذا الصك
-  
-  aiLogs            AIAnalysisLog[]    // سجل عمليات التحليل لهذا الصك
-  quotations        Quotation[]
 
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
-  
+  // --- العلاقات ---
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id])
+
+  transactions Transaction[] // المعاملات المرتبطة بهذا الصك
+
+  aiLogs     AIAnalysisLog[] // سجل عمليات التحليل لهذا الصك
+  quotations Quotation[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   @@index([deedNumber])
   @@index([district])
   @@index([clientId])
@@ -363,26 +364,26 @@ model OwnershipFile {
 // ===============================================
 
 model AIAnalysisLog {
-  id                String         @id @default(cuid())
-  
-  fileName          String         // اسم الملف المرفوع
-  filePath          String         // مسار الملف
-  fileSize          Int
-  
-  status            String         // Success, Failed
-  confidenceScore   Float?         // نسبة الدقة (0-100)
-  
-  extractedData     Json           // البيانات الخام المستخرجة (Raw JSON)
-  
+  id String @id @default(cuid())
+
+  fileName String // اسم الملف المرفوع
+  filePath String // مسار الملف
+  fileSize Int
+
+  status          String // Success, Failed
+  confidenceScore Float? // نسبة الدقة (0-100)
+
+  extractedData Json // البيانات الخام المستخرجة (Raw JSON)
+
   // هل تم اعتماد هذه البيانات وإنشاء صك بها؟
-  isApproved        Boolean        @default(false)
-  
+  isApproved Boolean @default(false)
+
   // ربط اختياري بالصك الذي تم إنشاؤه
-  ownershipId       String?
-  ownership         OwnershipFile? @relation(fields: [ownershipId], references: [id])
-  
-  performedBy       String?        // معرف الموظف الذي قام بالعملية
-  createdAt         DateTime       @default(now())
+  ownershipId String?
+  ownership   OwnershipFile? @relation(fields: [ownershipId], references: [id])
+
+  performedBy String? // معرف الموظف الذي قام بالعملية
+  createdAt   DateTime @default(now())
 }
 
 // ===============================================
@@ -397,43 +398,43 @@ model Project {
   status      String   @default("Pending")
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
-  
-  manager     Employee? @relation(fields: [managerId], references: [id])
-  managerId   String?
+
+  manager   Employee? @relation(fields: [managerId], references: [id])
+  managerId String?
 
   transactions Transaction[]
 }
 
 // ------ نموذج المعاملة (قلب النظام) ------
 model Transaction {
-  id              String    @id @default(cuid())
-  transactionCode String    @unique
-  title           String 
+  id              String @id @default(cuid())
+  transactionCode String @unique
+  title           String
 
   // --- النوع والقالب ---
-  transactionType    TransactionType? @relation(fields: [transactionTypeId], references: [id])
-  transactionTypeId  String?
+  transactionType   TransactionType? @relation(fields: [transactionTypeId], references: [id])
+  transactionTypeId String?
 
   // --- البيانات الأساسية ---
-  status       String  @default("Draft")
-  statusColor  String? @default("#6b7280")
-  priority     String? @default("متوسط")
-  description  String?
-  location     String?
-  deedNumber   String? // يمكن استبداله بالربط مع OwnershipFile
+  status                String  @default("Draft")
+  statusColor           String? @default("#6b7280")
+  priority              String? @default("متوسط")
+  description           String?
+  location              String?
+  deedNumber            String? // يمكن استبداله بالربط مع OwnershipFile
   projectClassification String?
 
   // --- بيانات التتبع والتقدم ---
-  category     String? 
-  complexity   String? 
-  duration     Int?      
-  progress     Float?  @default(0)
+  category   String?
+  complexity String?
+  duration   Int?
+  progress   Float?  @default(0)
 
   // --- البيانات المالية ---
-  totalFees       Float?  @default(0) 
-  paidAmount      Float?  @default(0)
-  remainingAmount Float?  @default(0)
-  fees            Json?    
+  totalFees       Float? @default(0)
+  paidAmount      Float? @default(0)
+  remainingAmount Float? @default(0)
+  fees            Json?
 
   // --- التفاصيل الفنية (JSON) ---
   floors               Json? @default("[]")
@@ -444,27 +445,27 @@ model Transaction {
   componentsExisting   Json? @default("[]")
   boundaries           Json? @default("[]")
   landArea             Json? @default("{}")
-  
-  authorities          String[] 
-  stages               Json?    
-  warnings             String[]
-  notes                Json? @default("{}")
-  approvals            Json? @default("{}")
-  requestPurposes      Json?
-  
+
+  authorities     String[]
+  stages          Json?
+  warnings        String[]
+  notes           Json?    @default("{}")
+  approvals       Json?    @default("{}")
+  requestPurposes Json?
+
   // --- العلاقات ---
-  client       Client    @relation(fields: [clientId], references: [id])
-  clientId     String
+  client   Client @relation(fields: [clientId], references: [id])
+  clientId String
 
   // علاقة جديدة مع الملكية (شاشة 310)
-  ownership    OwnershipFile? @relation(fields: [ownershipId], references: [id])
-  ownershipId  String?
+  ownership   OwnershipFile? @relation(fields: [ownershipId], references: [id])
+  ownershipId String?
 
-  project      Project? @relation(fields: [projectId], references: [id])
-  projectId    Int?
+  project   Project? @relation(fields: [projectId], references: [id])
+  projectId Int?
 
-  contract     Contract? @relation(fields: [contractId], references: [id])
-  contractId   String?
+  contract   Contract? @relation(fields: [contractId], references: [id])
+  contractId String?
 
   // --- المرفقات والمهام والموظفين ---
   attachments          Attachment[]
@@ -474,55 +475,55 @@ model Transaction {
   appointments         Appointment[]
   transactionEmployees TransactionEmployee[]
   followUpTasks        FollowUpTask[]
-  
+
   // --- تواريخ ---
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-  completedDate   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  completedDate DateTime?
 }
 
 // ------ نوع المعاملة (Configuration) ------
 model TransactionType {
-  id             String    @id @default(cuid())
-  code           String    @unique
-  name           String    @unique
-  description    String?
-  isActive       Boolean   @default(true)
+  id          String  @id @default(cuid())
+  code        String  @unique
+  name        String  @unique
+  description String?
+  isActive    Boolean @default(true)
 
   // تفاصيل الإعدادات
-  category       String? 
-  categoryAr     String? 
-  duration       Int?      @default(0)
-  estimatedCost  Float?    @default(0) 
-  complexity     String? 
+  category      String?
+  categoryAr    String?
+  duration      Int?    @default(0)
+  estimatedCost Float?  @default(0)
+  complexity    String?
 
-  defaultCosts   Json?
+  defaultCosts Json?
   // القيم الافتراضية
-  tasks          Json?    
-  documents      String[] 
-  authorities    String[] 
-  fees           Json?    
-  stages         Json?    
-  warnings       String[] 
-  notes          String[] 
+  tasks        Json?
+  documents    String[]
+  authorities  String[]
+  fees         Json?
+  stages       Json?
+  warnings     String[]
+  notes        String[]
 
-  transactions   Transaction[]
-  quotations     Quotation[]
+  transactions Transaction[]
+  quotations   Quotation[]
 }
 
 // ------ سجل الموظفين العاملين على المعاملة ------
 model TransactionEmployee {
-  id             String      @id @default(cuid())
-  
-  transaction    Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
-  transactionId  String
-  
-  employee       Employee    @relation(fields: [employeeId], references: [id])
-  employeeId     String
-  
-  role           String      // الدور في المعاملة (مهندس مصمم، مراجع، etc)
-  
-  createdAt      DateTime    @default(now())
+  id String @id @default(cuid())
+
+  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  transactionId String
+
+  employee   Employee @relation(fields: [employeeId], references: [id])
+  employeeId String
+
+  role String // الدور في المعاملة (مهندس مصمم، مراجع، etc)
+
+  createdAt DateTime @default(now())
 
   @@unique([transactionId, employeeId])
   @@index([transactionId])
@@ -535,7 +536,7 @@ model TransactionEmployee {
 
 model RequestPurpose {
   id          String  @id @default(cuid())
-  type        String  // 'brief' أو 'detailed'
+  type        String // 'brief' أو 'detailed'
   name        String
   nameEn      String
   description String?
@@ -545,39 +546,39 @@ model RequestPurpose {
 
   dynamicForm DynamicFormDefinition?
 
-  @@unique([type, name]) 
+  @@unique([type, name])
 }
 
 model DynamicFormDefinition {
-  id          String    @id @default(cuid())
-  name        String    @unique
+  id          String  @id @default(cuid())
+  name        String  @unique
   description String?
 
-  purpose     RequestPurpose @relation(fields: [purposeId], references: [id], onDelete: Cascade)
-  purposeId   String    @unique 
+  purpose   RequestPurpose @relation(fields: [purposeId], references: [id], onDelete: Cascade)
+  purposeId String         @unique
 
-  fields      DynamicFormField[]
+  fields DynamicFormField[]
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model DynamicFormField {
-  id               String  @id @default(cuid())
-  label            String  
-  fieldKey         String  
-  fieldType        String  
-  order            Int     @default(0) 
-  
-  optionsJson      Json? 
-  validationJson   Json? 
-  placeholder      String?
+  id        String @id @default(cuid())
+  label     String
+  fieldKey  String
+  fieldType String
+  order     Int    @default(0)
 
-  form             DynamicFormDefinition @relation(fields: [formId], references: [id], onDelete: Cascade)
-  formId           String
+  optionsJson    Json?
+  validationJson Json?
+  placeholder    String?
 
+  form   DynamicFormDefinition @relation(fields: [formId], references: [id], onDelete: Cascade)
+  formId String
+
+  @@unique([formId, fieldKey])
   @@index([formId])
-  @@unique([formId, fieldKey]) 
 }
 
 // ===============================================
@@ -585,49 +586,49 @@ model DynamicFormField {
 // ===============================================
 
 model Task {
-  id                String     @id @default(cuid())
-  taskNumber        String?    @unique
-  title             String
-  description       String?
-  status            String     @default("Pending")
-  dueDate           DateTime?
-  
-  priority          String?    @default("medium")
-  progress          Int?       @default(0)
-  category          String?
-  assignedById      String?    
-  receivedDate      DateTime?
-  completedDate     DateTime?
-  attachmentsCount  Int?       @default(0)
-  commentsCount     Int?       @default(0)
-  fees              Json?      
+  id          String    @id @default(cuid())
+  taskNumber  String?   @unique
+  title       String
+  description String?
+  status      String    @default("Pending")
+  dueDate     DateTime?
 
-  createdAt         DateTime   @default(now())
+  priority         String?   @default("medium")
+  progress         Int?      @default(0)
+  category         String?
+  assignedById     String?
+  receivedDate     DateTime?
+  completedDate    DateTime?
+  attachmentsCount Int?      @default(0)
+  commentsCount    Int?      @default(0)
+  fees             Json?
 
-  transaction       Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
-  transactionId     String
+  createdAt DateTime @default(now())
 
-  assignedTo        Employee? @relation("EmployeeToTask", fields: [assignedToId], references: [id])
-  assignedToId      String?
-  
-  @@index([assignedToId]) 
+  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  transactionId String
+
+  assignedTo   Employee? @relation("EmployeeToTask", fields: [assignedToId], references: [id])
+  assignedToId String?
+
+  @@index([assignedToId])
   @@index([transactionId])
 }
 
 model Appointment {
-  id             String      @id @default(cuid())
-  title          String      
-  date           DateTime    
-  type           String      
-  status         String      @default("scheduled") 
-  notes          String?     
-  location       String?     
-  
-  transaction    Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
-  transactionId  String
+  id       String   @id @default(cuid())
+  title    String
+  date     DateTime
+  type     String
+  status   String   @default("scheduled")
+  notes    String?
+  location String?
 
-  createdAt      DateTime    @default(now())
-  updatedAt      DateTime    @updatedAt
+  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  transactionId String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([transactionId])
 }
@@ -636,21 +637,25 @@ model Appointment {
 // نموذج قوالب العقود (Contract Templates)
 // ===============================================
 model ContractTemplate {
-  id          String   @id @default(cuid())
-  title       String   // اسم القالب (مثال: عقد فرد — خدمات هندسية)
-  description String?  // وصف القالب
-  clientType  String   // نوع العميل المستهدف (فرد، شركة، جهة حكومية)
-  serviceType String   // نوع الخدمة (رخصة بناء، إشراف، إلخ)
-  
-  hasRep      Boolean  @default(false) // هل يدعم وجود ممثل/وكيل؟
-  isProxy     Boolean  @default(false) // هل يدعم نيابة عن مكتب آخر؟
-  isDefault   Boolean  @default(false) // هل هذا القالب هو الافتراضي؟
-  
-  sections    Int      @default(1)     // عدد أقسام العقد
-  usesCount   Int      @default(0)     // عدد مرات استخدام هذا القالب
-  
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id          String  @id @default(cuid())
+  title       String // اسم القالب (مثال: عقد فرد — خدمات هندسية)
+  description String? // وصف القالب
+  clientType  String // نوع العميل المستهدف (فرد، شركة، جهة حكومية)
+  serviceType String // نوع الخدمة (رخصة بناء، إشراف، إلخ)
+
+  hasRep    Boolean @default(false) // هل يدعم وجود ممثل/وكيل؟
+  isProxy   Boolean @default(false) // هل يدعم نيابة عن مكتب آخر؟
+  isDefault Boolean @default(false) // هل هذا القالب هو الافتراضي؟
+
+  sections  Int @default(1) // عدد أقسام العقد
+  usesCount Int @default(0) // عدد مرات استخدام هذا القالب
+
+  clauses Json? @default("[]")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  contracts Contract[]
 }
 
 // ===============================================
@@ -658,21 +663,30 @@ model ContractTemplate {
 // ===============================================
 
 model Contract {
-  id             String    @id @default(cuid())
-  contractCode   String    @unique
-  title          String
-  startDate      DateTime
-  endDate        DateTime
-  totalValue     Float
-  status         String    @default("Active")
+  id           String   @id @default(cuid())
+  contractCode String   @unique
+  title        String
+  startDate    DateTime
+  endDate      DateTime
+  totalValue   Float
+  status       String   @default("Active")
 
-  client         Client    @relation(fields: [clientId], references: [id])
-  clientId       String
+  client   Client @relation(fields: [clientId], references: [id])
+  clientId String
 
-  transactions   Transaction[]
-  quotation      Quotation? @relation(fields: [quotationId], references: [id])
-  quotationId    String?    @unique
-  attachments    Attachment[]
+  // 👈 الإضافات الجديدة لحفظ تفاصيل العقد
+  ownershipId String?
+  ownership   OwnershipFile? @relation(fields: [ownershipId], references: [id])
+
+  templateId String?
+  template   ContractTemplate? @relation(fields: [templateId], references: [id])
+
+  clauses Json? @default("[]") // حفظ نسخة من بنود العقد وقت إنشائه
+
+  transactions Transaction[]
+  quotation    Quotation?    @relation(fields: [quotationId], references: [id])
+  quotationId  String?       @unique
+  attachments  Attachment[]
 }
 
 // --- Enums الخاصة بعروض الأسعار ---
@@ -691,9 +705,9 @@ enum QuotationStatus {
   REJECTED
   TRASHED
   EXPIRED
-  CANCELLED           // 👈 تم إضافة (ملغى)
-  REFUND_IN_PROGRESS  // 👈 تم إضافة (استرجاع جارٍ)
-  REFUNDED            // 👈 تم إضافة (مسترد بالكامل)
+  CANCELLED // 👈 تم إضافة (ملغى)
+  REFUND_IN_PROGRESS // 👈 تم إضافة (استرجاع جارٍ)
+  REFUNDED // 👈 تم إضافة (مسترد بالكامل)
 }
 
 enum DiscountType {
@@ -722,202 +736,202 @@ enum HandlingMethod {
 
 // --- النماذج (Models) الخاصة بعروض الأسعار ---
 model Quotation {
-  id              String           @id @default(cuid())
-  number          String           @unique  // QT-26-02-0012
-  
-  clientId        String?
-  client          Client?          @relation(fields: [clientId], references: [id])
-  
+  id     String @id @default(cuid())
+  number String @unique // QT-26-02-0012
+
+  clientId String?
+  client   Client? @relation(fields: [clientId], references: [id])
+
   // تم تغيير Property إلى OwnershipFile لتطابق قاعدة بياناتك الفعالة
-  ownershipId     String?
-  ownership       OwnershipFile?   @relation(fields: [ownershipId], references: [id])
-  
+  ownershipId String?
+  ownership   OwnershipFile? @relation(fields: [ownershipId], references: [id])
+
   // البيانات الأساسية
-  issueDate       DateTime         @default(now())
-  validityDays    Int              @default(30)
-  expiryDate      DateTime
-  isRenewable     Boolean          @default(false)
-  
+  issueDate    DateTime @default(now())
+  validityDays Int      @default(30)
+  expiryDate   DateTime
+  isRenewable  Boolean  @default(false)
+
   // نموذج العرض
-  templateType    TemplateType     @default(SUMMARY)
-  templateId      String?
-  showClientCode  Boolean          @default(true)
-  showPropertyCode Boolean         @default(true)
-  
+  templateType     TemplateType @default(SUMMARY)
+  templateId       String?
+  showClientCode   Boolean      @default(true)
+  showPropertyCode Boolean      @default(true)
+
   // بيانات الخدمة
   transactionTypeId String?
   transactionType   TransactionType? @relation(fields: [transactionTypeId], references: [id])
-  serviceNumber   String?
-  serviceYear     String?
-  licenseNumber   String?
-  licenseYear     String?
+  serviceNumber     String?
+  serviceYear       String?
+  licenseNumber     String?
+  licenseYear       String?
 
   // حقول الاعتمادات والأختام
-  isStamped      Boolean   @default(false)
-  stampedAt      DateTime?
-  stampedBy      String?   // ID المستخدم الذي قام بالختم
-  
-  isSigned       Boolean   @default(false)
-  signedAt       DateTime?
-  signedBy       String?
-  signatureHash  String?   // رمز التشفير للتوقيع الإلكتروني (إن وُجد)
-  
+  isStamped Boolean   @default(false)
+  stampedAt DateTime?
+  stampedBy String? // ID المستخدم الذي قام بالختم
+
+  isSigned      Boolean   @default(false)
+  signedAt      DateTime?
+  signedBy      String?
+  signatureHash String? // رمز التشفير للتوقيع الإلكتروني (إن وُجد)
+
   // البنود والتسعير
-  items           QuotationItem[]
-  subtotal        Float            @default(0) // استخدام Float ليتوافق مع باقي النظام
-  taxRate         Float            @default(0.15)
+  items            QuotationItem[]
+  subtotal         Float           @default(0) // استخدام Float ليتوافق مع باقي النظام
+  taxRate          Float           @default(0.15)
   officeTaxBearing Int             @default(0)
-  taxAmount       Float            @default(0)
-  total           Float            @default(0)
-  collectedAmount Float            @default(0)
-  currency        String           @default("SAR")
-  
+  taxAmount        Float           @default(0)
+  total            Float           @default(0)
+  collectedAmount  Float           @default(0)
+  currency         String          @default("SAR")
+
   // الدفعات
   payments        QuotationPayment[] // تم تغيير الاسم لمنع التضارب مع الدفعات العادية
-  acceptedMethods Json?            
-  
+  acceptedMethods Json?
+
   // المرفقات والنواقص
-  attachments     Attachment[]     
-  missingDocs     String?          @db.Text
-  showMissingDocs Boolean          @default(false)
-  
+  attachments     Attachment[]
+  missingDocs     String?      @db.Text
+  showMissingDocs Boolean      @default(false)
+
   // الشروط
-  terms           String?          @db.Text
-  notes           String?          @db.Text
-  clientTitle     ClientTitle      @default(MR)
-  handlingMethod  HandlingMethod   @default(DIRECT)
-  
+  terms          String?        @db.Text
+  notes          String?        @db.Text
+  clientTitle    ClientTitle    @default(MR)
+  handlingMethod HandlingMethod @default(DIRECT)
+
   // الحالة والربط
-  status          QuotationStatus  @default(DRAFT)
-  contract        Contract?
-  
-  qrCodeData      String?
-  
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
-  createdBy       String?          
+  status   QuotationStatus @default(DRAFT)
+  contract Contract?
+
+  qrCodeData String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  createdBy String?
 }
 
 model QuotationItem {
-  id            String    @id @default(cuid())
-  quotationId   String
-  quotation     Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
-  
-  order         Int
-  title         String
-  description   String?
-  category      String?   
-  
-  quantity      Float     @default(1)
-  unit          String    @default("خدمة")
-  unitPrice     Float
-  discount      Float     @default(0)
-  discountType  DiscountType @default(PERCENTAGE)
-  
-  subtotal      Float
-  
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  id          String    @id @default(cuid())
+  quotationId String
+  quotation   Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+
+  order       Int
+  title       String
+  description String?
+  category    String?
+
+  quantity     Float        @default(1)
+  unit         String       @default("خدمة")
+  unitPrice    Float
+  discount     Float        @default(0)
+  discountType DiscountType @default(PERCENTAGE)
+
+  subtotal Float
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model QuotationPayment {
-  id                String    @id @default(cuid())
-  quotationId       String
-  quotation         Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
-  
+  id          String    @id @default(cuid())
+  quotationId String
+  quotation   Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+
   installmentNumber Int
-  percentage        Float   
-  amount            Float   
-  dueCondition      String  
-  
-  createdAt         DateTime  @default(now())
+  percentage        Float
+  amount            Float
+  dueCondition      String
+
+  createdAt DateTime @default(now())
 }
 
 model QuotationTemplate {
-  id              String       @id @default(cuid())
-  code            String       @unique // TPL-001
-  title           String
-  description     String?      @db.Text
-  type            TemplateType @default(SUMMARY)
-  
-  // هل هو النموذج الافتراضي
-  isDefault       Boolean      @default(false)
-  status          String       @default("active") // "active", "disabled"
-  
-  // JSON لتخزين خيارات الأقسام (cover, header, items...)
-  sectionsConfig  Json         @default("{}")
-  // JSON لتخزين خيارات العرض الإضافية (showClientCode...)
-  displayOptions  Json         @default("{}")
-  
-  defaultTerms    String?      @db.Text
-  
-  // عداد الاستخدام
-  usesCount       Int          @default(0)
+  id          String       @id @default(cuid())
+  code        String       @unique // TPL-001
+  title       String
+  description String?      @db.Text
+  type        TemplateType @default(SUMMARY)
 
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
+  // هل هو النموذج الافتراضي
+  isDefault Boolean @default(false)
+  status    String  @default("active") // "active", "disabled"
+
+  // JSON لتخزين خيارات الأقسام (cover, header, items...)
+  sectionsConfig Json @default("{}")
+  // JSON لتخزين خيارات العرض الإضافية (showClientCode...)
+  displayOptions Json @default("{}")
+
+  defaultTerms String? @db.Text
+
+  // عداد الاستخدام
+  usesCount Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 // بند مفرد في المكتبة
 model QuotationLibraryItem {
-  id           String   @id @default(cuid())
-  code         String   @unique // ITM-001
-  title        String
-  description  String?  @db.Text
-  category     String   // "خدمات هندسية", "خدمات قانونية"
-  subCategory  String?  // "رخص وأمانة"
-  unit         String   @default("خدمة")
-  price        Float    @default(0)
-  
-  isEditable   Boolean  @default(true)
-  isActive     Boolean  @default(true)
-  warningText  String?  @db.Text // ملاحظات قانونية/استثناءات
-  usesCount    Int      @default(0)
-  
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id          String  @id @default(cuid())
+  code        String  @unique // ITM-001
+  title       String
+  description String? @db.Text
+  category    String // "خدمات هندسية", "خدمات قانونية"
+  subCategory String? // "رخص وأمانة"
+  unit        String  @default("خدمة")
+  price       Float   @default(0)
+
+  isEditable  Boolean @default(true)
+  isActive    Boolean @default(true)
+  warningText String? @db.Text // ملاحظات قانونية/استثناءات
+  usesCount   Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 // مجموعة بنود في المكتبة
 model QuotationBundle {
-  id           String   @id @default(cuid())
-  code         String   @unique // BDL-001
-  title        String
-  description  String?  @db.Text
-  icon         String?  @default("📦") // رمز تعبيري (Emoji)
-  color        String?  @default("blue") // اللون في الواجهة
-  
-  itemsIds     String[] // مصفوفة تحتوي على أكواد البنود [ITM-001, ITM-002]
-  
-  isActive     Boolean  @default(true)
-  usesCount    Int      @default(0)
-  
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id          String  @id @default(cuid())
+  code        String  @unique // BDL-001
+  title       String
+  description String? @db.Text
+  icon        String? @default("📦") // رمز تعبيري (Emoji)
+  color       String? @default("blue") // اللون في الواجهة
+
+  itemsIds String[] // مصفوفة تحتوي على أكواد البنود [ITM-001, ITM-002]
+
+  isActive  Boolean @default(true)
+  usesCount Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model Payment {
-  id              String    @id @default(cuid())
-  amount          Float
-  date            DateTime  @default(now())
-  method          String    // (Cash, Check, Transfer)
-  reference       String?
-  notes           String?
-  
-  category        String?   @default("أتعاب مكتب") 
-  isFollowUpFee   Boolean   @default(false)        
-  receiptImage    String?                          
+  id        String   @id @default(cuid())
+  amount    Float
+  date      DateTime @default(now())
+  method    String // (Cash, Check, Transfer)
+  reference String?
+  notes     String?
 
-  receivedBy      Employee  @relation("EmployeeToPayment", fields: [receivedById], references: [id])
-  receivedById    String
-  
-  allocations     Json?     @default("[]")
+  category      String? @default("أتعاب مكتب")
+  isFollowUpFee Boolean @default(false)
+  receiptImage  String?
 
-  transaction     Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
-  transactionId   String
+  receivedBy   Employee @relation("EmployeeToPayment", fields: [receivedById], references: [id])
+  receivedById String
 
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  allocations Json? @default("[]")
+
+  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  transactionId String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([transactionId])
   @@index([receivedById])
@@ -928,45 +942,45 @@ model Payment {
 // ===============================================
 
 model Document {
-  id               String    @id @default(cuid())
-  fileNumber       String    @unique
-  name             String    
-  type             String    // 'file' أو 'folder'
-  extension        String?   
-  size             Int?      
-  filePath         String?   @unique
-  
-  createdAt        DateTime  @default(now())
-  modifiedAt       DateTime  @updatedAt
-  
-  owner            Employee  @relation("OwnedDocuments", fields: [ownerId], references: [id])
-  ownerId          String
-  
-  classification    DocumentClassification? @relation(fields: [classificationId], references: [id])
-  classificationId  String?
-  
-  tags              String[] 
-  version           String    @default("1.0")
-  isShared          Boolean   @default(false)
-  downloads         Int       @default(0)
-  views             Int       @default(0)
+  id         String  @id @default(cuid())
+  fileNumber String  @unique
+  name       String
+  type       String // 'file' أو 'folder'
+  extension  String?
+  size       Int?
+  filePath   String? @unique
+
+  createdAt  DateTime @default(now())
+  modifiedAt DateTime @updatedAt
+
+  owner   Employee @relation("OwnedDocuments", fields: [ownerId], references: [id])
+  ownerId String
+
+  classification   DocumentClassification? @relation(fields: [classificationId], references: [id])
+  classificationId String?
+
+  tags      String[]
+  version   String   @default("1.0")
+  isShared  Boolean  @default(false)
+  downloads Int      @default(0)
+  views     Int      @default(0)
 
   // هيكلية المجلدات
-  path              String    
-  parent            Document? @relation("FolderHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
-  parentId          String?
-  children          Document[] @relation("FolderHierarchy")
+  path     String
+  parent   Document?  @relation("FolderHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
+  parentId String?
+  children Document[] @relation("FolderHierarchy")
 
   // الربط بالكيانات الأخرى
-  transaction       Transaction? @relation(fields: [transactionId], references: [id], onDelete: Cascade)
-  transactionId     String?
-  
-  client            Client?       @relation(fields: [clientId], references: [id])
-  clientId          String?
+  transaction   Transaction? @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  transactionId String?
 
-  permissions       DocumentPermission[]
-  activities        DocumentActivity[]
-  
+  client   Client? @relation(fields: [clientId], references: [id])
+  clientId String?
+
+  permissions DocumentPermission[]
+  activities  DocumentActivity[]
+
   @@index([ownerId])
   @@index([parentId])
   @@index([transactionId])
@@ -979,113 +993,113 @@ model Document {
 // ===============================================
 
 model DocumentType {
-  id                 String   @id @default(cuid())
-  code               String   @unique // DOC-001
-  name               String
-  nameEn             String?
-  
-  classification     String   // "مالي", "فني", "إداري", "قانوني"
-  allowedExtensions  String[] // ["PDF", "JPG", "DWG"]
-  maxSizeMB          Int      @default(5)
-  
-  requiresSignature  Boolean  @default(false)
-  confidentiality    String   @default("General") // "General", "Confidential", "TopSecret"
-  allowMultiple      Boolean  @default(false) // هل يسمح برفع أكثر من ملف لهذا النوع في المعاملة الواحدة؟
-  
-  status             String   @default("Active")
-  
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  id     String  @id @default(cuid())
+  code   String  @unique // DOC-001
+  name   String
+  nameEn String?
+
+  classification    String // "مالي", "فني", "إداري", "قانوني"
+  allowedExtensions String[] // ["PDF", "JPG", "DWG"]
+  maxSizeMB         Int      @default(5)
+
+  requiresSignature Boolean @default(false)
+  confidentiality   String  @default("General") // "General", "Confidential", "TopSecret"
+  allowMultiple     Boolean @default(false) // هل يسمح برفع أكثر من ملف لهذا النوع في المعاملة الواحدة؟
+
+  status String @default("Active")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model DocumentPermission {
-  id               String    @id @default(cuid())
-  permissionNumber String    @unique @default(cuid())
-  
-  document         Document  @relation(fields: [documentId], references: [id], onDelete: Cascade)
-  documentId       String
-  
-  user             Employee  @relation(fields: [userId], references: [id], onDelete: Cascade)
-  userId           String
-  
-  accessLevel      String    // 'view', 'edit', 'delete', 'admin'
-  expiryDate       DateTime?
-  
-  grantedBy        Employee  @relation("GrantedPermissions", fields: [grantedById], references: [id])
-  grantedById      String
-  grantedAt        DateTime  @default(now())
+  id               String @id @default(cuid())
+  permissionNumber String @unique @default(cuid())
+
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  documentId String
+
+  user   Employee @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String
+
+  accessLevel String // 'view', 'edit', 'delete', 'admin'
+  expiryDate  DateTime?
+
+  grantedBy   Employee @relation("GrantedPermissions", fields: [grantedById], references: [id])
+  grantedById String
+  grantedAt   DateTime @default(now())
 
   @@unique([documentId, userId])
   @@index([userId])
 }
 
 model DocumentActivity {
-  id             String    @id @default(cuid())
-  activityNumber String    @unique @default(cuid())
-  
-  document       Document  @relation(fields: [documentId], references: [id], onDelete: Cascade)
-  documentId     String
-  
-  fileName       String    
-  action         String    // 'upload', 'download', 'edit', 'delete', ...
-  
-  user           Employee  @relation(fields: [userId], references: [id], onDelete: Cascade)
-  userId         String
-  
-  timestamp      DateTime  @default(now())
-  ipAddress      String?
-  details        String?
+  id             String @id @default(cuid())
+  activityNumber String @unique @default(cuid())
+
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  documentId String
+
+  fileName String
+  action   String // 'upload', 'download', 'edit', 'delete', ...
+
+  user   Employee @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String
+
+  timestamp DateTime @default(now())
+  ipAddress String?
+  details   String?
 
   @@index([documentId])
   @@index([userId])
 }
 
 model DocumentClassification {
-  id          String    @id @default(cuid())
-  name        String    @unique
-  color       String    @default("#6b7280")
+  id          String  @id @default(cuid())
+  name        String  @unique
+  color       String  @default("#6b7280")
   description String?
 
-  createdBy    Employee  @relation("CreatedClassifications", fields: [createdById], references: [id])
-  createdById  String
-  createdAt    DateTime  @default(now())
+  createdBy   Employee @relation("CreatedClassifications", fields: [createdById], references: [id])
+  createdById String
+  createdAt   DateTime @default(now())
 
-  documents    Document[]
+  documents Document[]
 
   @@index([createdById])
 }
 
 model Attachment {
-  id             String    @id @default(cuid())
-  fileName       String
-  filePath       String    @unique
-  fileType       String
-  fileSize       Int
-  notes         String?   @db.Text
-  createdAt      DateTime  @default(now())
+  id        String   @id @default(cuid())
+  fileName  String
+  filePath  String   @unique
+  fileType  String
+  fileSize  Int
+  notes     String?  @db.Text
+  createdAt DateTime @default(now())
 
-  uploadedBy     Employee  @relation(fields: [uploadedById], references: [id])
-  uploadedById   String
+  uploadedBy   Employee @relation(fields: [uploadedById], references: [id])
+  uploadedById String
 
-  transaction    Transaction? @relation(fields: [transactionId], references: [id], onDelete: Cascade)
-  transactionId  String?
+  transaction   Transaction? @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  transactionId String?
 
-  contract       Contract?    @relation(fields: [contractId], references: [id])
-  contractId     String?
+  contract   Contract? @relation(fields: [contractId], references: [id])
+  contractId String?
 
-  client         Client?      @relation(fields: [clientId], references: [id])
-  clientId       String?
+  client   Client? @relation(fields: [clientId], references: [id])
+  clientId String?
 
-  sectorId    String?
-  sector      RiyadhSector?   @relation(fields: [sectorId], references: [id], onDelete: Cascade)
-  
-  districtId  String?
-  district    RiyadhDistrict? @relation(fields: [districtId], references: [id], onDelete: Cascade)
+  sectorId String?
+  sector   RiyadhSector? @relation(fields: [sectorId], references: [id], onDelete: Cascade)
 
-  employee       Employee?    @relation("EmployeeAttachments", fields: [employeeId], references: [id], onDelete: Cascade)
-  employeeId     String?
-  quotation      Quotation?   @relation(fields: [quotationId], references: [id], onDelete: Cascade)
-  quotationId    String?
+  districtId String?
+  district   RiyadhDistrict? @relation(fields: [districtId], references: [id], onDelete: Cascade)
+
+  employee    Employee?  @relation("EmployeeAttachments", fields: [employeeId], references: [id], onDelete: Cascade)
+  employeeId  String?
+  quotation   Quotation? @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+  quotationId String?
 }
 
 // ===============================================
@@ -1094,55 +1108,55 @@ model Attachment {
 
 // وحدة التعقيب (Follow-Up)
 model FollowUpAgent {
-  id                 String    @id @default(cuid())
-  type               String    // 'individual' or 'entity'
+  id                 String  @id @default(cuid())
+  type               String // 'individual' or 'entity'
   name               String
-  nationalId         String?  
-  commercialRegister String?  
-  
-  phone              String
-  email              String?
-  address            String?
+  nationalId         String?
+  commercialRegister String?
 
-  specialization     String[] 
-  governmentEntities String[] 
+  phone   String
+  email   String?
+  address String?
 
-  joinDate           DateTime @default(now())
-  status             String   @default("active") 
-  rating             Float    @default(5.0)
-  notes              String?
+  specialization     String[]
+  governmentEntities String[]
 
-  tasks              FollowUpTask[]
+  joinDate DateTime @default(now())
+  status   String   @default("active")
+  rating   Float    @default(5.0)
+  notes    String?
 
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  tasks FollowUpTask[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model FollowUpTask {
-  id                 String    @id @default(cuid())
-  
-  agent              FollowUpAgent @relation(fields: [agentId], references: [id], onDelete: Cascade)
-  agentId            String
+  id String @id @default(cuid())
 
-  transaction        Transaction   @relation(fields: [transactionId], references: [id], onDelete: Cascade)
-  transactionId      String
+  agent   FollowUpAgent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  agentId String
 
-  governmentEntity   String   
-  description        String   
-  
-  startDate          DateTime @default(now())
-  targetDate         DateTime?
-  completionDate     DateTime?
+  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  transactionId String
 
-  status             String   @default("pending") 
-  successStatus      String   @default("pending") 
-  attempts           Int      @default(0)          
-  
-  notes              String?
-  feedbacks          String[] 
+  governmentEntity String
+  description      String
 
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  startDate      DateTime  @default(now())
+  targetDate     DateTime?
+  completionDate DateTime?
+
+  status        String @default("pending")
+  successStatus String @default("pending")
+  attempts      Int    @default(0)
+
+  notes     String?
+  feedbacks String[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([agentId])
   @@index([transactionId])
@@ -1150,88 +1164,88 @@ model FollowUpTask {
 
 // وحدة شوارع وتقسيم الرياض
 model RiyadhSector {
-  id        String           @id @default(cuid())
-  code      String           @unique // 👈 جديد: مثل SEC-C
-  name      String           @unique 
-  districts RiyadhDistrict[] // 👈 جديد: القطاع يحتوي على أحياء
-  streets   RiyadhStreet[]
-  createdAt DateTime         @default(now())
+  id             String           @id @default(cuid())
+  code           String           @unique // 👈 جديد: مثل SEC-C
+  name           String           @unique
+  districts      RiyadhDistrict[] // 👈 جديد: القطاع يحتوي على أحياء
+  streets        RiyadhStreet[]
+  createdAt      DateTime         @default(now())
   officialLink   String?
   mapImage       String?
   satelliteImage String?
-  notes       Json? @default("[]") // لتخزين الملاحظات
-  regulations Json? @default("[]") // لتخزين الاشتراطات
-  auditLogs   Json? @default("[]") // لتخزين سجل التعديلات
-  attachments Attachment[]         // ربط المرفقات
+  notes          Json?            @default("[]") // لتخزين الملاحظات
+  regulations    Json?            @default("[]") // لتخزين الاشتراطات
+  auditLogs      Json?            @default("[]") // لتخزين سجل التعديلات
+  attachments    Attachment[] // ربط المرفقات
 }
 
 model RiyadhPlan {
-  id            String   @id @default(cuid())
-  planNumber    String   @unique // رقم المخطط الرسمي (مثال: 2345)
-  oldNumber     String?  // الترقيم القديم
-  internalCode  String   @unique // رمز داخلي (مثال: PLAN-C-001)
-  status        String   // معتمد، قيد المراجعة، ملغى، معدل
-  isWithout     Boolean  @default(false) // هل هو "بدون" مخطط؟
-  properties    Int      @default(0) // عدد الملكيات (للتخزين المؤقت قبل الربط الحقيقي)
-  plots         Int      @default(0) // عدد القطع
-  attachments   Int      @default(0) // عدد المرفقات
-  
+  id           String  @id @default(cuid())
+  planNumber   String  @unique // رقم المخطط الرسمي (مثال: 2345)
+  oldNumber    String? // الترقيم القديم
+  internalCode String  @unique // رمز داخلي (مثال: PLAN-C-001)
+  status       String // معتمد، قيد المراجعة، ملغى، معدل
+  isWithout    Boolean @default(false) // هل هو "بدون" مخطط؟
+  properties   Int     @default(0) // عدد الملكيات (للتخزين المؤقت قبل الربط الحقيقي)
+  plots        Int     @default(0) // عدد القطع
+  attachments  Int     @default(0) // عدد المرفقات
+
   // علاقة متعدد إلى متعدد مع الأحياء
-  districts     RiyadhDistrict[] 
-  
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  districts RiyadhDistrict[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model RiyadhDistrict {
-  id        String         @id @default(cuid())
-  code      String         @unique // 👈 جديد: مثل NBH-C-001
-  name      String         @unique 
-  
-  sector    RiyadhSector   @relation(fields: [sectorId], references: [id]) // 👈 جديد: الحي ينتمي لقطاع
-  sectorId  String
+  id   String @id @default(cuid())
+  code String @unique // 👈 جديد: مثل NBH-C-001
+  name String @unique
 
-  streets   RiyadhStreet[]
+  sector   RiyadhSector @relation(fields: [sectorId], references: [id]) // 👈 جديد: الحي ينتمي لقطاع
+  sectorId String
+
+  streets        RiyadhStreet[]
   plans          RiyadhPlan[]
   ownerships     OwnershipFile[]
-  createdAt DateTime       @default(now())
+  createdAt      DateTime        @default(now())
   officialLink   String?
   mapImage       String?
   satelliteImage String?
-  notes       Json? @default("[]") // لتخزين الملاحظات
-  regulations Json? @default("[]") // لتخزين الاشتراطات
-  auditLogs   Json? @default("[]") // لتخزين سجل التعديلات
-  attachments Attachment[]         // ربط المرفقات
+  notes          Json?           @default("[]") // لتخزين الملاحظات
+  regulations    Json?           @default("[]") // لتخزين الاشتراطات
+  auditLogs      Json?           @default("[]") // لتخزين سجل التعديلات
+  attachments    Attachment[] // ربط المرفقات
 }
 
 model RiyadhStreet {
-  id                 String         @id @default(cuid())
-  streetCode         String         @unique 
-  name               String
+  id         String @id @default(cuid())
+  streetCode String @unique
+  name       String
 
-  sector             RiyadhSector   @relation(fields: [sectorId], references: [id])
-  sectorId           String
-  
-  district           RiyadhDistrict @relation(fields: [districtId], references: [id])
-  districtId         String
+  sector   RiyadhSector @relation(fields: [sectorId], references: [id])
+  sectorId String
 
-  type               String         
-  width              Float
-  length             Float
-  lanes              Int
-  status             String         
-  
-  lighting           Boolean  @default(true)
-  sidewalks          Boolean  @default(true)
+  district   RiyadhDistrict @relation(fields: [districtId], references: [id])
+  districtId String
 
-  centerLat          Float
-  centerLng          Float
+  type   String
+  width  Float
+  length Float
+  lanes  Int
+  status String
+
+  lighting  Boolean @default(true)
+  sidewalks Boolean @default(true)
+
+  centerLat Float
+  centerLng Float
 
   hasSpecialRegulation Boolean @default(false)
-  regulationDetails    Json?    
-  
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  regulationDetails    Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([sectorId])
   @@index([districtId])
@@ -1239,17 +1253,17 @@ model RiyadhStreet {
 
 // سجل الأنشطة العام
 model ActivityLog {
-  id             String    @id @default(cuid())
-  date           DateTime  @default(now())
-  action         String 
-  description    String
-  category       String 
+  id          String   @id @default(cuid())
+  date        DateTime @default(now())
+  action      String
+  description String
+  category    String
 
-  performedBy    Employee @relation("EmployeeToActivityLog", fields: [performedById], references: [id])
-  performedById  String
+  performedBy   Employee @relation("EmployeeToActivityLog", fields: [performedById], references: [id])
+  performedById String
 
-  client         Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  clientId       String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  clientId String
 
   @@index([clientId])
   @@index([performedById])
@@ -1257,32 +1271,31 @@ model ActivityLog {
 
 // إعدادات النظام
 model SystemSettings {
-  id               String    @id @default("singleton") 
-  gradingCriteria  Json? 
-  gradeThresholds  Json? 
+  id              String @id @default("singleton")
+  gradingCriteria Json?
+  gradeThresholds Json?
 
-  updatedAt        DateTime @updatedAt
+  updatedAt DateTime @updatedAt
 }
 
 // نظام المحادثات
 model Conversation {
-  id            String    @id @default(cuid())
-  name          String?
-  createdAt     DateTime  @default(now())
+  id        String   @id @default(cuid())
+  name      String?
+  createdAt DateTime @default(now())
 
-  participants  Employee[] @relation("EmployeeToConversation")
-  messages      Message[]
+  participants Employee[] @relation("EmployeeToConversation")
+  messages     Message[]
 }
 
 model Message {
-  id              String    @id @default(cuid())
-  content         String
-  createdAt       DateTime  @default(now())
+  id        String   @id @default(cuid())
+  content   String
+  createdAt DateTime @default(now())
 
-  conversation    Conversation @relation(fields: [conversationId], references: [id])
-  conversationId  String
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  conversationId String
 
-  sender          Employee     @relation("SenderToMessage", fields: [senderId], references: [id])
-  senderId        String
+  sender   Employee @relation("SenderToMessage", fields: [senderId], references: [id])
+  senderId String
 }
-
