@@ -633,6 +633,27 @@ model Appointment {
 }
 
 // ===============================================
+// نموذج قوالب العقود (Contract Templates)
+// ===============================================
+model ContractTemplate {
+  id          String   @id @default(cuid())
+  title       String   // اسم القالب (مثال: عقد فرد — خدمات هندسية)
+  description String?  // وصف القالب
+  clientType  String   // نوع العميل المستهدف (فرد، شركة، جهة حكومية)
+  serviceType String   // نوع الخدمة (رخصة بناء، إشراف، إلخ)
+  
+  hasRep      Boolean  @default(false) // هل يدعم وجود ممثل/وكيل؟
+  isProxy     Boolean  @default(false) // هل يدعم نيابة عن مكتب آخر؟
+  isDefault   Boolean  @default(false) // هل هذا القالب هو الافتراضي؟
+  
+  sections    Int      @default(1)     // عدد أقسام العقد
+  usesCount   Int      @default(0)     // عدد مرات استخدام هذا القالب
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// ===============================================
 // 7. المالية والعقود (Finance & Contracts)
 // ===============================================
 

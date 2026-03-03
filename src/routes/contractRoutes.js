@@ -1,32 +1,40 @@
 // routes/contractRoutes.js
-const express = require('express');
+const express = require("express");
 const router = express.Router();
-const { protect } = require('../middleware/authMiddleware');
+const { protect } = require("../middleware/authMiddleware");
 
 // استيراد الوظائف من الـ Controller
 const {
   createContract,
-  getAllContracts,
-  getContractById,
-  updateContract,
+  getContracts,
   deleteContract,
-} = require('../controllers/contractController');
+  getTemplates,
+  createTemplate,
+  deleteTemplate,
+  incrementTemplateUse,
+  updateTemplate
+} = require("../controllers/contractController");
 
-// حماية جميع مسارات العقود
+// حماية جميع مسارات العقود (يجب أن يكون المستخدم مسجل الدخول)
 router.use(protect);
 
-// GET /api/contracts  -> جلب كل العقود
-// POST /api/contracts -> إنشاء عقد جديد
-router.route('/')
-  .get(getAllContracts)
-  .post(createContract);
+// ==========================================
+// مسارات العقود (Contract Routes)
+// ==========================================
 
-// GET /api/contracts/:id    -> جلب عقد واحد
-// PUT /api/contracts/:id    -> تحديث عقد
-// DELETE /api/contracts/:id -> حذف عقد
-router.route('/:id')
-  .get(getContractById)
-  .put(updateContract)
-  .delete(deleteContract);
+// GET /api/contracts  -> جلب كل العقود
+router.get("/", getContracts);
+
+// POST /api/contracts -> إنشاء عقد جديد
+router.post("/", createContract);
+
+router.get("/templates", getTemplates);
+router.post("/templates", createTemplate);
+router.put('/templates/:id', updateTemplate);
+router.delete("/templates/:id", deleteTemplate);
+router.put("/templates/:id/use", incrementTemplateUse);
+
+// DELETE /api/contracts/:id -> حذف عقد محدد
+router.delete("/:id", deleteContract);
 
 module.exports = router;
