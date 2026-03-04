@@ -85,6 +85,9 @@ app.use('/api/followup', followUpRoutes);
 const riyadhStreetsRoutes = require('./routes/riyadhStreetsRoutes');
 app.use('/api/riyadh-streets', riyadhStreetsRoutes);
 
+const riyadhZoneRoutes = require('./routes/riyadhZoneRoutes');
+app.use('/api/riyadh-zones', riyadhZoneRoutes);
+
 const propertyRoutes = require('./routes/propertyRoutes');
 app.use('/api/properties', propertyRoutes);
 
