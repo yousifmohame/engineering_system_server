@@ -167,7 +167,7 @@ const createEmployee = async (req, res) => {
 };
 
 // ===============================================
-// 3. تحديث بيانات موظف
+// 3. تحديث بيانات موظف (مع دعم تغيير الباسوورد المشفر)
 // PUT /api/employees/:id
 // ===============================================
 const updateEmployee = async (req, res) => {
@@ -180,7 +180,7 @@ const updateEmployee = async (req, res) => {
       nameEn,
       phone,
       position,
-      qiwaPosition, // 👈
+      qiwaPosition,
       department,
       hireDate,
       baseSalary,
@@ -189,7 +189,8 @@ const updateEmployee = async (req, res) => {
       nationality,
       gosiNumber,
       iqamaNumber,
-      roleIds, // 👈 مصفوفة الأدوار
+      roleIds,
+      password, // 👈 1. استخراج الباسوورد القادم من الواجهة
     } = req.body;
 
     // تجهيز بيانات التحديث
@@ -199,7 +200,7 @@ const updateEmployee = async (req, res) => {
       nameEn,
       phone,
       position,
-      qiwaPosition, // 👈
+      qiwaPosition,
       department,
       type,
       status,
@@ -212,22 +213,29 @@ const updateEmployee = async (req, res) => {
     if (baseSalary !== undefined)
       updateData.baseSalary = baseSalary ? parseFloat(baseSalary) : null;
 
-    // 👈 التحديث السحري للأدوار الوظيفية المتعددة (إزالة القديم ووضع الجديد)
+    // 👈 2. السر هنا: إذا قام المستخدم بكتابة باسوورد جديد، نقوم بتشفيره وإضافته لبيانات التحديث
+    // إذا ترك الحقل فارغاً في الواجهة، سيتم تجاهل هذا الشرط ولن يتغير الباسوورد القديم
+    if (password && password.trim() !== "") {
+      const salt = await bcrypt.genSalt(10);
+      updateData.password = await bcrypt.hash(password, salt);
+    }
+
+    // التحديث السحري للأدوار الوظيفية المتعددة
     if (roleIds && Array.isArray(roleIds)) {
       updateData.roles = {
-        set: roleIds.map((roleId) => ({ id: roleId })), // set تقوم بتفريغ الأدوار القديمة وإضافة الجديدة
+        set: roleIds.map((roleId) => ({ id: roleId })),
       };
     } else {
-      updateData.roles = { set: [] }; // تفريغ الأدوار إذا أرسل الواجهة مصفوفة فارغة
+      updateData.roles = { set: [] };
     }
 
     const updatedEmployee = await prisma.employee.update({
       where: { id: id },
       data: updateData,
-      include: { roles: true }, // نرجع الأدوار المحدثة لتظهر في الفرونت إند مباشرة
+      include: { roles: true },
     });
 
-    delete updatedEmployee.password;
+    delete updatedEmployee.password; // عدم إرجاع الباسوورد في الاستجابة للأمان
     res.status(200).json(updatedEmployee);
   } catch (error) {
     if (error.code === "P2025")
@@ -236,7 +244,6 @@ const updateEmployee = async (req, res) => {
     res.status(500).json({ message: "خطأ في الخادم" });
   }
 };
-
 // ===============================================
 // 4. حذف موظف (أو أرشفته)
 // DELETE /api/employees/:id
