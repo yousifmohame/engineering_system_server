@@ -162,12 +162,13 @@ const checkClientId = async (req, res) => {
     if (!idNumber) return res.status(400).json({ message: "رقم الهوية مطلوب" });
 
     const existingClient = await prisma.client.findUnique({
-      where: { idNumber }
+      where: { idNumber },
     });
 
     if (existingClient) {
       // إرجاع اسم العميل المسجل لتنبيه المستخدم
-      const clientName = existingClient.officialNameAr || existingClient.name?.ar || "عميل مسجل";
+      const clientName =
+        existingClient.officialNameAr || existingClient.name?.ar || "عميل مسجل";
       return res.json({ exists: true, clientName });
     }
 
@@ -346,7 +347,6 @@ const createClient = async (req, res) => {
     // 4. الحفظ في قاعدة البيانات
     // ==========================================
     const newClient = await prisma.client.create({
-      
       data: {
         clientCode: generatedClientCode,
         mobile,
@@ -518,7 +518,7 @@ const updateClient = async (req, res) => {
 
 // حذف عميل
 // ===============================================
-// حذف عميل 
+// حذف عميل
 // DELETE /api/clients/:id
 // ===============================================
 const deleteClient = async (req, res) => {
@@ -531,28 +531,28 @@ const deleteClient = async (req, res) => {
     });
 
     res.status(200).json({ success: true, message: "تم حذف العميل بنجاح" });
-
   } catch (error) {
     console.error("Error deleting client:", error);
 
     // 👈 اصطياد خطأ ارتباط المفتاح الأجنبي (Foreign Key Constraint)
     // P2003 هو كود Prisma القياسي لهذا الخطأ، ونضيف فحص النص للاحتياط
     if (
-      error.code === 'P2003' || 
-      (error.message && error.message.includes('violates RESTRICT')) ||
-      (error.message && error.message.includes('Foreign key constraint'))
+      error.code === "P2003" ||
+      (error.message && error.message.includes("violates RESTRICT")) ||
+      (error.message && error.message.includes("Foreign key constraint"))
     ) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "لا يمكن حذف هذا العميل لوجود ارتباطات نشطة به (مثل ملفات ملكية، أو معاملات). يرجى حذف الارتباطات أولاً أو إيقاف حساب العميل بدلاً من حذفه." 
+      return res.status(400).json({
+        success: false,
+        message:
+          "لا يمكن حذف هذا العميل لوجود ارتباطات نشطة به (مثل ملفات ملكية، أو معاملات). يرجى حذف الارتباطات أولاً أو إيقاف حساب العميل بدلاً من حذفه.",
       });
     }
 
     // أي خطأ آخر
-    res.status(500).json({ 
-      success: false, 
-      message: "حدث خطأ في السيرفر أثناء محاولة الحذف", 
-      error: error.message 
+    res.status(500).json({
+      success: false,
+      message: "حدث خطأ في السيرفر أثناء محاولة الحذف",
+      error: error.message,
     });
   }
 };
@@ -722,18 +722,18 @@ const analyzeIdentityImage = async (req, res) => {
     // ==========================================
     // أضفنا تعليمات صريحة لاستخراج مكان الميلاد، التواريخ، وحساب العمر
     const prompt = `
-    أنت خبير في قراءة الوثائق الرسمية السعودية (هوية وطنية، إقامة، سجل تجاري، جواز سفر، شهادة رقم موحد).
-    مهمتك قراءة الصورة/الصور المرفقة واستخراج البيانات بدقة متناهية وإعادتها كـ JSON صالح 100%.
+    أنت خبير في قراءة الوثائق الرسمية السعودية.
+    مهمتك قراءة الصورة المرفقة واستخراج البيانات وإعادتها كـ JSON صالح 100%.
 
     نوع الوثيقة المتوقع: ${documentType || "غير محدد"}
 
     القواعد:
-    - إذا كانت الوثيقة "سجل تجاري" أو "شركة": ضع اسم الشركة بالكامل في "firstAr" واترك باقي أجزاء الاسم فارغة.
-    - إذا كانت "هوية" أو "إقامة": قم بتفكيك الاسم إلى 4 أجزاء (أول، أب، جد، عائلة) بالعربية والإنجليزية إن وجد.
-    - ابحث بدقة عن "محل الميلاد" أو "مكان الميلاد".
-    - ابحث عن تاريخ الميلاد. الهوية السعودية عادة تحتوي على التاريخ بالهجري والميلادي معاً.
-    - قم بحساب عمر الشخص الحالي بالسنوات بناءً على تاريخ ميلاده (قم بإجراء العملية الحسابية وأرجع الرقم).
-    - إذا لم تجد المعلومة، أرجع نصاً فارغاً "". بالنسبة للعمر إذا لم تستطع حسابه أرجع null.
+    1. إذا كانت الوثيقة "سجل تجاري" أو "شركة": ضع اسم الشركة بالكامل في "firstAr" واترك باقي أجزاء الاسم فارغة.
+    2. إذا كانت "هوية" أو "إقامة": قم بتفكيك الاسم إلى 4 أجزاء (أول، أب، جد، عائلة).
+    3. 🚨 هام جداً (الأسماء الإنجليزية): إذا لم يكن الاسم الإنجليزي مكتوباً في الوثيقة، **يجب عليك كتابته وترجمته حرفياً (Transliteration)** من العربية إلى الإنجليزية بناءً على النطق الصحيح (مثال: محمد -> Mohammed، الغامدي -> Alghamdi). لا تترك حقول firstEn, fatherEn, grandEn, familyEn فارغة أبداً إذا كان الاسم العربي موجوداً.
+    4. ابحث عن تاريخ الميلاد. الهوية السعودية تحتوي عادة على الهجري والميلادي.
+    5. قم بحساب العمر بالسنوات بناءً على تاريخ الميلاد (أرجع رقم).
+    6. إذا لم تجد المعلومة أرجع نصاً فارغاً "". بالنسبة للعمر أرجع null إذا فشلت.
 
     التركيبة المطلوبة للـ JSON:
     {
@@ -741,18 +741,18 @@ const analyzeIdentityImage = async (req, res) => {
       "fatherAr": "اسم الأب بالعربية",
       "grandAr": "اسم الجد بالعربية",
       "familyAr": "اسم العائلة بالعربية",
-      "firstEn": "First Name",
-      "fatherEn": "Father Name",
-      "grandEn": "Grandfather Name",
-      "familyEn": "Family Name",
-      "idNumber": "رقم الهوية أو الإقامة أو السجل التجاري (أرقام فقط)",
-      "birthDate": "تاريخ الميلاد الأساسي المكتوب (للتوافق)",
+      "firstEn": "First Name (Mandatory)",
+      "fatherEn": "Father Name (Mandatory)",
+      "grandEn": "Grandfather Name (Mandatory)",
+      "familyEn": "Family Name (Mandatory)",
+      "idNumber": "رقم الهوية أو الإقامة أو السجل (أرقام فقط)",
+      "birthDate": "تاريخ الميلاد الأساسي المكتوب",
       "birthDateHijri": "تاريخ الميلاد بالهجري (مثال: 1405/06/15)",
-      "birthDateGregorian": "تاريخ الميلاد بالميلادي (مثال: 1985/02/05)",
-      "placeOfBirth": "مكان الميلاد / محل الميلاد",
+      "birthDateGregorian": "تاريخ الميلاد بالميلادي بصيغة YYYY-MM-DD",
+      "placeOfBirth": "مكان الميلاد",
       "age": عمر الشخص بالسنوات (Number),
       "nationality": "الجنسية",
-      "confidence": نسبة دقة الاستخراج من 0 إلى 100 (Number)
+      "confidence": نسبة دقة الاستخراج (Number)
     }
     `;
 
