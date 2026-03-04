@@ -1,20 +1,26 @@
-const multer = require('multer');
-const fs = require('fs');
-const path = require('path');
+const multer = require("multer");
+const fs = require("fs");
+const path = require("path");
 const { PrismaClient } = require("@prisma/client");
 const prisma = new PrismaClient();
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    const dir = 'uploads/streets';
+    const dir = "uploads/streets";
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true }); // إنشاء المجلد تلقائياً إذا لم يكن موجوداً
     }
     cb(null, dir);
   },
   filename: (req, file, cb) => {
-    cb(null, Date.now() + '-' + Math.round(Math.random() * 1E9) + path.extname(file.originalname));
-  }
+    cb(
+      null,
+      Date.now() +
+        "-" +
+        Math.round(Math.random() * 1e9) +
+        path.extname(file.originalname),
+    );
+  },
 });
 
 const upload = multer({ storage });
@@ -216,7 +222,7 @@ const getStatistics = async (req, res) => {
 // ===================================================
 /*
   💡 ملاحظة للمبرمج: 
-  عندما تقوم بإنشاء جداول (Transaction, Property, Client) في Prisma،
+  عندما تقوم بإنشاء جداول (Transaction, ownerships, Client) في Prisma،
   يجب أن تضيف لها حقل `districtId`. 
   وبعدها سيتم تغيير هذا الكود ليقوم بالعد التلقائي (Aggregation) مباشرة من الداتابيز كالتالي:
 */
@@ -227,10 +233,10 @@ const getDivisionTree = async (req, res) => {
         districts: {
           include: {
             streets: true,
-            // 🚀 الكود المستقبلي للربط الحقيقي 🚀
-            // _count: {
-            //   select: { properties: true, transactions: true, clients: true }
-            // }
+            // 🚀 تصحيح اسم العلاقة إلى ownerships بدلاً من properties 🚀
+            _count: {
+              select: { ownerships: true, transactions: true, clients: true },
+            },
           },
         },
       },
@@ -265,7 +271,11 @@ const getDivisionTree = async (req, res) => {
     };
 
     const treeData = sectors.map((sector) => {
-      const meta = uiMeta[sector.name] || {
+      // 💡 بحث ذكي عن اللون المطابق لاسم القطاع (لأن الاسم في الداتابيز قد يكون "قطاع شمال الرياض")
+      const matchedKey = Object.keys(uiMeta).find((key) =>
+        sector.name.includes(key),
+      );
+      const meta = uiMeta[matchedKey] || {
         color: "rgb(100, 116, 139)",
         bgLight: "rgba(100, 116, 139, 0.063)",
         icon: "📍",
@@ -276,11 +286,11 @@ const getDivisionTree = async (req, res) => {
       let totalClients = 0;
 
       const mappedNeighborhoods = sector.districts.map((dist) => {
-        // إذا تم تفعيل الـ _count في Prisma، استبدل الأرقام الوهمية بـ: dist._count.transactions
+        // 🚀 جلب الأرقام الحقيقية من قاعدة البيانات مباشرة 🚀
         const nbhStats = {
-          transactions: Math.floor(Math.random() * 250) + 50,
-          properties: Math.floor(Math.random() * 1500) + 500,
-          clients: Math.floor(Math.random() * 300) + 100,
+          transactions: dist._count?.transactions || 0,
+          properties: dist._count?.ownerships || 0,
+          clients: dist._count?.clients || 0,
         };
 
         totalTransactions += nbhStats.transactions;
@@ -308,7 +318,7 @@ const getDivisionTree = async (req, res) => {
       return {
         id: sector.id,
         name: sector.name,
-        fullName: `قطاع ${sector.name} مدينة الرياض`,
+        fullName: sector.name, // استخدمنا الاسم مباشرة ليكون أنظف
         code: sector.code || "N/A",
         officialLink: sector.officialLink || "",
         mapImage: sector.mapImage || null,
@@ -328,11 +338,13 @@ const getDivisionTree = async (req, res) => {
 
     res.json(treeData);
   } catch (error) {
+    console.error("Tree Error:", error); // سيفيدك جداً لطباعة الخطأ الحقيقي في التيرمينال
     res
       .status(500)
       .json({ message: "فشل جلب شجرة التقسيم", error: error.message });
   }
 };
+
 // ===================================================
 // 6. إضافة قطاع جديد
 // ===================================================
@@ -569,94 +581,246 @@ const deletePlan = async (req, res) => {
     res.status(500).json({ message: "فشل حذف المخطط", error: error.message });
   }
 };
-// ===================================================
-// 11. جلب الإحصائيات الشاملة (لتاب StatsTab)
-// ===================================================
+
+
+// دالة مساعدة لحساب نسبة النمو
+const calculateGrowth = (current, previous) => {
+  if (previous === 0) return current > 0 ? 100 : 0;
+  return parseFloat((((current - previous) / previous) * 100).toFixed(1));
+};
+
 const getDashboardStats = async (req, res) => {
   try {
     const { period, sectorId, transactionType } = req.query;
 
-    // 1. حساب الـ KPIs العلوية
-    // (بافتراض وجود جداول Transaction, Client, Property، إذا لم تكن موجودة، سنستخدم أرقاماً مبدئية)
+    // إعداد التواريخ لحساب النمو (آخر 30 يوم مقارنة بالـ 30 يوم التي قبلها)
+    const now = new Date();
+    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const sixtyDaysAgo = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000);
 
-    // ملاحظة: استبدل هذه الأرقام مستقبلاً بـ await prisma.transaction.count() الخ..
+    // ==========================================
+    // 1. حساب الـ KPIs العلوية الحقيقية
+    // ==========================================
+    const [
+      totalTx,
+      prevTx,
+      totalClients,
+      prevClients,
+      totalProps,
+      prevProps,
+      completedTxCurrent,
+      completedTxPrev,
+      rejectedTxCurrent,
+      rejectedTxPrev,
+    ] = await Promise.all([
+      prisma.transaction.count(),
+      prisma.transaction.count({ where: { createdAt: { lt: thirtyDaysAgo } } }),
+
+      prisma.client.count(),
+      prisma.client.count({ where: { createdAt: { lt: thirtyDaysAgo } } }),
+
+      prisma.ownershipFile.count(),
+      prisma.ownershipFile.count({
+        where: { createdAt: { lt: thirtyDaysAgo } },
+      }),
+
+      // المعاملات المنجزة والمرفوضة للشهر الحالي والسابق (لحساب معدلات الإنجاز والرفض)
+      prisma.transaction.count({
+        where: { status: "Completed", completedDate: { gte: thirtyDaysAgo } },
+      }),
+      prisma.transaction.count({
+        where: {
+          status: "Completed",
+          completedDate: { gte: sixtyDaysAgo, lt: thirtyDaysAgo },
+        },
+      }),
+
+      prisma.transaction.count({
+        where: { status: "Rejected", createdAt: { gte: thirtyDaysAgo } },
+      }),
+      prisma.transaction.count({
+        where: {
+          status: "Rejected",
+          createdAt: { gte: sixtyDaysAgo, lt: thirtyDaysAgo },
+        },
+      }),
+    ]);
+
+    // حساب معدلات الرفض
+    const currentTotalForRates =
+      (await prisma.transaction.count({
+        where: { createdAt: { gte: thirtyDaysAgo } },
+      })) || 1;
+    const prevTotalForRates =
+      (await prisma.transaction.count({
+        where: { createdAt: { gte: sixtyDaysAgo, lt: thirtyDaysAgo } },
+      })) || 1;
+
+    const rejectionRate = (
+      (rejectedTxCurrent / currentTotalForRates) *
+      100
+    ).toFixed(1);
+    const prevRejectionRate = (
+      (rejectedTxPrev / prevTotalForRates) *
+      100
+    ).toFixed(1);
+
+    // حساب متوسط وقت الإنجاز (للمعاملات المكتملة)
+    const completedTransactions = await prisma.transaction.findMany({
+      where: { status: "Completed", completedDate: { not: null } },
+      select: { createdAt: true, completedDate: true },
+      take: 100, // نأخذ آخر 100 معاملة كعينة للحساب السريع
+    });
+
+    let avgTime = 0;
+    if (completedTransactions.length > 0) {
+      const totalHours = completedTransactions.reduce((acc, tx) => {
+        return acc + Math.abs(tx.completedDate - tx.createdAt) / 36e5; // فرق الساعات
+      }, 0);
+      avgTime = Math.round(totalHours / completedTransactions.length);
+    }
+
     const kpi = {
-      totalTransactions: 12952,
-      transactionsGrowth: 5.2,
-      totalClients: 8203,
-      clientsGrowth: 3.8,
-      totalProperties: 78456,
-      propertiesGrowth: 1.2,
-      avgCompletionTime: 29, // ساعة
-      completionGrowth: -2.5, // انخفاض يعني تحسن
-      rejectionRate: 4.5,
-      rejectionGrowth: 0.5,
+      totalTransactions: totalTx,
+      transactionsGrowth: calculateGrowth(totalTx, prevTx),
+      totalClients: totalClients,
+      clientsGrowth: calculateGrowth(totalClients, prevClients),
+      totalProperties: totalProps,
+      propertiesGrowth: calculateGrowth(totalProps, prevProps),
+      avgCompletionTime: avgTime || 24, // ساعة
+      completionGrowth: 0, // يمكن تطويرها برمجياً
+      rejectionRate: parseFloat(rejectionRate),
+      rejectionGrowth: (rejectionRate - prevRejectionRate).toFixed(1),
     };
 
+    // ==========================================
     // 2. تحليل حركة المعاملات (Area Chart) لآخر 6 أشهر
-    // (استبدلها مستقبلاً بـ GroupBy على جدول Transactions)
-    const areaData = [
-      { name: "يناير", new: 400, completed: 240 },
-      { name: "فبراير", new: 300, completed: 139 },
-      { name: "مارس", new: 200, completed: 980 },
-      { name: "أبريل", new: 278, completed: 390 },
-      { name: "مايو", new: 189, completed: 480 },
-      { name: "يونيو", new: 239, completed: 380 },
-    ];
+    // ==========================================
+    const areaData = [];
+    // نولد بيانات آخر 6 شهور ديناميكياً
+    for (let i = 5; i >= 0; i--) {
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const endOfMonth = new Date(
+        now.getFullYear(),
+        now.getMonth() - i + 1,
+        0,
+        23,
+        59,
+        59,
+      );
+      const monthName = startOfMonth.toLocaleString("ar-SA", {
+        month: "short",
+      }); // مثال: يناير
 
-    // 3. توزيع أنواع العملاء (Pie Chart)
-    const pieData = [
-      { name: "أفراد", value: 4500, color: "#3b82f6" },
-      { name: "شركات", value: 2500, color: "#8b5cf6" },
-      { name: "جهات حكومية", value: 1203, color: "#10b981" },
-    ];
+      const newCount = await prisma.transaction.count({
+        where: { createdAt: { gte: startOfMonth, lte: endOfMonth } },
+      });
+      const completedCount = await prisma.transaction.count({
+        where: {
+          completedDate: { gte: startOfMonth, lte: endOfMonth },
+          status: "Completed",
+        },
+      });
 
-    // 4. الخريطة الحرارية الحقيقية بناءً على الأحياء الموجودة في قاعدة البيانات
+      areaData.push({
+        name: monthName,
+        new: newCount,
+        completed: completedCount,
+      });
+    }
+
+    // ==========================================
+    // 3. توزيع أنواع العملاء الحقيقي (Pie Chart)
+    // ==========================================
+    const clientsGrouped = await prisma.client.groupBy({
+      by: ["type"],
+      _count: { id: true },
+    });
+
+    const pieColors = {
+      "فرد سعودي": "#3b82f6",
+      "فرد غير سعودي": "#60a5fa",
+      شركة: "#8b5cf6",
+      "جهة حكومية": "#10b981",
+      ورثة: "#f59e0b",
+      وقف: "#14b8a6",
+      "مكتب هندسي": "#06b6d4",
+    };
+
+    const pieData = clientsGrouped
+      .map((group) => ({
+        name: group.type || "غير محدد",
+        value: group._count.id,
+        color: pieColors[group.type] || "#94a3b8", // لون افتراضي
+      }))
+      .filter((item) => item.value > 0); // إخفاء الأنواع التي قيمتها 0
+
+    // ==========================================
+    // 4. الخريطة الحرارية الحقيقية (Heatmap)
+    // ==========================================
     let districtFilter = {};
     if (sectorId && sectorId !== "all") {
       districtFilter.sectorId = sectorId;
     }
 
+    // جلب الأحياء مع معاملاتها
     const districts = await prisma.riyadhDistrict.findMany({
       where: districtFilter,
-      select: { name: true, id: true },
+      select: {
+        name: true,
+        transactions: {
+          select: { category: true }, // جلب تصنيف المعاملة لمعرفة نوعها (فرز، دمج...)
+        },
+      },
     });
 
-    // توليد مصفوفة الخريطة الحرارية (Heatmap)
-    const heatMapData = districts.map((dist) => {
-      // 💡 الكود المستقبلي الحقيقي:
-      // const evalCount = await prisma.transaction.count({ where: { districtId: dist.id, type: 'eval' }});
+    // بناء مصفوفة الخريطة الحرارية
+    const heatMapData = districts
+      .map((dist) => {
+        let evalCount = 0,
+          splitCount = 0,
+          mergeCount = 0,
+          transferCount = 0,
+          licenseCount = 0;
 
-      // كود توليد مؤقت لحين ربط المعاملات
-      const evalCount = Math.floor(Math.random() * 80) + 10;
-      const splitCount = Math.floor(Math.random() * 80) + 10;
-      const mergeCount = Math.floor(Math.random() * 80) + 10;
-      const transferCount = Math.floor(Math.random() * 80) + 10;
-      const licenseCount = Math.floor(Math.random() * 80) + 10;
+        // تصنيف المعاملات الموجودة في هذا الحي (اعتمدت على كلمات دلالية في category)
+        dist.transactions.forEach((tx) => {
+          const cat = tx.category || "";
+          if (cat.includes("تقييم") || cat.includes("تثمين")) evalCount++;
+          else if (cat.includes("فرز")) splitCount++;
+          else if (cat.includes("دمج")) mergeCount++;
+          else if (cat.includes("نقل") || cat.includes("إفراغ"))
+            transferCount++;
+          else if (cat.includes("رخص") || cat.includes("بناء")) licenseCount++;
+          else evalCount++; // افتراضي للأنواع الأخرى
+        });
 
-      return {
-        nbh: dist.name,
-        eval: evalCount,
-        split: splitCount,
-        merge: mergeCount,
-        transfer: transferCount,
-        license: licenseCount,
-        total:
-          evalCount + splitCount + mergeCount + transferCount + licenseCount,
-      };
-    });
+        const total =
+          evalCount + splitCount + mergeCount + transferCount + licenseCount;
 
-    // ترتيب الخريطة الحرارية من الأعلى نشاطاً للأقل
+        return {
+          nbh: dist.name,
+          eval: evalCount,
+          split: splitCount,
+          merge: mergeCount,
+          transfer: transferCount,
+          license: licenseCount,
+          total: total,
+        };
+      })
+      .filter((d) => d.total > 0); // عرض الأحياء التي فيها نشاط فقط
+
+    // ترتيب من الأعلى للأقل نشاطاً
     heatMapData.sort((a, b) => b.total - a.total);
 
     res.json({
       kpi,
       areaData,
       pieData,
-      heatMapData: heatMapData.slice(0, 20), // عرض أعلى 20 حي فقط لتخفيف الواجهة
+      heatMapData: heatMapData.slice(0, 20), // أعلى 20 حي نشاطاً
     });
   } catch (error) {
-    console.error(error);
+    console.error("Dashboard Stats Error:", error);
     res
       .status(500)
       .json({ message: "فشل جلب الإحصائيات", error: error.message });
@@ -1094,25 +1258,41 @@ const addNodeDetail = async (req, res) => {
     const { type, id, tab } = req.params; // tab = 'notes' أو 'regulations'
     const payload = req.body;
 
-    const model = type === 'sector' ? prisma.riyadhSector : prisma.riyadhDistrict;
-    const currentNode = await model.findUnique({ where: { id }, select: { [tab]: true, auditLogs: true } });
-    
+    const model =
+      type === "sector" ? prisma.riyadhSector : prisma.riyadhDistrict;
+    const currentNode = await model.findUnique({
+      where: { id },
+      select: { [tab]: true, auditLogs: true },
+    });
+
     const currentList = Array.isArray(currentNode[tab]) ? currentNode[tab] : [];
-    const newList = [{ id: Date.now().toString(), ...payload, createdAt: new Date().toISOString() }, ...currentList];
+    const newList = [
+      {
+        id: Date.now().toString(),
+        ...payload,
+        createdAt: new Date().toISOString(),
+      },
+      ...currentList,
+    ];
 
     // تسجيل العملية في سجل التدقيق (Audit Log)
-    const currentAudit = Array.isArray(currentNode.auditLogs) ? currentNode.auditLogs : [];
-    const newAudit = [{
-      id: Date.now().toString(),
-      user: req.user?.name || "مدير النظام",
-      action: tab === 'notes' ? "إضافة ملاحظة" : "إضافة اشتراط",
-      newValue: payload.title || payload.type,
-      date: new Date().toLocaleString('ar-SA'),
-    }, ...currentAudit];
+    const currentAudit = Array.isArray(currentNode.auditLogs)
+      ? currentNode.auditLogs
+      : [];
+    const newAudit = [
+      {
+        id: Date.now().toString(),
+        user: req.user?.name || "مدير النظام",
+        action: tab === "notes" ? "إضافة ملاحظة" : "إضافة اشتراط",
+        newValue: payload.title || payload.type,
+        date: new Date().toLocaleString("ar-SA"),
+      },
+      ...currentAudit,
+    ];
 
     await model.update({
       where: { id },
-      data: { [tab]: newList, auditLogs: newAudit }
+      data: { [tab]: newList, auditLogs: newAudit },
     });
 
     res.json({ message: "تمت الإضافة بنجاح" });
@@ -1135,11 +1315,13 @@ const uploadMedia = async (req, res) => {
 
     // 💡 ملحوظة: جدول Attachment يتطلب uploadedById (رقم الموظف)
     // إذا لم يكن لديك نظام تسجيل دخول (Auth) يعمل حالياً، سنجلب أول موظف من الداتابيز لتجنب الأخطاء
-    let uploaderId = req.user?.id; 
+    let uploaderId = req.user?.id;
     if (!uploaderId) {
       const defaultEmployee = await prisma.employee.findFirst();
       if (!defaultEmployee) {
-        return res.status(400).json({ message: "لا يوجد أي موظف مسجل في النظام لربط الملف به!" });
+        return res
+          .status(400)
+          .json({ message: "لا يوجد أي موظف مسجل في النظام لربط الملف به!" });
       }
       uploaderId = defaultEmployee.id;
     }
@@ -1152,9 +1334,9 @@ const uploadMedia = async (req, res) => {
         fileType: file.mimetype,
         fileSize: file.size,
         uploadedById: uploaderId, // الموظف الذي قام بالرفع
-        sectorId: sectorId || null,     // ربط بالقطاع إذا تم التمرير
+        sectorId: sectorId || null, // ربط بالقطاع إذا تم التمرير
         districtId: districtId || null, // ربط بالحي إذا تم التمرير
-      }
+      },
     });
 
     res.status(201).json({ message: "تم الرفع بنجاح", data: newAttachment });
@@ -1163,7 +1345,6 @@ const uploadMedia = async (req, res) => {
     res.status(500).json({ message: "فشل حفظ الملف", error: error.message });
   }
 };
-
 
 // لا تنسَ التصدير
 module.exports = {
@@ -1190,5 +1371,5 @@ module.exports = {
   deleteDistrict,
   getNodeDetails,
   addNodeDetail,
-  uploadMedia
+  uploadMedia,
 };

@@ -280,6 +280,9 @@ model Client {
   notes                String?
   createdBy            String?
 
+  districtId   String?
+  districtNode RiyadhDistrict? @relation(fields: [districtId], references: [id])
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -456,6 +459,10 @@ model Transaction {
   // --- العلاقات ---
   client   Client @relation(fields: [clientId], references: [id])
   clientId String
+
+  // علاقة جديدة مع الحي (التقسيم الإداري)
+  districtId   String?
+  districtNode RiyadhDistrict? @relation(fields: [districtId], references: [id])
 
   // علاقة جديدة مع الملكية (شاشة 310)
   ownership   OwnershipFile? @relation(fields: [ownershipId], references: [id])
@@ -1208,6 +1215,8 @@ model RiyadhDistrict {
   streets        RiyadhStreet[]
   plans          RiyadhPlan[]
   ownerships     OwnershipFile[]
+  clients        Client[] // أضف هذا السطر
+  transactions   Transaction[] // أضف هذا السطر
   createdAt      DateTime        @default(now())
   officialLink   String?
   mapImage       String?

@@ -263,6 +263,9 @@ exports.createProperty = async (req, res) => {
       owners = [],
       boundaries = [],
       attachments = [],
+
+      // 🚀 استقبال معرف الحي من الفرونت إند للربط الإحصائي 🚀
+      districtId,
     } = req.body;
 
     if (!clientId) {
@@ -328,6 +331,7 @@ exports.createProperty = async (req, res) => {
           type: "فرد سعودي",
           contact: {},
           identification: {},
+          ...(districtId && { districtNode: { connect: { id: districtId } } }),
         },
       });
       finalClientId = newClient.id;
@@ -354,7 +358,10 @@ exports.createProperty = async (req, res) => {
         status: "Active",
         notes,
 
-        // 🚀 حفظ كل المصفوفات كـ JSON مباشرة كما هو محدد في Schema
+        // 🚀 إضافة الربط المباشر مع جدول الأحياء (districtId)
+        ...(districtId && { districtNode: { connect: { id: districtId } } }),
+
+        // حفظ المصفوفات
         documents,
         plots,
         owners,
