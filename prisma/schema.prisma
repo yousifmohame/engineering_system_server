@@ -287,13 +287,15 @@ model Client {
   updatedAt DateTime @updatedAt
 
   // --- العلاقات ---
-  ownerships   OwnershipFile[]
-  transactions Transaction[]
-  contracts    Contract[]
-  quotations   Quotation[]
-  attachments  Attachment[]
-  activityLogs ActivityLog[]
-  documents    Document[]
+  ownerships          OwnershipFile[]
+  transactions        Transaction[]
+  contracts           Contract[]
+  quotations          Quotation[]
+  attachments         Attachment[]
+  activityLogs        ActivityLog[]
+  documents           Document[]
+  // داخل model Client
+  privateTransactions PrivateTransaction[] @relation("ClientPrivateTransactions")
 }
 
 model ClientClassification {
@@ -1212,19 +1214,20 @@ model RiyadhDistrict {
   sector   RiyadhSector @relation(fields: [sectorId], references: [id]) // 👈 جديد: الحي ينتمي لقطاع
   sectorId String
 
-  streets        RiyadhStreet[]
-  plans          RiyadhPlan[]
-  ownerships     OwnershipFile[]
-  clients        Client[] // أضف هذا السطر
-  transactions   Transaction[] // أضف هذا السطر
-  createdAt      DateTime        @default(now())
-  officialLink   String?
-  mapImage       String?
-  satelliteImage String?
-  notes          Json?           @default("[]") // لتخزين الملاحظات
-  regulations    Json?           @default("[]") // لتخزين الاشتراطات
-  auditLogs      Json?           @default("[]") // لتخزين سجل التعديلات
-  attachments    Attachment[] // ربط المرفقات
+  streets             RiyadhStreet[]
+  plans               RiyadhPlan[]
+  ownerships          OwnershipFile[]
+  clients             Client[] // أضف هذا السطر
+  transactions        Transaction[] // أضف هذا السطر
+  createdAt           DateTime             @default(now())
+  officialLink        String?
+  mapImage            String?
+  satelliteImage      String?
+  notes               Json?                @default("[]") // لتخزين الملاحظات
+  regulations         Json?                @default("[]") // لتخزين الاشتراطات
+  auditLogs           Json?                @default("[]") // لتخزين سجل التعديلات
+  attachments         Attachment[] // ربط المرفقات
+  privateTransactions PrivateTransaction[] @relation("DistrictPrivateTransactions")
 }
 
 model RiyadhStreet {
@@ -1307,4 +1310,112 @@ model Message {
 
   sender   Employee @relation("SenderToMessage", fields: [senderId], references: [id])
   senderId String
+}
+
+// ===============================================
+// 10. النظام الداخلي الموازي (Private / Shadow System)
+// ===============================================
+
+model PrivateTransaction {
+  id              String @id @default(cuid())
+  transactionCode String @unique // مثال: PTX-2026-001
+  title           String
+
+  // --- البيانات الأساسية ---
+  status      String  @default("جديدة")
+  description String?
+  category    String? // نوع المعاملة (إصدار، تعديل...)
+  complexity  String? // نوع الرفع (برافع، بدون...)
+  source      String? // مصدر المعاملة
+
+  // --- البيانات المالية (مفصولة تماماً عن الحسابات الرسمية) ---
+  totalFees       Float? @default(0)
+  paidAmount      Float? @default(0)
+  remainingAmount Float? @default(0)
+
+  // --- التفاصيل (تُحفظ كـ JSON لتقليل الجداول المرتبطة) ---
+  authorities String[] // الجهات (أمانة، هيئة...)
+  attachments String[] // المرفقات المستلمة
+  notes       Json?    @default("{}") // نحفظ هنا: رقم القطعة، المخطط، والوسطاء والمعقبين
+
+  // --- العلاقات مع الجداول الأساسية ---
+  clientId String
+  client   Client @relation("ClientPrivateTransactions", fields: [clientId], references: [id])
+
+  districtId   String?
+  districtNode RiyadhDistrict? @relation("DistrictPrivateTransactions", fields: [districtId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  payments PrivatePayment[]
+
+  @@index([clientId])
+  @@index([districtId])
+}
+
+// ===============================================
+// نموذج مدفوعات النظام الداخلي (مفصول عن المدفوعات الرسمية)
+// ===============================================
+model PrivatePayment {
+  id        String   @id @default(cuid())
+  amount    Float
+  date      DateTime @db.Date
+  method    String // بنكي، نقدي، غير مسلم للشركة
+  periodRef String? // فترة التحصيل / الدفعة
+
+  collectedFromType String // من أشخاص النظام، شخص آخر
+  collectedFromId   String? // معرف الشخص (عميل/موظف)
+  collectedFromName String? // اسم الشخص (إذا كان خارجي)
+
+  bankAccountId String? // حساب البنك (إن وجد)
+  receiverId    String? // الموظف المستلم
+  notes         String? @db.Text
+  receiptImage  String? // مسار المرفق (الإيصال)
+
+  // الربط مع المعاملة الداخلية
+  transaction   PrivateTransaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  transactionId String
+
+  createdAt DateTime @default(now())
+}
+
+// ===============================================
+// نموذج تسويات النظام الداخلي (الوسطاء والشركاء)
+// ===============================================
+model PrivateSettlement {
+  id              String   @id @default(cuid())
+  
+  // نوع التسوية (شريك، وسيط، معقب، موظف...)
+  targetType      String   
+  
+  // معرف الموظف/الوسيط (مربوط بجدول الموظفين إذا كان مسجلاً بالنظام)
+  targetId        String?  
+  targetName      String?  // في حال كان شخصاً خارجياً غير مسجل
+
+  amount          Float    // المبلغ
+  
+  // الحالة: PENDING (تم تسجيل التسوية فقط)، DELIVERED (تم تسليم المبلغ الفعلي)
+  status          String   @default("PENDING") 
+
+  // تفاصيل التسليم
+  deliveryMethod  String?  // نقدي، تحويل بنكي
+  deliveryDate    DateTime? @db.Date
+  deliveredById   String?  // من قام بتسليمه
+  
+  // تفاصيل إضافية
+  source          String?  // مصدر المعاملة
+  periodRef       String?  // الفترة السابقة
+  notes           String?  @db.Text
+  attachmentPath  String?  // المرفق (الإيصال)
+
+  // هل هذا رصيد افتتاحي (تسوية سابقة)؟
+  isOpeningBalance Boolean @default(false)
+  openingTotal     Float?  @default(0) // إجمالي ما تم تسويته سابقاً
+  openingDelivered Float?  @default(0) // إجمالي ما تم تسليمه سابقاً
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([targetId])
 }
