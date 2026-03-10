@@ -119,7 +119,7 @@ const getBrokerTransactions = async (req, res) => {
   try {
     const { brokerId } = req.params;
 
-    // 💡 البحث الصحيح في الأعمدة الحقيقية (بدلاً من الـ JSON)
+    // 💡 التحديث هنا: البحث في الأعمدة الأساسية + البحث في جدول الوسطاء المتعددين (brokersList)
     const transactions = await prisma.privateTransaction.findMany({
       where: {
         OR: [
@@ -128,6 +128,8 @@ const getBrokerTransactions = async (req, res) => {
           { stakeholderId: brokerId },
           { receiverId: brokerId },
           { engOfficeBrokerId: brokerId },
+          // 🚀 إضافة هذا السطر للبحث داخل الجدول الجديد (TransactionBroker)
+          { brokersList: { some: { brokerId: brokerId } } },
         ],
       },
       include: {
@@ -135,6 +137,8 @@ const getBrokerTransactions = async (req, res) => {
         districtNode: {
           select: { name: true, sector: { select: { name: true } } },
         },
+        // 🚀 تضمين جدول الوسطاء لمعرفة أتعاب الوسيط المطلوب تحديداً
+        brokersList: true,
       },
       orderBy: { createdAt: "desc" },
     });
@@ -148,6 +152,18 @@ const getBrokerTransactions = async (req, res) => {
             : tx.client.name.ar;
       }
 
+      // 💡 محاولة استخراج الأتعاب الخاصة بهذا الوسيط تحديداً في هذه المعاملة
+      let specificBrokerFees = 0;
+      const notes =
+        typeof tx.notes === "object" && tx.notes !== null ? tx.notes : {};
+
+      // إذا كان هو الوسيط الأساسي القديم
+      if (tx.brokerId === brokerId)
+        specificBrokerFees = notes.mediatorFees || 0;
+      // أو نبحث عن أتعابه في الجدول المتعدد
+      const foundInList = tx.brokersList?.find((b) => b.brokerId === brokerId);
+      if (foundInList) specificBrokerFees = foundInList.fees;
+
       return {
         id: tx.id,
         ref: tx.transactionCode,
@@ -158,6 +174,10 @@ const getBrokerTransactions = async (req, res) => {
         totalFees: tx.totalFees || 0,
         paidAmount: tx.paidAmount || 0,
         remainingAmount: tx.remainingAmount || 0,
+
+        // 🚀 إضافة حقل الأتعاب المستحقة للوسيط في هذه المعاملة للواجهة
+        personalFees: specificBrokerFees,
+
         status: tx.status,
         date: tx.createdAt.toISOString().split("T")[0],
       };
