@@ -1328,94 +1328,382 @@ model PrivateTransaction {
   complexity  String? // نوع الرفع (برافع، بدون...)
   source      String? // مصدر المعاملة
 
-  // --- البيانات المالية (مفصولة تماماً عن الحسابات الرسمية) ---
+  // --- البيانات المالية ---
   totalFees       Float? @default(0)
   paidAmount      Float? @default(0)
   remainingAmount Float? @default(0)
 
-  // --- التفاصيل (تُحفظ كـ JSON لتقليل الجداول المرتبطة) ---
-  authorities String[] // الجهات (أمانة، هيئة...)
-  attachments String[] // المرفقات المستلمة
-  notes       Json?    @default("{}") // نحفظ هنا: رقم القطعة، المخطط، والوسطاء والمعقبين
+  // --- التفاصيل ---
+  authorities String[]
+  attachments String[]
+  notes       Json?    @default("{}")
 
-  // --- العلاقات مع الجداول الأساسية ---
+  // --- العلاقات الأساسية ---
   clientId String
   client   Client @relation("ClientPrivateTransactions", fields: [clientId], references: [id])
 
   districtId   String?
   districtNode RiyadhDistrict? @relation("DistrictPrivateTransactions", fields: [districtId], references: [id])
 
+  // 👈 علاقات عكسية (One-to-Many) للربط المالي
+  payments      PrivatePayment[]
+  settlements   PrivateSettlement[]
+  disbursements Disbursement[]
+  treasuryLogs  TreasuryTransaction[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  payments PrivatePayment[]
+  // --- العلاقات مع سجل الأشخاص (الأدوار) ---
+  brokerId String?
+  broker   Person? @relation("TxBroker", fields: [brokerId], references: [id])
+
+  agentId String?
+  agent   Person? @relation("TxAgent", fields: [agentId], references: [id])
+
+  stakeholderId String?
+  stakeholder   Person? @relation("TxStakeholder", fields: [stakeholderId], references: [id])
+
+  receiverId String?
+  receiver   Person? @relation("TxReceiver", fields: [receiverId], references: [id])
+
+  engOfficeBrokerId String?
+  engOfficeBroker   Person? @relation("TxEngBroker", fields: [engOfficeBrokerId], references: [id])
 
   @@index([clientId])
   @@index([districtId])
 }
 
 // ===============================================
-// نموذج مدفوعات النظام الداخلي (مفصول عن المدفوعات الرسمية)
+// مدفوعات النظام الداخلي
 // ===============================================
 model PrivatePayment {
   id        String   @id @default(cuid())
   amount    Float
   date      DateTime @db.Date
-  method    String // بنكي، نقدي، غير مسلم للشركة
-  periodRef String? // فترة التحصيل / الدفعة
+  method    String
+  periodRef String?
 
+  // 👈 الربط مع سجل الأشخاص (من دفع؟)
   collectedFromType String // من أشخاص النظام، شخص آخر
-  collectedFromId   String? // معرف الشخص (عميل/موظف)
-  collectedFromName String? // اسم الشخص (إذا كان خارجي)
+  collectedFromId   String?
+  collectedFrom     Person? @relation("PaymentCollector", fields: [collectedFromId], references: [id])
+  collectedFromName String? // يستخدم فقط إذا كان شخصاً خارجياً غير مسجل
 
-  bankAccountId String? // حساب البنك (إن وجد)
-  receiverId    String? // الموظف المستلم
-  notes         String? @db.Text
-  receiptImage  String? // مسار المرفق (الإيصال)
+  // 👈 الربط مع سجل الأشخاص (الموظف المستلم)
+  receiverId String?
+  receiver   Person? @relation("PaymentReceiver", fields: [receiverId], references: [id])
 
-  // الربط مع المعاملة الداخلية
-  transaction   PrivateTransaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  // 👈 الربط مع البنك
+  bankAccountId String?
+  bankAccount   BankAccount? @relation(fields: [bankAccountId], references: [id])
+
+  notes        String? @db.Text
+  receiptImage String?
+
+  // الربط مع المعاملة
   transactionId String
+  transaction   PrivateTransaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([collectedFromId])
+  @@index([receiverId])
+  @@index([bankAccountId])
+}
+
+// ===============================================
+// تسويات النظام الداخلي
+// ===============================================
+model PrivateSettlement {
+  id         String @id @default(cuid())
+  targetType String
+
+  // 👈 الربط مع المستفيد (شريك، وسيط، معقب)
+  targetId   String?
+  target     Person? @relation("SettlementTarget", fields: [targetId], references: [id])
+  targetName String? // شخص خارجي
+
+  amount Float
+  status String @default("PENDING")
+
+  deliveryMethod String?
+  deliveryDate   DateTime? @db.Date
+
+  // 👈 الربط مع من قام بتسليم المبلغ
+  deliveredById String?
+  deliveredBy   Person? @relation("SettlementDeliverer", fields: [deliveredById], references: [id])
+
+  // 👈 الربط مع المعاملة (إذا كانت التسوية تخص معاملة محددة)
+  transactionId String?
+  transaction   PrivateTransaction? @relation(fields: [transactionId], references: [id])
+
+  source         String?
+  periodRef      String?
+  notes          String? @db.Text
+  attachmentPath String?
+
+  isOpeningBalance Boolean @default(false)
+  openingTotal     Float?  @default(0)
+  openingDelivered Float?  @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([targetId])
+  @@index([deliveredById])
+  @@index([transactionId])
+}
+
+// ===============================================
+// المكاتب المتعاونة
+// ===============================================
+model CoopOffice {
+  id            String  @id @default(cuid())
+  name          String
+  contactName   String?
+  phone         String?
+  agreementType String  @default("حسب عدد المعاملات")
+  monthlyAmount Float?  @default(0)
+
+  // 👈 الربط مع سجل الأشخاص (المسؤول من طرفكم)
+  responsibleId String?
+  responsible   Person? @relation("OfficeResponsible", fields: [responsibleId], references: [id])
+
+  isLinkedToSystem Boolean @default(false)
+  notes            String? @db.Text
+
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+  fees      CoopOfficeFee[]
+}
+
+model CoopOfficeFee {
+  id              String @id @default(cuid())
+  transactionCode String @unique
+  internalName    String
+
+  officeId String
+  office   CoopOffice @relation(fields: [officeId], references: [id])
+
+  isSurveyOnly Boolean @default(false)
+  isPrepToo    Boolean @default(false)
+
+  officeFees Float
+  paidAmount Float     @default(0)
+  dueDate    DateTime?
+
+  status String  @default("غير مدفوع")
+  notes  String? @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ===============================================
+// مصروفات المكتب
+// ===============================================
+model OfficeExpense {
+  id     String @id @default(cuid())
+  item   String
+  amount Float
+
+  // 👈 الربط مع الأشخاص
+  payerId   String?
+  payer     Person? @relation("ExpensePayer", fields: [payerId], references: [id])
+  payerName String? // في حال كان كيان خارجي (الشركة مثلاً)
+
+  payeeId   String?
+  payee     Person? @relation("ExpensePayee", fields: [payeeId], references: [id])
+  payeeName String? // جهة خارجية (شركة الكهرباء)
+
+  method        String
+  source        String
+  expenseDate   DateTime
+  notes         String?  @db.Text
+  attachmentUrl String?
+
+  isClearable      Boolean @default(false)
+  linkToSettlement Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ===============================================
+// حركات الخزنة
+// ===============================================
+model TreasuryTransaction {
+  id        String   @id @default(cuid())
+  type      String
+  amount    Float
+  date      DateTime
+  statement String?
+
+  // 👈 الربط مع المعاملات (إذا كانت الحركة مرتبطة بمعاملة)
+  transactionId String?
+  transaction   PrivateTransaction? @relation(fields: [transactionId], references: [id])
+
+  // 👈 الربط مع الأشخاص (المستفيد / المودع)
+  personId      String?
+  person        Person? @relation("TreasuryPerson", fields: [personId], references: [id])
+  referenceText String? // نص مرجعي إضافي
+
+  notes         String? @db.Text
+  attachmentUrl String?
+  metadata      Json?
+
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model TreasurySettings {
+  id      Int     @id @default(1)
+  enabled Boolean @default(true)
+  type    String  @default("نسبة مئوية")
+  value   Float   @default(27.3)
+  method  String  @default("على كل معاملة")
+
+  updatedAt DateTime @updatedAt
+}
+
+// ===============================================
+// الحسابات البنكية
+// ===============================================
+model BankAccount {
+  id            String  @id @default(cuid())
+  bankName      String
+  accountName   String?
+  accountNumber String  @unique
+  iban          String?
+
+  // 👈 الربط مع الأشخاص
+  openedById String?
+  openedBy   Person? @relation("AccountOpener", fields: [openedById], references: [id])
+
+  controlledById String?
+  controlledBy   Person? @relation("AccountController", fields: [controlledById], references: [id])
+
+  openDate          DateTime?
+  authorizedPersons String?
+
+  initialBalance      Float     @default(0)
+  initialBalanceDate  DateTime?
+  initialBalanceNotes String?
+
+  systemBalance   Float @default(0)
+  externalBalance Float @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  transactions    BankTransaction[]
+  privatePayments PrivatePayment[]
+}
+
+model BankTransaction {
+  id        String      @id @default(cuid())
+  accountId String
+  account   BankAccount @relation(fields: [accountId], references: [id])
+
+  type   String
+  amount Float
+
+  // 👈 الربط مع الشريك عند الشحن
+  partnerId String?
+  partner   Person? @relation("BankTxPartner", fields: [partnerId], references: [id])
+
+  date  DateTime
+  notes String?
 
   createdAt DateTime @default(now())
 }
 
 // ===============================================
-// نموذج تسويات النظام الداخلي (الوسطاء والشركاء)
+// أوامر الصرف (Disbursements)
 // ===============================================
-model PrivateSettlement {
-  id              String   @id @default(cuid())
-  
-  // نوع التسوية (شريك، وسيط، معقب، موظف...)
-  targetType      String   
-  
-  // معرف الموظف/الوسيط (مربوط بجدول الموظفين إذا كان مسجلاً بالنظام)
-  targetId        String?  
-  targetName      String?  // في حال كان شخصاً خارجياً غير مسجل
+model Disbursement {
+  id            String @id @default(cuid())
+  requestNumber String @unique
+  type          String
 
-  amount          Float    // المبلغ
-  
-  // الحالة: PENDING (تم تسجيل التسوية فقط)، DELIVERED (تم تسليم المبلغ الفعلي)
-  status          String   @default("PENDING") 
+  // 👈 الربط مع المستفيد
+  beneficiaryId   String?
+  beneficiary     Person? @relation("DisbursementBeneficiary", fields: [beneficiaryId], references: [id])
+  beneficiaryName String? // في حال المستفيد خارجي غير مسجل
 
-  // تفاصيل التسليم
-  deliveryMethod  String?  // نقدي، تحويل بنكي
-  deliveryDate    DateTime? @db.Date
-  deliveredById   String?  // من قام بتسليمه
-  
-  // تفاصيل إضافية
-  source          String?  // مصدر المعاملة
-  periodRef       String?  // الفترة السابقة
-  notes           String?  @db.Text
-  attachmentPath  String?  // المرفق (الإيصال)
+  amount            Float
+  date              DateTime
+  reason            String
+  notes             String?  @db.Text
+  requestAttachment String?
 
-  // هل هذا رصيد افتتاحي (تسوية سابقة)؟
-  isOpeningBalance Boolean @default(false)
-  openingTotal     Float?  @default(0) // إجمالي ما تم تسويته سابقاً
-  openingDelivered Float?  @default(0) // إجمالي ما تم تسليمه سابقاً
+  // 👈 الربط بالمعاملة
+  isRelatedToTx Boolean             @default(false)
+  transactionId String?
+  transaction   PrivateTransaction? @relation(fields: [transactionId], references: [id])
 
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  department String?
+  importance String?
 
-  @@index([targetId])
+  repaymentType      String?
+  expectedReturnDate DateTime?
+  repaymentMethod    String?
+
+  status          String @default("معلق")
+  repaymentStatus String @default("غير مطلوب")
+  remainingAmount Float?
+
+  executionMethod     String?
+  executionReference  String?
+  executionNotes      String?   @db.Text
+  executionAttachment String?
+  executedAt          DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ===============================================
+// سجل الأشخاص (المركز الأساسي)
+// ===============================================
+model Person {
+  id            String  @id @default(cuid())
+  personCode    String  @unique
+  name          String
+  role          String
+  phone         String?
+  agreementType String?
+  notes         String? @db.Text
+  attachments   Json?
+
+  // 👈 جميع العلاقات العكسية (لتسهيل استخراج كشف حساب/ملف للشخص)
+  paymentsCollected PrivatePayment[] @relation("PaymentCollector")
+  paymentsReceived  PrivatePayment[] @relation("PaymentReceiver")
+
+  settlementsTarget   PrivateSettlement[] @relation("SettlementTarget")
+  settlementsDelivred PrivateSettlement[] @relation("SettlementDeliverer")
+
+  expensesPaid     OfficeExpense[] @relation("ExpensePayer")
+  expensesReceived OfficeExpense[] @relation("ExpensePayee")
+
+  treasuryLogs TreasuryTransaction[] @relation("TreasuryPerson")
+
+  disbursements Disbursement[] @relation("DisbursementBeneficiary")
+
+  bankAccountsOpened BankAccount[]     @relation("AccountOpener")
+  bankAccountsCtrl   BankAccount[]     @relation("AccountController")
+  bankTransactions   BankTransaction[] @relation("BankTxPartner")
+
+  officesResponsible CoopOffice[] @relation("OfficeResponsible")
+
+  createdAt               DateTime             @default(now())
+  updatedAt               DateTime             @updatedAt
+  brokeredTransactions    PrivateTransaction[] @relation("TxBroker")
+  agentTransactions       PrivateTransaction[] @relation("TxAgent")
+  stakeholderTransactions PrivateTransaction[] @relation("TxStakeholder")
+  receivedTransactions    PrivateTransaction[] @relation("TxReceiver")
+  engBrokeredTransactions PrivateTransaction[] @relation("TxEngBroker")
 }

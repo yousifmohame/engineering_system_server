@@ -12,6 +12,7 @@ const {
   getBrokerTransactions,
   getBrokerSettlementsList,
   getBrokerPaymentsList,
+  deleteBrokerSettlements
 } = require("../controllers/privateSettlementController");
 
 router.use(protect);
@@ -22,5 +23,6 @@ router.post("/deliver", upload.single("file"), deliverSettlement);
 router.get("/broker/:brokerId/transactions", getBrokerTransactions);
 router.get("/broker/:brokerId/settlements", getBrokerSettlementsList);
 router.get("/broker/:brokerId/payments", getBrokerPaymentsList);
+router.delete("/broker/:brokerId", deleteBrokerSettlements);
 
 module.exports = router;

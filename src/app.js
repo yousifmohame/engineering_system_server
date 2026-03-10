@@ -25,6 +25,9 @@ app.use(morgan("dev"));
 app.use(express.json({ limit: "100mb" }));
 app.use(express.urlencoded({ limit: "100mb", extended: true }));
 
+app.use("/api/uploads", express.static(path.join(__dirname, "../uploads")));
+app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
+
 const authRoutes = require("./routes/authRoutes");
 app.use("/api/auth", authRoutes);
 
@@ -36,6 +39,33 @@ app.use("/api/private-transactions", privateTransactionRoutes);
 
 const privateSettlementRoutes = require("./routes/privateSettlementRoutes");
 app.use("/api/private-settlements", privateSettlementRoutes);
+
+const coopOfficeRoutes = require("./routes/coopOfficeRoutes");
+app.use("/api/coop-offices", coopOfficeRoutes);
+
+const coopOfficeFeeRoutes = require("./routes/coopOfficeFeeRoutes");
+app.use("/api/coop-office-fees", coopOfficeFeeRoutes);
+
+const officeExpenseRoutes = require("./routes/officeExpenseRoutes");
+app.use("/api/office-expenses", officeExpenseRoutes);
+
+const treasuryRoutes = require("./routes/treasuryRoutes");
+app.use("/api/treasury", treasuryRoutes);
+
+const bankAccountRoutes = require("./routes/bankAccountRoutes");
+app.use("/api/bank-accounts", bankAccountRoutes);
+
+const disbursementRoutes = require("./routes/disbursementRoutes");
+app.use("/api/disbursements", disbursementRoutes);
+
+const personRoutes = require("./routes/personRoutes");
+app.use("/api/persons", personRoutes);
+
+const financeRoutes = require("./routes/financeRoutes");
+app.use("/api/finance", financeRoutes);
+
+const financialDashboardRoutes = require("./routes/financialDashboardRoutes");
+app.use("/api/financial-dashboard", financialDashboardRoutes);
 
 const clientRoutes = require("./routes/clientRoutes");
 app.use("/api/clients", clientRoutes);

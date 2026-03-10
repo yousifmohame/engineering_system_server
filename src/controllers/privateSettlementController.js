@@ -1,13 +1,16 @@
 const { PrismaClient } = require("@prisma/client");
 const prisma = new PrismaClient();
 
-// 1. جلب إحصائيات لوحة التسويات
+// ==================================================
+// 1. جلب إحصائيات لوحة التسويات (الإصدار الدقيق 100%)
+// GET /api/private-settlements/dashboard?type=شريك
+// ==================================================
 const getSettlementsDashboard = async (req, res) => {
   try {
-    // حساب الرصيد البنكي والنقدي والغير مسلم (من المدفوعات التي تم تحصيلها PrivatePayment)
-    // ملاحظة: نفترض أن لديك جدول PrivatePayment كما فعلنا في الطلب السابق
-    const payments = await prisma.privatePayment.findMany();
+    const targetTypeFilter = req.query.type || "شريك";
 
+    // 1. حساب الرصيد البنكي والنقدي والغير مسلم للملخص العلوي
+    const payments = await prisma.privatePayment.findMany();
     let bankBalance = 0;
     let cashBalance = 0;
     let undelivered = 0;
@@ -18,45 +21,78 @@ const getSettlementsDashboard = async (req, res) => {
       if (p.method === "غير مسلم للشركة") undelivered += p.amount;
     });
 
-    const taxEstimate = (bankBalance + cashBalance) * 0.15; // تقدير ضريبي 15% كمثال
+    const taxEstimate = (bankBalance + cashBalance) * 0.15;
     const availableBalance =
       bankBalance + cashBalance - taxEstimate - undelivered;
 
-    // جلب قائمة الوسطاء (نجلب الموظفين الذين لديهم معاملات أو تسويات)
-    // للتبسيط في هذا المثال، سنرسل قائمة مجمعة
-    const settlements = await prisma.privateSettlement.findMany({
-      orderBy: { createdAt: "desc" },
+    // 2. 💡 الجلب الدقيق: نجلب الأشخاص بناءً على نوعهم مع جميع علاقاتهم بالمعاملات والتسويات
+    const persons = await prisma.person.findMany({
+      where: { role: targetTypeFilter },
+      include: {
+        // نجلب الـ ID فقط لعد المعاملات الحقيقية لتخفيف الضغط على السيرفر
+        brokeredTransactions: { select: { id: true } },
+        agentTransactions: { select: { id: true } },
+        stakeholderTransactions: { select: { id: true } },
+
+        // نجلب التسويات لحساب المبالغ المالية
+        settlementsTarget: true,
+      },
     });
 
-    // تجميع بيانات الوسطاء (يمكن تحسين هذا بـ SQL Group By)
-    const brokersMap = {};
-    settlements.forEach((s) => {
-      const key = s.targetId || s.targetName || "مجهول";
-      if (!brokersMap[key]) {
-        brokersMap[key] = {
-          id: key,
-          name: s.targetName || "تم السحب من النظام", // يفترض جلب الاسم من جدول Employees
-          txCount: 0,
-          totalFees: 0,
-          received: 0,
-          remaining: 0,
-          lastPayment: null,
-          statusText: "غير محدد",
-        };
+    // 3. تنسيق البيانات وحساب الأرقام بدقة متناهية
+    const formattedBrokers = persons.map((person) => {
+      // أ) حساب عدد المعاملات الحقيقي بناءً على دور الشخص
+      let realTxCount = 0;
+      if (targetTypeFilter === "وسيط")
+        realTxCount = person.brokeredTransactions.length;
+      else if (targetTypeFilter === "معقب")
+        realTxCount = person.agentTransactions.length;
+      else if (targetTypeFilter === "صاحب مصلحة")
+        realTxCount = person.stakeholderTransactions.length;
+      else {
+        // للشركاء أو الموظفين (نجمع كل ما شاركوا فيه)
+        realTxCount =
+          person.brokeredTransactions.length +
+          person.agentTransactions.length +
+          person.stakeholderTransactions.length;
       }
 
-      brokersMap[key].txCount += 1;
-      brokersMap[key].totalFees += s.amount;
-      if (s.status === "DELIVERED") {
-        brokersMap[key].received += s.amount;
-        brokersMap[key].lastPayment = s.deliveryDate || s.createdAt;
-      }
-    });
+      // ب) حساب المبالغ المالية من جدول التسويات المرتبط به
+      let totalFees = 0;
+      let received = 0;
 
-    Object.values(brokersMap).forEach((b) => {
-      b.remaining = b.totalFees - b.received;
-      b.statusText =
-        b.remaining === 0 ? "مُسوّى" : b.received > 0 ? "جزئي" : "غير مدفوع";
+      person.settlementsTarget.forEach((s) => {
+        // إذا كانت مستحقات (دين للوسيط/الشريك)
+        if (
+          s.status === "PENDING" ||
+          (s.status === "PENDING" && s.isOpeningBalance)
+        ) {
+          totalFees += s.amount;
+        }
+        // إذا تم تسليمها
+        if (s.status === "DELIVERED") {
+          received += s.amount;
+        }
+      });
+
+      const remaining = totalFees - received;
+
+      return {
+        id: person.id,
+        name: person.name,
+        txCount: realTxCount, // 👈 هنا يكمن السحر! الرقم الحقيقي للمعاملات
+        totalFees: totalFees,
+        received: received,
+        remaining: remaining,
+        statusText:
+          remaining <= 0 && totalFees > 0
+            ? "مُسوّى"
+            : received > 0 && remaining > 0
+              ? "جزئي"
+              : remaining > 0
+                ? "غير مدفوع"
+                : "لا يوجد مستحقات",
+      };
     });
 
     res.json({
@@ -68,97 +104,31 @@ const getSettlementsDashboard = async (req, res) => {
         undelivered,
         availableBalance,
       },
-      brokers: Object.values(brokersMap),
+      brokers: formattedBrokers, // نرسلها للفرونت إند ليعرضها في الجدول
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
-
-// 2. تسجيل تسوية سابقة (رصيد افتتاحي)
-const addPreviousSettlement = async (req, res) => {
-  try {
-    const data = req.body;
-    await prisma.privateSettlement.create({
-      data: {
-        targetType: data.type,
-        targetId: data.targetId,
-        amount: parseFloat(data.remaining), // المبلغ المتبقي كدين
-        isOpeningBalance: true,
-        openingTotal: parseFloat(data.totalSettled),
-        openingDelivered: parseFloat(data.totalDelivered),
-        periodRef: data.periodDate,
-        notes: data.notes,
-        status: "PENDING",
-      },
-    });
-    res.json({ success: true, message: "تم تسجيل التسوية السابقة" });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
-
-// 3. تسجيل تسوية (مستحقات وسيط)
-const recordSettlement = async (req, res) => {
-  try {
-    const data = req.body;
-    await prisma.privateSettlement.create({
-      data: {
-        targetType: data.type,
-        targetName: data.name, // ممكن يكون نص حر
-        amount: parseFloat(data.amount),
-        source: data.source,
-        notes: data.notes,
-        status: "PENDING",
-      },
-    });
-    res.json({ success: true, message: "تم تسجيل التسوية بنجاح" });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
-
-// 4. تسليم تسوية (دفع للوسيط)
-const deliverSettlement = async (req, res) => {
-  try {
-    const data = req.body;
-    let attachmentPath = null;
-    if (req.file) attachmentPath = `/uploads/settlements/${req.file.filename}`;
-
-    await prisma.privateSettlement.create({
-      data: {
-        targetType: data.type,
-        targetId: data.targetId,
-        amount: parseFloat(data.amount),
-        deliveryMethod: data.method,
-        deliveryDate: new Date(data.date),
-        deliveredById: data.deliveredById,
-        notes: data.notes,
-        attachmentPath,
-        status: "DELIVERED",
-      },
-    });
-    res.json({ success: true, message: "تم تسليم التسوية بنجاح" });
-  } catch (error) {
+    console.error("Dashboard Error:", error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
 // ==================================================
-// 5. جلب معاملات وسيط محدد
-// GET /api/private-settlements/broker/:brokerId/transactions
+// 2. جلب معاملات شخص محدد (وسيط، معقب، شريك...)
 // ==================================================
 const getBrokerTransactions = async (req, res) => {
   try {
     const { brokerId } = req.params;
 
-    // البحث في المعاملات حيث يكون الـ brokerId داخل حقل notes (JSON)
+    // 💡 البحث الصحيح في الأعمدة الحقيقية (بدلاً من الـ JSON)
     const transactions = await prisma.privateTransaction.findMany({
       where: {
-        notes: {
-          path: ["roles", "brokerId"],
-          equals: brokerId,
-        },
+        OR: [
+          { brokerId: brokerId },
+          { agentId: brokerId },
+          { stakeholderId: brokerId },
+          { receiverId: brokerId },
+          { engOfficeBrokerId: brokerId },
+        ],
       },
       include: {
         client: { select: { name: true } },
@@ -169,7 +139,6 @@ const getBrokerTransactions = async (req, res) => {
       orderBy: { createdAt: "desc" },
     });
 
-    // تنسيق البيانات للفرونت إند
     const formattedData = transactions.map((tx) => {
       let clientName = "غير محدد";
       if (tx.client?.name) {
@@ -202,48 +171,50 @@ const getBrokerTransactions = async (req, res) => {
 };
 
 // ==================================================
-// 6. جلب سجل تسويات وسيط محدد
-// GET /api/private-settlements/broker/:brokerId/settlements
+// 3. جلب سجل تسويات (مستحقات) شخص محدد
 // ==================================================
 const getBrokerSettlementsList = async (req, res) => {
   try {
     const { brokerId } = req.params;
 
     const settlements = await prisma.privateSettlement.findMany({
-      where: { targetId: brokerId },
+      where: {
+        targetId: brokerId,
+        status: "PENDING", // فقط المستحقات
+      },
       orderBy: { createdAt: "desc" },
     });
 
     const formattedData = settlements.map((s) => ({
       id: s.id,
-      ref: `SET-${s.id.substring(s.id.length - 5).toUpperCase()}`, // إنشاء مرجع وهمي مؤقت
+      ref: `SET-${s.id.substring(s.id.length - 5).toUpperCase()}`,
       amount: s.amount,
       status: s.status,
-      type: s.isOpeningBalance ? "رصيد افتتاحي" : "تسوية",
+      type: s.isOpeningBalance ? "رصيد افتتاحي" : "تسوية أتعاب",
       notes: s.notes || "—",
       date: s.createdAt.toISOString().split("T")[0],
     }));
 
     res.json({ success: true, data: formattedData });
   } catch (error) {
-    console.error("Get Broker Settlements Error:", error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
 // ==================================================
-// 7. جلب سجل مدفوعات وسيط محدد (ما تم تسليمه له)
-// GET /api/private-settlements/broker/:brokerId/payments
+// 4. جلب سجل مدفوعات (تسليمات) شخص محدد
 // ==================================================
 const getBrokerPaymentsList = async (req, res) => {
   try {
     const { brokerId } = req.params;
 
-    // نجلب فقط التسويات التي حالتها DELIVERED
     const payments = await prisma.privateSettlement.findMany({
       where: {
         targetId: brokerId,
         status: "DELIVERED",
+      },
+      include: {
+        deliveredBy: { select: { name: true } }, // 👈 جلب اسم الموظف المسلّم
       },
       orderBy: { deliveryDate: "desc" },
     });
@@ -256,22 +227,155 @@ const getBrokerPaymentsList = async (req, res) => {
       date: p.deliveryDate
         ? p.deliveryDate.toISOString().split("T")[0]
         : p.createdAt.toISOString().split("T")[0],
-      deliveredBy: "تم بواسطة النظام", // يجب ربطه بـ deliveredById في الحقيقة
+      deliveredBy: p.deliveredBy?.name || "النظام", // 👈 عرض اسم الموظف
     }));
 
     res.json({ success: true, data: formattedData });
   } catch (error) {
-    console.error("Get Broker Payments Error:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ==================================================
+// 5. تسجيل تسوية سابقة (رصيد افتتاحي)
+// ==================================================
+const addPreviousSettlement = async (req, res) => {
+  try {
+    const data = req.body;
+
+    if (!data.targetId)
+      return res
+        .status(400)
+        .json({ success: false, message: "يرجى تحديد الشريك" });
+
+    const totalSettled = parseFloat(data.totalSettled) || 0;
+    const totalDelivered = parseFloat(data.totalDelivered) || 0;
+    const targetDate = data.periodDate ? new Date(data.periodDate) : new Date();
+
+    if (totalSettled > 0) {
+      await prisma.privateSettlement.create({
+        data: {
+          targetType: data.type,
+          targetId: data.targetId,
+          amount: totalSettled,
+          isOpeningBalance: true,
+          periodRef: data.periodDate,
+          notes: data.notes
+            ? `رصيد افتتاحي (مستحق): ${data.notes}`
+            : "رصيد افتتاحي (إجمالي مستحق)",
+          status: "PENDING",
+        },
+      });
+    }
+
+    if (totalDelivered > 0) {
+      await prisma.privateSettlement.create({
+        data: {
+          targetType: data.type,
+          targetId: data.targetId,
+          amount: totalDelivered,
+          isOpeningBalance: true,
+          deliveryMethod: "رصيد افتتاحي",
+          deliveryDate: targetDate,
+          notes: "دفعة مسجلة ضمن الرصيد الافتتاحي",
+          status: "DELIVERED",
+        },
+      });
+    }
+
+    res.json({
+      success: true,
+      message: "تم تسجيل الرصيد الافتتاحي والدفعات بنجاح",
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ==================================================
+// 6. تسجيل تسوية (إضافة مستحق جديد)
+// ==================================================
+const recordSettlement = async (req, res) => {
+  try {
+    const data = req.body;
+
+    if (!data.targetId)
+      return res.status(400).json({
+        success: false,
+        message: "يجب تحديد اسم الشخص (الـ ID) المراد تسجيل التسوية له",
+      });
+
+    await prisma.privateSettlement.create({
+      data: {
+        targetType: data.type || "غير محدد",
+        targetId: data.targetId, // 💡 حفظ الـ ID بشكل صحيح
+        amount: parseFloat(data.amount),
+        source: data.source,
+        notes: data.notes,
+        status: "PENDING",
+      },
+    });
+    res.json({ success: true, message: "تم تسجيل التسوية بنجاح" });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ==================================================
+// 7. تسليم تسوية (صرف مبلغ للشخص)
+// ==================================================
+const deliverSettlement = async (req, res) => {
+  try {
+    const data = req.body;
+    let attachmentPath = null;
+    if (req.file) attachmentPath = `/uploads/settlements/${req.file.filename}`;
+
+    await prisma.privateSettlement.create({
+      data: {
+        targetType: data.type,
+        targetId: data.targetId,
+        amount: parseFloat(data.amount),
+        deliveryMethod: data.method,
+        deliveryDate: data.date ? new Date(data.date) : new Date(),
+        deliveredById: data.deliveredById || null, // 💡 ربط بالموظف الذي سلم
+        notes: data.notes,
+        attachmentPath,
+        status: "DELIVERED",
+      },
+    });
+    res.json({ success: true, message: "تم تسليم المبلغ بنجاح" });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ==================================================
+// 8. حذف جميع تسويات ومدفوعات شخص محدد (تصفير الحساب)
+// ==================================================
+const deleteBrokerSettlements = async (req, res) => {
+  try {
+    const { brokerId } = req.params;
+
+    await prisma.privateSettlement.deleteMany({
+      where: { targetId: brokerId },
+    });
+
+    res.json({
+      success: true,
+      message: "تم مسح جميع تسويات ومدفوعات الشخص بنجاح",
+    });
+  } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
 module.exports = {
   getSettlementsDashboard,
-  addPreviousSettlement,
-  recordSettlement,
-  deliverSettlement,
   getBrokerTransactions,
   getBrokerSettlementsList,
   getBrokerPaymentsList,
+  addPreviousSettlement,
+  recordSettlement,
+  deliverSettlement,
+  deleteBrokerSettlements,
 };

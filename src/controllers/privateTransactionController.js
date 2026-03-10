@@ -1,14 +1,17 @@
-// src/controllers/privateTransactionController.js
 const { PrismaClient } = require("@prisma/client");
 const prisma = new PrismaClient();
 
 // ==================================================
-// دالة مساعدة: توليد رقم المعاملة الخاصة (مثال: PTX-2026-0001)
+// دالة توليد رقم المعاملة (سنة-شهر-خمس أرقام)
+// مثال: 2026-03-00001
 // ==================================================
 const generatePrivateTxCode = async () => {
-  const year = new Date().getFullYear();
-  const prefix = `PTX-${year}-`;
+  const date = new Date();
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0"); // إضافة 0 إذا كان الشهر أقل من 10
+  const prefix = `${year}-${month}-`;
 
+  // جلب آخر معاملة في هذا الشهر تحديداً
   const lastTx = await prisma.privateTransaction.findFirst({
     where: { transactionCode: { startsWith: prefix } },
     orderBy: { transactionCode: "desc" },
@@ -17,14 +20,17 @@ const generatePrivateTxCode = async () => {
   let nextNumber = 1;
   if (lastTx) {
     try {
-      const lastNumberStr = lastTx.transactionCode.split("-")[2];
+      // فصل النص بناءً على (-) وأخذ الجزء الثالث الذي يمثل الرقم
+      const parts = lastTx.transactionCode.split("-");
+      const lastNumberStr = parts[2]; // مثال: 00001
       nextNumber = parseInt(lastNumberStr, 10) + 1;
     } catch (e) {
       nextNumber = 1;
     }
   }
 
-  return `${prefix}${String(nextNumber).padStart(4, "0")}`;
+  // دمج البادئة مع الرقم المكون من 5 خانات
+  return `${prefix}${String(nextNumber).padStart(5, "0")}`;
 };
 
 // ==================================================
@@ -34,65 +40,78 @@ const generatePrivateTxCode = async () => {
 const createPrivateTransaction = async (req, res) => {
   try {
     const {
-      transactionType, // اصدار، تجديد، تعديل
-      surveyType, // برافع، بدون رفع
-      clientId, // المالك
-      districtId, // الحي
-      plotNumber, // القطعة
-      planId, // المخطط
-      entities, // الجهات (أمانة، هيئة...)
-      source, // مصدر المعاملة
-      attachments, // المرفقات المستلمة
-      brokerId, // الوسيط
-      followUpAgentId, // المعقب
-      stakeholderId, // صاحب المصلحة
-      receiverId, // المستلم
-      engOfficeBrokerId, // وسيط المكتب الهندسي
+      transactionType,
+      surveyType,
+      clientId,
+      plotNumber,
+      planId,
+      districtId,
+      sectorName,
+      entities,
+      source,
+      attachments,
       totalFees,
+      firstPayment,
+      // 💡 معرفات الأشخاص القادمة من الفرونت إند
+      brokerId,
+      followUpAgentId,
+      stakeholderId,
+      receiverId,
+      engOfficeBrokerId,
     } = req.body;
 
     if (!clientId) {
-      return res
-        .status(400)
-        .json({ success: false, message: "المالك (العميل) مطلوب" });
+      return res.status(400).json({
+        success: false,
+        message: "يرجى اختيار المالك (العميل) لربط المعاملة.",
+      });
     }
 
     const transactionCode = await generatePrivateTxCode();
-    const title = `معاملة ${transactionType} (داخلي) - ${plotNumber ? `قطعة ${plotNumber}` : "جديدة"}`;
-
     const parsedTotalFees = totalFees ? parseFloat(totalFees) : 0;
+    const parsedFirstPayment = firstPayment ? parseFloat(firstPayment) : 0;
 
     const newTransaction = await prisma.privateTransaction.create({
       data: {
         transactionCode,
-        title,
-        category: transactionType,
+        title: `${transactionType || "معاملة"} - ${transactionCode}`,
+        category: transactionType || "غير محدد",
         complexity: surveyType,
         source: source || "مكتب ديتيلز",
-        status: "جديدة",
-        authorities: entities || [],
-        attachments: attachments || [],
-
+        status: "in_progress",
         totalFees: parsedTotalFees,
-        remainingAmount: parsedTotalFees, // المتبقي في البداية يساوي الإجمالي لأنه لم يدفع شيء بعد
-        paidAmount: 0,
+        paidAmount: parsedFirstPayment,
+        remainingAmount: parsedTotalFees - parsedFirstPayment,
 
-        // ربط العميل
-        client: { connect: { id: clientId } },
+        // الربط بالعميل والحي
+        clientId: clientId,
+        districtId: districtId || null,
 
-        // ربط الحي (إن وجد)
-        ...(districtId && { districtNode: { connect: { id: districtId } } }),
+        // 🚀 الربط الحقيقي والمباشر بسجل الأشخاص (Foreign Keys)
+        brokerId: brokerId || null,
+        agentId: followUpAgentId || null, // لاحظ أننا ربطناها بـ agentId في الداتابيز
+        stakeholderId: stakeholderId || null,
+        receiverId: receiverId || null,
+        engOfficeBrokerId: engOfficeBrokerId || null,
 
-        // حفظ باقي التفاصيل داخل حقل notes كـ JSON لتخفيف الجداول
+        // باقي التفاصيل الوصفية تبقى في الـ JSON
         notes: {
-          plotNumber: plotNumber || null,
-          planId: planId || null,
-          roles: {
-            brokerId: brokerId || null,
-            followUpAgentId: followUpAgentId || null,
-            stakeholderId: stakeholderId || null,
-            receiverId: receiverId || null,
-            engOfficeBrokerId: engOfficeBrokerId || null,
+          refs: {
+            plot: plotNumber || null,
+            plan: planId || null,
+            sector: sectorName || null,
+          },
+          entities: Array.isArray(entities) ? entities : [],
+          attachments: Array.isArray(attachments) ? attachments : [],
+          statuses: {
+            collection:
+              parsedFirstPayment >= parsedTotalFees && parsedTotalFees > 0
+                ? "fully_collected"
+                : parsedFirstPayment > 0
+                  ? "partially_collected"
+                  : "not_collected",
+            approval: "approved",
+            settlement: "unsettled",
           },
         },
       },
@@ -100,23 +119,21 @@ const createPrivateTransaction = async (req, res) => {
 
     res.status(201).json({
       success: true,
-      message: "تم تسجيل المعاملة الداخلية بنجاح",
+      message: "تم إنشاء المعاملة بنجاح",
       data: newTransaction,
     });
   } catch (error) {
     console.error("Create Private Transaction Error:", error);
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "خطأ في السيرفر",
-        error: error.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "خطأ في السيرفر أثناء حفظ المعاملة",
+      error: error.message,
+    });
   }
 };
 
 // ==================================================
-// 2. جلب جميع المعاملات الخاصة (لعرضها في الجدول السري وقائمة التحصيل)
+// 2. جلب المعاملات (بشكل ذكي وسريع باستخدام Relations)
 // GET /api/private-transactions
 // ==================================================
 const getPrivateTransactions = async (req, res) => {
@@ -124,43 +141,61 @@ const getPrivateTransactions = async (req, res) => {
     const transactions = await prisma.privateTransaction.findMany({
       orderBy: { createdAt: "desc" },
       include: {
-        client: { select: { name: true, mobile: true } },
+        client: { select: { name: true } },
         districtNode: {
           select: { name: true, sector: { select: { name: true } } },
         },
+        broker: { select: { name: true } },
+        agent: { select: { name: true } },
       },
     });
 
-    // تنسيق البيانات لتناسب الجدول في الفرونت إند
     const formattedData = transactions.map((tx) => {
-      // استخراج الاسم العربي للعميل
-      let clientName = "غير محدد";
+      const notes =
+        typeof tx.notes === "object" && tx.notes !== null ? tx.notes : {};
+
+      let ownerName = "غير محدد";
       if (tx.client?.name) {
-        clientName =
+        ownerName =
           typeof tx.client.name === "string"
             ? JSON.parse(tx.client.name).ar
             : tx.client.name.ar;
       }
 
-      return {
-        id: tx.id,
-        ref: tx.transactionCode,
-        type: tx.category,
-        client: clientName || "غير محدد",
-        district: tx.districtNode?.name || "غير محدد",
-        sector: tx.districtNode?.sector?.name || "غير محدد",
+      let collectionStatus = "not_collected";
+      if (tx.paidAmount >= tx.totalFees && tx.totalFees > 0)
+        collectionStatus = "محصل بالكامل";
+      else if (tx.paidAmount > 0) collectionStatus = "محصل جزئي";
+      else collectionStatus = "غير محصل";
 
-        // 💡 التحديث هنا: إرسال المبالغ كاملة بدلاً من إرسال totalFees كـ value فقط
+      const dateObj = new Date(tx.createdAt);
+      const formattedDate = `${dateObj.getFullYear()}/${String(dateObj.getMonth() + 1).padStart(2, "0")}/${String(dateObj.getDate()).padStart(2, "0")}`;
+
+      return {
+        // 💡 تم توحيد المسميات لتطابق الفرونت إند 100%
+        id: tx.id, // الـ ID الحقيقي لقاعدة البيانات (مهم للحذف والتعديل)
+        ref: tx.transactionCode, // رقم المعاملة للواجهة
+        type: tx.category || "غير محدد",
+        client: ownerName,
+        district: notes?.refs?.sector || tx.districtNode?.name || "غير محدد",
+        sector:
+          notes?.refs?.sector || tx.districtNode?.sector?.name || "غير محدد",
+        plot: notes?.refs?.plot || "—",
+        plan: notes?.refs?.plan || "—",
+        office: tx.source || "مكتب ديتيلز",
+        sourceName: tx.source || "مباشر",
+
+        mediator: tx.broker?.name || "—",
+        agent: tx.agent?.name || "—",
+
         totalFees: tx.totalFees || 0,
         paidAmount: tx.paidAmount || 0,
         remainingAmount:
           tx.remainingAmount || (tx.totalFees || 0) - (tx.paidAmount || 0),
 
-        // للاستخدام في الجدول (يتم عرض الإجمالي)
-        value: tx.totalFees || 0,
-
-        status: tx.status,
-        date: tx.createdAt.toISOString().split("T")[0],
+        collectionStatus: collectionStatus,
+        status: tx.status || "جارية",
+        date: formattedDate,
       };
     });
 
@@ -172,21 +207,21 @@ const getPrivateTransactions = async (req, res) => {
 };
 
 // ==================================================
-// 3. تسجيل تحصيل مالي لمعاملة داخلية
+// 3. تسجيل تحصيل مالي (مربوط بالأشخاص والبنك)
 // POST /api/private-transactions/payments
 // ==================================================
 const addPrivatePayment = async (req, res) => {
   try {
+    // 💡 استقبال جميع الحقول من الفرونت إند
     const {
       transactionId,
+      amount,
+      paymentMethod,
+      periodRef,
       collectedFromType,
       collectedFromId,
       collectedFromOther,
-      amount,
-      periodRef,
-      paymentMethod,
       bankAccountId,
-      date,
       receiverId,
       notes,
     } = req.body;
@@ -196,173 +231,164 @@ const addPrivatePayment = async (req, res) => {
     if (!transactionId || isNaN(paymentAmount) || paymentAmount <= 0) {
       return res
         .status(400)
-        .json({
-          success: false,
-          message: "بيانات التحصيل غير مكتملة أو غير صحيحة",
-        });
+        .json({ success: false, message: "بيانات التحصيل غير صحيحة" });
     }
 
-    // 1. جلب المعاملة للتحقق من المبالغ
     const transaction = await prisma.privateTransaction.findUnique({
       where: { id: transactionId },
     });
 
-    if (!transaction) {
+    if (!transaction)
       return res
         .status(404)
         .json({ success: false, message: "المعاملة غير موجودة" });
-    }
 
-    // 2. معالجة المرفق (إذا تم رفع صورة/ملف)
-    let receiptImagePath = null;
-    if (req.file) {
-      // بافتراض أنك تستخدم multer لرفع الملفات، سيعود المسار هنا
-      receiptImagePath = `/uploads/receipts/${req.file.filename}`;
-    }
+    // مسار المرفق إن وجد
+    const receiptImage = req.file
+      ? `/uploads/payments/${req.file.filename}`
+      : null;
 
-    // 3. تحديد اسم الشخص (سواء من النظام أو خارجي)
-    let collectedFromName = collectedFromOther;
-    if (collectedFromType === "من أشخاص النظام" && collectedFromId) {
-      // يمكنك جلب اسم العميل أو الموظف من قاعدة البيانات هنا إذا أردت تخزينه كنص صريح
-      // للسرعة سنعتمد على أن الفرونت إند يرسل الـ ID وسنحفظه
-    }
-
-    // 4. استخدام Transaction (DB Transaction) لضمان حفظ الدفعة وتحديث المعاملة معاً
+    // استخدام Transaction لحماية قواعد البيانات
     const result = await prisma.$transaction(async (prismaDelegate) => {
-      // أ) إنشاء الدفعة الجديدة
+      // 1. إنشاء الدفعة وربطها بالموظف، والبنك، والعميل!
       const newPayment = await prismaDelegate.privatePayment.create({
         data: {
-          transactionId,
+          transactionId: transactionId,
           amount: paymentAmount,
-          date: date ? new Date(date) : new Date(),
-          method: paymentMethod,
-          periodRef,
-          collectedFromType,
+          method: paymentMethod || "نقدي",
+          periodRef: periodRef || null,
+          collectedFromType: collectedFromType || "من أشخاص النظام",
           collectedFromId: collectedFromId || null,
-          collectedFromName: collectedFromName || null,
+          collectedFromName: collectedFromOther || null,
           bankAccountId: bankAccountId || null,
           receiverId: receiverId || null,
-          notes,
-          receiptImage: receiptImagePath,
+          notes: notes || "",
+          receiptImage: receiptImage,
         },
       });
 
-      // ب) تحديث مبالغ المعاملة (إضافة للمدفوع وخصم من المتبقي)
-      const currentPaid = transaction.paidAmount || 0;
-      const currentTotal = transaction.totalFees || 0;
-
-      const newPaidAmount = currentPaid + paymentAmount;
-      const newRemainingAmount = currentTotal - newPaidAmount;
+      // 2. تحديث المتبقي في المعاملة
+      const newPaidAmount = (transaction.paidAmount || 0) + paymentAmount;
+      const newRemainingAmount = (transaction.totalFees || 0) - newPaidAmount;
 
       await prismaDelegate.privateTransaction.update({
         where: { id: transactionId },
         data: {
           paidAmount: newPaidAmount,
-          remainingAmount: newRemainingAmount < 0 ? 0 : newRemainingAmount, // لا تجعل المتبقي بالسالب
+          remainingAmount: newRemainingAmount < 0 ? 0 : newRemainingAmount,
         },
       });
+
+      // 3. (اختياري لكن قوي) إذا كان الدفع بنكي، نزيد رصيد البنك
+      if (paymentMethod === "بنكي" && bankAccountId) {
+        await prismaDelegate.bankAccount.update({
+          where: { id: bankAccountId },
+          data: { systemBalance: { increment: paymentAmount } },
+        });
+      }
 
       return newPayment;
     });
 
-    res.status(201).json({
-      success: true,
-      message: "تم تسجيل التحصيل وتحديث الرصيد بنجاح",
-      data: result,
-    });
-  } catch (error) {
-    console.error("Add Private Payment Error:", error);
     res
-      .status(500)
-      .json({
-        success: false,
-        message: "فشل في تسجيل التحصيل",
-        error: error.message,
-      });
+      .status(201)
+      .json({ success: true, message: "تم تسجيل الدفعة بنجاح", data: result });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
 // ==================================================
-// 4. جلب إحصائيات لوحة القيادة للنظام الداخلي
+// 4. جلب إحصائيات لوحة القيادة
 // GET /api/private-transactions/dashboard-stats
 // ==================================================
 const getDashboardStats = async (req, res) => {
   try {
-    // 1. حساب الإجماليات (عدد المعاملات، إجمالي الأتعاب، إجمالي المحصل)
+    // جلب الإجماليات
     const aggregations = await prisma.privateTransaction.aggregate({
       _count: { id: true },
-      _sum: {
-        totalFees: true,
-        paidAmount: true,
-      },
+      _sum: { totalFees: true, paidAmount: true },
     });
 
-    // 2. حساب عدد الوسطاء النشطين (نستخرجهم من حقل notes.roles.brokerId)
-    // نجلب فقط المعاملات التي تحتوي على ملاحظات لتخفيف الحمل
-    const transactionsWithNotes = await prisma.privateTransaction.findMany({
-      where: { notes: { not: null } },
-      select: { notes: true },
-    });
-
-    const uniqueBrokers = new Set();
-    transactionsWithNotes.forEach((tx) => {
-      const notes = tx.notes;
-      if (notes && notes.roles && notes.roles.brokerId) {
-        uniqueBrokers.add(notes.roles.brokerId);
-      }
-    });
-
-    // 3. جلب آخر 10 معاملات حديثة للجدول
+    // 💡 جلب آخر 5 معاملات لعرضها في الجدول الصغير في الداشبورد
     const recentTx = await prisma.privateTransaction.findMany({
-      take: 10,
+      take: 5,
       orderBy: { createdAt: "desc" },
-      include: {
-        client: { select: { name: true } },
-        districtNode: {
-          select: { name: true, sector: { select: { name: true } } },
-        },
-      },
+      include: { client: { select: { name: true } } },
     });
 
-    // تنسيق المعاملات لتناسب الجدول في الواجهة
-    const formattedRecentTransactions = recentTx.map((tx) => {
-      let clientName = "غير محدد";
+    const recentFormatted = recentTx.map((tx) => {
+      let clientName = "عميل";
       if (tx.client?.name) {
         clientName =
           typeof tx.client.name === "string"
             ? JSON.parse(tx.client.name).ar
             : tx.client.name.ar;
       }
-
       return {
         id: tx.id,
         ref: tx.transactionCode,
-        type: tx.category || "غير محدد",
+        type: tx.category,
         client: clientName,
-        district: tx.districtNode?.name || "غير محدد",
-        sector: tx.districtNode?.sector?.name || "غير محدد",
-        value: tx.totalFees || 0,
-        status: tx.status,
+        value: tx.totalFees,
+        status: tx.status === "in_progress" ? "جارية" : "مكتملة", // تعريب الحالة
         date: tx.createdAt.toISOString().split("T")[0],
       };
     });
 
-    // 4. تجميع النتيجة النهائية وإرسالها
+    // عدد الوسطاء لتعبئة كارد "الوسطاء النشطون"
+    const activeBrokersCount = await prisma.person.count({
+      where: { role: "وسيط" },
+    });
+
     res.json({
       success: true,
       data: {
         totalCount: aggregations._count.id || 0,
         totalProfits: aggregations._sum.totalFees || 0,
         vaultBalance: aggregations._sum.paidAmount || 0,
-        activeBrokers: uniqueBrokers.size || 0,
-        recentTransactions: formattedRecentTransactions,
+        activeBrokers: activeBrokersCount,
+        recentTransactions: recentFormatted, // 👈 هذا ما ينتظره الفرونت إند للجدول
       },
     });
   } catch (error) {
-    console.error("Get Private Dashboard Stats Error:", error);
-    res
-      .status(500)
-      .json({ success: false, message: "فشل جلب إحصائيات لوحة القيادة" });
+    res.status(500).json({ success: false, message: "فشل جلب الإحصائيات" });
+  }
+};
+
+// ==================================================
+// 5. حذف المعاملة
+// DELETE /api/private-transactions/:id
+// ==================================================
+const deletePrivateTransaction = async (req, res) => {
+  try {
+    const { id } = req.params;
+    await prisma.privateTransaction.delete({ where: { id } });
+    res.json({ success: true, message: "تم حذف المعاملة بنجاح" });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "لا يمكن حذف معاملة مرتبطة بمدفوعات مالية." });
+  }
+};
+
+// ==================================================
+// 6. تجميد / تنشيط المعاملة
+// PATCH /api/private-transactions/:id/toggle-freeze
+// ==================================================
+const toggleFreezeTransaction = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const tx = await prisma.privateTransaction.findUnique({ where: { id } });
+    if (!tx) return res.status(404).json({ success: false, message: "غير موجودة" });
+
+    const newStatus = tx.status === "مجمّدة" ? "جارية" : "مجمّدة";
+    await prisma.privateTransaction.update({
+      where: { id },
+      data: { status: newStatus }
+    });
+
+    res.json({ success: true, message: `تم تغيير حالة المعاملة إلى: ${newStatus}` });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "حدث خطأ" });
   }
 };
 
@@ -371,4 +397,6 @@ module.exports = {
   getPrivateTransactions,
   addPrivatePayment,
   getDashboardStats,
+  deletePrivateTransaction, // 👈
+  toggleFreezeTransaction   // 👈
 };
