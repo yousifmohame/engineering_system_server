@@ -68,4 +68,14 @@ const addDistrict = async (req, res) => {
   }
 };
 
-module.exports = { getRiyadhZones, addDistrict };
+const deleteDistrict = async (req, res) => {
+  try {
+    const { id } = req.params;
+    await prisma.riyadhDistrict.delete({ where: { id } });
+    res.json({ success: true, message: "تم حذف الحي" });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+module.exports = { getRiyadhZones, addDistrict, deleteDistrict };

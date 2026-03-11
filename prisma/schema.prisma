@@ -1281,15 +1281,6 @@ model ActivityLog {
   @@index([performedById])
 }
 
-// إعدادات النظام
-model SystemSettings {
-  id              String @id @default("singleton")
-  gradingCriteria Json?
-  gradeThresholds Json?
-
-  updatedAt DateTime @updatedAt
-}
-
 // نظام المحادثات
 model Conversation {
   id        String   @id @default(cuid())
@@ -1751,4 +1742,40 @@ model TransactionBroker {
 
   transaction PrivateTransaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
   broker      Person             @relation("PersonBrokers", fields: [brokerId], references: [id])
+}
+
+// ===============================================
+// إعدادات النظام الشاملة (System Settings)
+// ===============================================
+model SystemSettings {
+  id Int @id @default(1)
+
+  // إعدادات عامة
+  companyName String? @default("مكتب ديتيلز للاستشارات الهندسية")
+  taxNumber   String? @default("310000000000003")
+  currency    String? @default("SAR")
+  timezone    String? @default("Asia/Riyadh (UTC+3)")
+
+  // إعدادات التأخير
+  warningDays Int? @default(5)
+  overdueDays Int? @default(10)
+
+  // إعدادات التقدير الضريبي
+  taxEstimateEnabled Boolean? @default(true)
+  taxPercentage      Float?   @default(15)
+  taxApplyTo         String?  @default("كل المبالغ البنكية")
+  taxExclude         Json?    @default("[\"النقد\", \"الخزنة\", \"التحصيل غير المسلم للشركة\"]")
+  taxNotes           String?  @db.Text
+
+  // إعدادات حصة المكتب
+  officeShareType       String?  @default("percentage")
+  officeShareValue      Float?   @default(10)
+  officeShareCategories Json?    @default("[{\"id\":1,\"label\":\"أقل من 50,000\",\"minProfit\":0,\"maxProfit\":50000,\"fixedAmount\":2000},{\"id\":2,\"label\":\"50,000 — 150,000\",\"minProfit\":50000,\"maxProfit\":150000,\"fixedAmount\":5000},{\"id\":3,\"label\":\"150,000 — 500,000\",\"minProfit\":150000,\"maxProfit\":500000,\"fixedAmount\":12000},{\"id\":4,\"label\":\"أكثر من 500,000\",\"minProfit\":500000,\"maxProfit\":999999999,\"fixedAmount\":25000}]")
+  officeShareManual     Boolean? @default(false)
+  officeShareManualVal  Float?   @default(0)
+
+  // الحسابات الخاصة
+  specialAccounts Json? @default("[{\"id\":1,\"systemName\":\"حسابات العبودي\",\"reportName\":\"العبودي\"},{\"id\":2,\"systemName\":\"حسابات إبراهيم الراجحي\",\"reportName\":\"إبراهيم الراجحي\"},{\"id\":3,\"systemName\":\"حسابات أحمد طلعت\",\"reportName\":\"أحمد طلعت\"},{\"id\":4,\"systemName\":\"حسابات محمد فؤاد\",\"reportName\":\"محمد فؤاد\"}]")
+
+  updatedAt DateTime @updatedAt
 }

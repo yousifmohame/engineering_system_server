@@ -389,6 +389,99 @@ const deleteBrokerSettlements = async (req, res) => {
   }
 };
 
+// ==================================================
+// جلب بيانات "حساب خاص" (حاوية تجمع عدة أشخاص)
+// GET /api/private-settlements/special-account/:accountName
+// ==================================================
+const getSpecialAccountData = async (req, res) => {
+  try {
+    const { accountName } = req.params;
+
+    // 1. جلب إعدادات النظام لمعرفة من هم الأشخاص داخل هذه الحاوية
+    const settings = await prisma.systemSettings.findUnique({ where: { id: 1 } });
+    const specialAccounts = typeof settings.specialAccounts === 'string' 
+      ? JSON.parse(settings.specialAccounts) 
+      : (settings.specialAccounts || []);
+
+    const targetAccount = specialAccounts.find(
+      a => a.reportName === accountName || a.systemName === accountName
+    );
+
+    // إذا لم يكن هناك أشخاص مربوطين، نرجع مصفوفات فارغة
+    if (!targetAccount || !targetAccount.linkedPersons || targetAccount.linkedPersons.length === 0) {
+      return res.json({ success: true, data: { transactions: [], settlements: [], payments: [] } });
+    }
+
+    const personIds = targetAccount.linkedPersons; // مصفوفة من الـ IDs
+
+    // 2. جلب جميع المعاملات التي يتواجد فيها أي شخص من هذه الحاوية
+    const transactions = await prisma.privateTransaction.findMany({
+      where: {
+        OR: [
+          { brokerId: { in: personIds } },
+          { agentId: { in: personIds } },
+          { stakeholderId: { in: personIds } },
+          { receiverId: { in: personIds } },
+          { engOfficeBrokerId: { in: personIds } },
+          { brokersList: { some: { brokerId: { in: personIds } } } }
+        ]
+      },
+      include: {
+        client: { select: { name: true } },
+        districtNode: { select: { name: true, sector: { select: { name: true } } } },
+        brokersList: true,
+      },
+      orderBy: { createdAt: "desc" }
+    });
+
+    const formattedTxs = transactions.map(tx => {
+      let clientName = "غير محدد";
+      if (tx.client?.name) {
+        clientName = typeof tx.client.name === "string" ? JSON.parse(tx.client.name).ar : tx.client.name.ar;
+      }
+      return {
+        id: tx.id,
+        ref: tx.transactionCode,
+        client: clientName,
+        district: tx.districtNode?.name || "غير محدد",
+        type: tx.category || "غير محدد",
+        totalFees: tx.totalFees || 0,
+        paidAmount: tx.paidAmount || 0,
+        remainingAmount: tx.remainingAmount || 0,
+        status: tx.status,
+        date: tx.createdAt.toISOString().split("T")[0],
+      };
+    });
+
+    // 3. جلب جميع التسويات (المستحقات) لهؤلاء الأشخاص
+    const settlements = await prisma.privateSettlement.findMany({
+      where: { targetId: { in: personIds }, status: "PENDING" },
+      orderBy: { createdAt: "desc" }
+    });
+
+    // 4. جلب جميع المدفوعات (المسلمة) لهؤلاء الأشخاص
+    const payments = await prisma.privateSettlement.findMany({
+      where: { targetId: { in: personIds }, status: "DELIVERED" },
+      include: { deliveredBy: { select: { name: true } } },
+      orderBy: { deliveryDate: "desc" }
+    });
+
+    const formattedSettlements = settlements.map(s => ({
+      id: s.id, ref: `SET-${s.id.slice(-5).toUpperCase()}`, amount: s.amount, type: s.isOpeningBalance ? "رصيد افتتاحي" : "تسوية", notes: s.notes || "—", date: s.createdAt.toISOString().split("T")[0]
+    }));
+
+    const formattedPayments = payments.map(p => ({
+      id: p.id, ref: `PAY-${p.id.slice(-5).toUpperCase()}`, amount: p.amount, method: p.deliveryMethod || "نقدي", deliveredBy: p.deliveredBy?.name || "النظام", date: (p.deliveryDate || p.createdAt).toISOString().split("T")[0]
+    }));
+
+    // إرسال البيانات المجمعة للحاوية
+    res.json({ success: true, data: { transactions: formattedTxs, settlements: formattedSettlements, payments: formattedPayments } });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+
 module.exports = {
   getSettlementsDashboard,
   getBrokerTransactions,
@@ -398,4 +491,5 @@ module.exports = {
   recordSettlement,
   deliverSettlement,
   deleteBrokerSettlements,
+  getSpecialAccountData
 };

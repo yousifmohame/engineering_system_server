@@ -12,7 +12,8 @@ const {
   getBrokerTransactions,
   getBrokerSettlementsList,
   getBrokerPaymentsList,
-  deleteBrokerSettlements
+  deleteBrokerSettlements,
+  getSpecialAccountData
 } = require("../controllers/privateSettlementController");
 
 router.use(protect);
@@ -20,6 +21,7 @@ router.get("/dashboard", getSettlementsDashboard);
 router.post("/previous", addPreviousSettlement);
 router.post("/record", recordSettlement);
 router.post("/deliver", upload.single("file"), deliverSettlement);
+router.get("/special-account/:accountName", getSpecialAccountData);
 router.get("/broker/:brokerId/transactions", getBrokerTransactions);
 router.get("/broker/:brokerId/settlements", getBrokerSettlementsList);
 router.get("/broker/:brokerId/payments", getBrokerPaymentsList);
