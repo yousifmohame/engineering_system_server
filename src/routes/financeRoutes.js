@@ -25,6 +25,8 @@ const {
   createSettlement,
   deliverSettlement,
   recordInventory,
+  getMonthlySettlementData,
+  executeMonthlySettlement,
 } = require("../controllers/financeController");
 
 // حماية جميع المسارات (يجب أن يكون المستخدم مسجل الدخول)
@@ -32,6 +34,9 @@ router.use(protect);
 
 // 1. تسجيل تسوية (إنشاء مستحق جديد)
 router.post("/settlements", createSettlement);
+
+router.get("/monthly-settlement", getMonthlySettlementData);
+router.post("/monthly-settlement/execute", executeMonthlySettlement);
 
 // 2. تسليم تسوية (دفع فعلي مع إمكانية إرفاق صورة)
 router.post("/settlements/deliver", upload.single("file"), deliverSettlement);

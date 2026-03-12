@@ -391,6 +391,9 @@ const createClient = async (req, res) => {
 };
 
 // تحديث عميل
+// ===============================================
+// تحديث عميل
+// ===============================================
 const updateClient = async (req, res) => {
   const { id: clientId } = req.params;
   try {
@@ -426,16 +429,22 @@ const updateClient = async (req, res) => {
     const completionPercentage = calculateCompletionPercentage(mergedData);
     const gradeInfo = calculateClientGrade(mergedData, completionPercentage);
 
-    // ✅ إعطاء الأولوية للتقييم المرسل يدوياً، وإلا استخدم المحسوب آلياً
+    // إعطاء الأولوية للتقييم المرسل يدوياً، وإلا استخدم المحسوب آلياً
     const finalGrade =
       req.body.grade !== undefined ? req.body.grade : gradeInfo.grade;
+
+    // 💡 الحل السحري: تنظيف الإيميل والجوال لمنع التضارب (Unique Constraint)
+    const finalEmail =
+      req.body.email && req.body.email.trim() !== ""
+        ? req.body.email.trim()
+        : null;
 
     // 4. تنفيذ التحديث
     const updatedClient = await prisma.client.update({
       where: { id: clientId },
       data: {
         mobile: req.body.mobile,
-        email: req.body.email,
+        email: finalEmail, // 👈 استخدام الإيميل المعالج هنا
         idNumber: req.body.idNumber,
         type: req.body.type,
         category: req.body.category,
@@ -447,8 +456,6 @@ const updateClient = async (req, res) => {
         secretRating: req.body.secretRating,
         notes: req.body.notes,
         isActive: req.body.isActive,
-
-        // ✅ إضافة مستوى المخاطرة ليتم حفظه في قاعدة البيانات
         riskTier: req.body.riskTier,
 
         name: req.body.name ? req.body.name : undefined,
@@ -459,16 +466,15 @@ const updateClient = async (req, res) => {
           : undefined,
 
         completionPercentage,
-        grade: finalGrade, // ✅ استخدام التقييم النهائي المدمج
+        grade: finalGrade,
         gradeScore: gradeInfo.score,
       },
       include: {
-        // نستخدم include بشكل آمن (تأكد من مطابقة هذه الحقول لما هو موجود في مخططك)
         transactions: { include: { payments: true } },
         contracts: true,
         quotations: true,
         attachments: true,
-        ownerships: true, // في حال أضفتها مسبقاً
+        ownerships: true,
         activityLogs: {
           include: { performedBy: { select: { id: true, name: true } } },
         },
@@ -503,10 +509,18 @@ const updateClient = async (req, res) => {
 
     res.json(updatedClient);
   } catch (error) {
+    // 💡 اصطياد الخطأ بشكل ذكي لمعرفة الحقل المتضارب بالضبط
     if (error.code === "P2002") {
+      const target = error.meta?.target || [];
+      let fieldName = "بيانات معينة";
+
+      if (target.includes("mobile")) fieldName = "رقم الجوال";
+      else if (target.includes("idNumber")) fieldName = "رقم الهوية";
+      else if (target.includes("email")) fieldName = "البريد الإلكتروني";
+
       return res.status(400).json({
-        message: "فشل التحديث: تضارب في البيانات",
-        error: `البيانات (مثل الجوال أو الإيميل) مستخدمة مسبقاً.`,
+        message: `فشل التحديث: ${fieldName} مستخدم بالفعل`,
+        error: `عذراً، ${fieldName} الذي أدخلته مسجل مسبقاً لعميل آخر.`,
       });
     }
     console.error("Error updating client:", error);
