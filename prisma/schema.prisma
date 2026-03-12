@@ -1675,6 +1675,25 @@ model Person {
   email             String?
   preferredCurrency String? @default("SAR")
   isActive          Boolean @default(true)
+  // 🚀 --- الحقول الجديدة للموظف عن بعد والربط المستقبلي ---
+  firstNameAr       String?
+  secondNameAr      String?
+  thirdNameAr       String?
+  fourthNameAr      String?
+
+  firstNameEn  String?
+  secondNameEn String?
+  thirdNameEn  String?
+  fourthNameEn String?
+
+  country  String?
+  whatsapp String?
+  telegram String?
+
+  transferMethod  String? // طريقة التحويل (ويسترن، بنك، انستا)
+  transferDetails Json? // تفاصيل التحويل (رقم الحساب، الايبان الخ)
+
+  isLocalOnly Boolean @default(true) // 💡 true = هذا الشخص تم إنشاؤه في النظام الفرعي ولا يرحل للرئيسي
 
   // 👈 جميع العلاقات العكسية (لتسهيل استخراج كشف حساب/ملف للشخص)
   paymentsCollected PrivatePayment[] @relation("PaymentCollector")

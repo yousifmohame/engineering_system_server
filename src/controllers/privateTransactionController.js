@@ -34,25 +34,74 @@ const generatePrivateTxCode = async () => {
 };
 
 // ==================================================
+// دالة توليد كود العميل تلقائياً (مثال: C-001)
+// ==================================================
+const generateClientCode = async () => {
+  const lastClient = await prisma.client.findFirst({
+    orderBy: { createdAt: "desc" },
+  });
+
+  const year = new Date().getFullYear();
+
+  if (!lastClient || !lastClient.clientCode) {
+    return `CLT-${year}-001`;
+  }
+
+  // استخراج الرقم الأخير فقط
+  const parts = lastClient.clientCode.split("-");
+  const lastNumber = parseInt(parts[2]);
+
+  if (isNaN(lastNumber)) {
+    return `CLT-${year}-001`;
+  }
+
+  const nextNumber = String(lastNumber + 1).padStart(3, "0");
+
+  return `CLT-${year}-${nextNumber}`;
+};
+
+// ==================================================
 // 1. إنشاء معاملة خاصة جديدة
 // POST /api/private-transactions
 // ==================================================
 const createPrivateTransaction = async (req, res) => {
   try {
     const {
+      internalName,
+      isInternalNameHidden,
       transactionType,
       surveyType,
+      feeType,
+
+      // العميل
       clientId,
-      plotNumber,
-      planId,
+      ownerName,
+      ownerIdNumber,
+      ownerMobile, // 👈 أضفنا استدعاء رقم الجوال هنا
+
+      // الموقع والمراجع
       districtId,
-      sectorName,
+      sector,
+      plots,
+      plan,
+      oldDeed,
+      serviceNo,
+      requestNo,
+      licenseNo,
+
+      // الجهات والمرفقات والمصادر
       entities,
+      receivedAttachmentsList,
       source,
-      attachments,
+      sourceType,
+      sourceName,
+      sourcePercent,
+
+      // الماليات والأطراف
       totalFees,
       firstPayment,
-      // 💡 معرفات الأشخاص القادمة من الفرونت إند
+      mediatorFees,
+      agentFees,
       brokerId,
       followUpAgentId,
       stakeholderId,
@@ -60,49 +109,106 @@ const createPrivateTransaction = async (req, res) => {
       engOfficeBrokerId,
     } = req.body;
 
-    if (!clientId) {
-      return res.status(400).json({
-        success: false,
-        message: "يرجى اختيار المالك (العميل) لربط المعاملة.",
-      });
-    }
+    // 1. معالجة العميل (إذا كان عميل جديد سريع، نقوم بإنشائه أولاً في الداتابيز)
+    // 1. معالجة العميل (إذا كان عميل جديد سريع، نقوم بإنشائه أولاً في الداتابيز)
+    let finalClientId = clientId;
 
+    if (!finalClientId) {
+      if (!ownerName) {
+        return res
+          .status(400)
+          .json({
+            success: false,
+            message: "يرجى اختيار المالك أو إدخال اسم المالك الجديد.",
+          });
+      }
+
+      const clientCode = await generateClientCode(); // توليد الكود
+
+      // 💡 حماية قاعدة البيانات: الهوية إجبارية وفريدة (Unique) في الـ Schema
+      // إذا لم يُدخل المستخدم رقم هوية، نولد له رقم مؤقت فريد حتى لا ينكسر النظام
+      const uniqueIdNumber =
+        ownerIdNumber && ownerIdNumber.trim() !== ""
+          ? ownerIdNumber
+          : `TMP-${Date.now()}`;
+
+      // إنشاء عميل جديد بتنسيق يطابق الـ Prisma Schema 100%
+      const newClient = await prisma.client.create({
+        data: {
+          clientCode: clientCode,
+          mobile: ownerMobile || "بدون رقم",
+          idNumber: uniqueIdNumber,
+          type: "فرد", // 👈 حقل إجباري حسب Schema
+
+          // 👈 الحقول التالية إجبارية كـ JSON
+          name: { ar: ownerName, en: "", details: {} },
+          contact: { mobile: ownerMobile || "بدون رقم", email: "", phone: "" },
+          identification: { idType: "هوية وطنية", idNumber: uniqueIdNumber },
+
+          isActive: true,
+        },
+      });
+      finalClientId = newClient.id;
+    }
+    // 2. معالجة الأرقام والبيانات
     const transactionCode = await generatePrivateTxCode();
     const parsedTotalFees = totalFees ? parseFloat(totalFees) : 0;
     const parsedFirstPayment = firstPayment ? parseFloat(firstPayment) : 0;
 
+    // تحديد عنوان المعاملة
+    const txTitle =
+      !isInternalNameHidden && internalName
+        ? `${internalName} - ${transactionCode}`
+        : `${transactionType || "معاملة"} - ${transactionCode}`;
+
+    // 3. إنشاء المعاملة
     const newTransaction = await prisma.privateTransaction.create({
       data: {
         transactionCode,
-        title: `${transactionType || "معاملة"} - ${transactionCode}`,
+        title: txTitle,
         category: transactionType || "غير محدد",
-        complexity: surveyType,
+        complexity: surveyType || "بدون رفع",
         source: source || "مكتب ديتيلز",
         status: "in_progress",
         totalFees: parsedTotalFees,
         paidAmount: parsedFirstPayment,
         remainingAmount: parsedTotalFees - parsedFirstPayment,
 
-        // الربط بالعميل والحي
-        clientId: clientId,
+        clientId: finalClientId,
         districtId: districtId || null,
 
-        // 🚀 الربط الحقيقي والمباشر بسجل الأشخاص (Foreign Keys)
+        authorities: Array.isArray(entities) ? entities : [],
+        attachments: Array.isArray(receivedAttachmentsList)
+          ? receivedAttachmentsList
+          : [],
+
         brokerId: brokerId || null,
-        agentId: followUpAgentId || null, // لاحظ أننا ربطناها بـ agentId في الداتابيز
+        agentId: followUpAgentId || null,
         stakeholderId: stakeholderId || null,
         receiverId: receiverId || null,
         engOfficeBrokerId: engOfficeBrokerId || null,
 
-        // باقي التفاصيل الوصفية تبقى في الـ JSON
         notes: {
-          refs: {
-            plot: plotNumber || null,
-            plan: planId || null,
-            sector: sectorName || null,
+          internalName: internalName || null,
+          isInternalNameHidden: isInternalNameHidden || false,
+          feeType: feeType || "نهائي",
+          agentFees: agentFees ? parseFloat(agentFees) : 0,
+          mediatorFees: mediatorFees ? parseFloat(mediatorFees) : 0,
+          sourceDistribution: {
+            type: sourceType,
+            name: sourceName,
+            percent: sourcePercent ? parseFloat(sourcePercent) : 0,
           },
-          entities: Array.isArray(entities) ? entities : [],
-          attachments: Array.isArray(attachments) ? attachments : [],
+          refs: {
+            plots: Array.isArray(plots) ? plots : [],
+            plan: plan || null,
+            sector: sector || null,
+            oldDeed: oldDeed || null,
+            serviceNo: serviceNo || null,
+            requestNo: requestNo || null,
+            licenseNo: licenseNo || null,
+            ownerMobile: ownerMobile || null, // حفظ الرقم كمرجع إضافي في الملاحظات
+          },
           statuses: {
             collection:
               parsedFirstPayment >= parsedTotalFees && parsedTotalFees > 0
@@ -394,15 +500,20 @@ const getPrivateTransactions = async (req, res) => {
       const remoteCost = tx.tasks?.reduce((sum, t) => sum + t.cost, 0) || 0;
 
       // 💡 حساب بيانات الوسطاء من الجدول الجديد
-      const transactionBrokers = tx.brokersList?.map(b => ({
-        id: b.id, // ID الخاص بسجل الربط (للحذف)
-        personId: b.brokerId,
-        name: b.broker?.name || "وسيط",
-        fees: b.fees
-      })) || [];
+      const transactionBrokers =
+        tx.brokersList?.map((b) => ({
+          id: b.id, // ID الخاص بسجل الربط (للحذف)
+          personId: b.brokerId,
+          name: b.broker?.name || "وسيط",
+          fees: b.fees,
+        })) || [];
 
-      const totalBrokerFees = transactionBrokers.reduce((sum, b) => sum + b.fees, 0);
-      const brokerNames = transactionBrokers.map(b => b.name).join(" و ") || "—";
+      const totalBrokerFees = transactionBrokers.reduce(
+        (sum, b) => sum + b.fees,
+        0,
+      );
+      const brokerNames =
+        transactionBrokers.map((b) => b.name).join(" و ") || "—";
 
       return {
         id: tx.id,
@@ -421,7 +532,6 @@ const getPrivateTransactions = async (req, res) => {
         mediatorFees: totalBrokerFees, // يجمع أتعابهم للمحرك المالي
         brokers: transactionBrokers, // المصفوفة التي ستعرض في تاب الوسطاء
 
-        
         agentCost: notes?.agentFees || 0,
         remoteCost: remoteCost,
         expensesCost: 0, // سيتم ربطها لاحقاً لو أضفت مصروفات المعاملة

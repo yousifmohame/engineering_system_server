@@ -1,13 +1,16 @@
 const { PrismaClient } = require("@prisma/client");
 const prisma = new PrismaClient();
 
-// توليد رقم P-001
+// 💡 حل مشكلة الـ Unique Constraint (البحث بالكود الأكبر وليس الأحدث)
 const generatePersonCode = async () => {
   const lastRecord = await prisma.person.findFirst({
-    orderBy: { createdAt: "desc" },
+    orderBy: { personCode: "desc" },
   });
   if (!lastRecord || !lastRecord.personCode) return "P-001";
+
   const lastNumber = parseInt(lastRecord.personCode.replace("P-", ""));
+  if (isNaN(lastNumber)) return `P-${Date.now().toString().slice(-4)}`; // أمان إضافي
+
   return `P-${String(lastNumber + 1).padStart(3, "0")}`;
 };
 
@@ -119,7 +122,7 @@ const getPersons = async (req, res) => {
 // 2. إضافة شخص جديد
 const createPerson = async (req, res) => {
   try {
-    const { name, role, phone, agreementType, notes } = req.body;
+    const data = req.body;
     const personCode = await generatePersonCode();
 
     let attachmentsList = [];
@@ -131,20 +134,45 @@ const createPerson = async (req, res) => {
       }));
     }
 
+    // تجهيز تفاصيل التحويل إن وجدت
+    let transferDetails = null;
+    if (data.transferDetails) {
+      try {
+        transferDetails = JSON.parse(data.transferDetails);
+      } catch (e) {}
+    }
+
     const newPerson = await prisma.person.create({
       data: {
         personCode,
-        name,
-        role,
-        phone,
-        agreementType,
-        notes,
+        name: data.name,
+        role: data.role,
+        phone: data.phone,
+        whatsapp: data.whatsapp,
+        telegram: data.telegram,
+        email: data.email,
+        country: data.country,
+        preferredCurrency: data.preferredCurrency || "SAR",
+        transferMethod: data.transferMethod,
+        transferDetails: transferDetails,
+        firstNameAr: data.firstNameAr,
+        secondNameAr: data.secondNameAr,
+        thirdNameAr: data.thirdNameAr,
+        fourthNameAr: data.fourthNameAr,
+        firstNameEn: data.firstNameEn,
+        secondNameEn: data.secondNameEn,
+        thirdNameEn: data.thirdNameEn,
+        fourthNameEn: data.fourthNameEn,
+        agreementType: data.agreementType,
+        notes: data.notes,
+        isLocalOnly: true, // 💡 بناءً على قاعدتك: يتم إنشاءه محلياً ولا يتزامن
         attachments: attachmentsList.length > 0 ? attachmentsList : undefined,
       },
     });
 
     res.status(201).json({ success: true, data: newPerson });
   } catch (error) {
+    console.error("Create Person Error:", error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -153,7 +181,7 @@ const createPerson = async (req, res) => {
 const updatePerson = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, role, phone, agreementType, notes } = req.body;
+    const data = req.body;
 
     const existingPerson = await prisma.person.findUnique({ where: { id } });
     if (!existingPerson)
@@ -161,7 +189,6 @@ const updatePerson = async (req, res) => {
         .status(404)
         .json({ success: false, message: "الشخص غير موجود" });
 
-    // إضافة المرفقات الجديدة للمرفقات القديمة إن وجدت
     let updatedAttachments = existingPerson.attachments
       ? [...existingPerson.attachments]
       : [];
@@ -174,25 +201,35 @@ const updatePerson = async (req, res) => {
       updatedAttachments = [...updatedAttachments, ...newFiles];
     }
 
+    let transferDetails = existingPerson.transferDetails;
+    if (data.transferDetails) {
+      try {
+        transferDetails = JSON.parse(data.transferDetails);
+      } catch (e) {}
+    }
+
     const updatedPerson = await prisma.person.update({
       where: { id },
       data: {
-        // إذا كان الطلب فقط لرفع ملفات (بدون إرسال بيانات نصية)، نحافظ على البيانات القديمة
-        name: name || existingPerson.name,
-        role: role || existingPerson.role,
-        phone: phone || existingPerson.phone,
-        agreementType: agreementType || existingPerson.agreementType,
-        notes: notes || existingPerson.notes,
+        name: data.name || existingPerson.name,
+        role: data.role || existingPerson.role, // 💡 بمجرد تغيير الرول من الواجهة سينتقل بكل حساباته!
+        phone: data.phone || existingPerson.phone,
+        whatsapp: data.whatsapp || existingPerson.whatsapp,
+        telegram: data.telegram || existingPerson.telegram,
+        email: data.email || existingPerson.email,
+        country: data.country || existingPerson.country,
+        preferredCurrency:
+          data.preferredCurrency || existingPerson.preferredCurrency,
+        transferMethod: data.transferMethod || existingPerson.transferMethod,
+        transferDetails: transferDetails,
+        firstNameAr: data.firstNameAr || existingPerson.firstNameAr,
+        agreementType: data.agreementType || existingPerson.agreementType,
+        notes: data.notes || existingPerson.notes,
         attachments: updatedAttachments,
       },
     });
 
-    res.json({
-      success: true,
-      // 💡 نرسل المرفقات الجديدة بوضوح لتحديثها في الواجهة
-      data: { attachments: updatedPerson.attachments },
-      message: "تم حفظ التعديلات/المرفقات بنجاح",
-    });
+    res.json({ success: true, data: updatedPerson, message: "تم الحفظ بنجاح" });
   } catch (error) {
     console.error("Update Person Error:", error);
     res.status(500).json({ success: false, message: error.message });
