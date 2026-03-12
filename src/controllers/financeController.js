@@ -448,6 +448,207 @@ const createOutsourcePayment = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+
+// ============================================================================
+// 💡 نظام كشف الحساب والمقاصة (Person Statement & Netting)
+// ============================================================================
+
+const getPersonStatement = async (req, res) => {
+  try {
+    const { personId } = req.params;
+
+    // 1. جلب الشخص مع كافة علاقاته المالية والتشغيلية
+    const person = await prisma.person.findUnique({
+      where: { id: personId },
+      include: {
+        disbursements: true, // السلف والمنصرفات
+        settlementsTarget: true, // الدفعات والتسويات التي استلمها
+        paymentsCollected: {
+          include: { transaction: { select: { transactionCode: true } } },
+        }, // المبالغ التي حصلها ولم يوردها
+        // المعاملات التي عمل بها للحصول على أتعابه
+        agentTransactions: true,
+        assignedTasks: {
+          include: { transaction: { select: { transactionCode: true } } },
+        },
+        assignedBrokers: {
+          include: { transaction: { select: { transactionCode: true } } },
+        },
+      },
+    });
+
+    if (!person) {
+      return res
+        .status(404)
+        .json({ success: false, message: "الشخص غير موجود" });
+    }
+
+    let statement = [];
+
+    // ==========================================
+    // 💰 أولاً: المستحقات (له - Credit)
+    // ==========================================
+
+    // أ. أتعاب التعقيب
+    if (person.agentTransactions) {
+      person.agentTransactions.forEach((tx) => {
+        const notes = typeof tx.notes === "object" ? tx.notes : {};
+        const fee = parseFloat(notes?.agentFees || tx.agentCost || 0);
+        if (fee > 0) {
+          statement.push({
+            id: `FEE-AGT-${tx.id}`,
+            date: tx.createdAt.toISOString().split("T")[0],
+            type: "fee",
+            description: `أتعاب تعقيب - معاملة ${tx.transactionCode}`,
+            amount: fee,
+            category: "credit",
+            source: "المعاملات",
+            settled: false,
+            txStatus: tx.status,
+          });
+        }
+      });
+    }
+
+    // ب. أتعاب الوساطة
+    if (person.assignedBrokers) {
+      person.assignedBrokers.forEach((b) => {
+        if (b.fees > 0) {
+          statement.push({
+            id: `FEE-BRK-${b.id}`,
+            date: b.createdAt.toISOString().split("T")[0],
+            type: "fee",
+            description: `أتعاب وساطة - معاملة ${b.transaction?.transactionCode || "بدون مرجع"}`,
+            amount: parseFloat(b.fees),
+            category: "credit",
+            source: "المعاملات",
+            settled: false,
+          });
+        }
+      });
+    }
+
+    // ج. أتعاب مهام العمل عن بعد
+    if (person.assignedTasks) {
+      person.assignedTasks.forEach((t) => {
+        if (t.cost > 0) {
+          statement.push({
+            id: `FEE-RMT-${t.id}`,
+            date: t.createdAt.toISOString().split("T")[0],
+            type: "fee",
+            description: `أتعاب مهمة: ${t.name} - معاملة ${t.transaction?.transactionCode || ""}`,
+            amount: parseFloat(t.cost),
+            category: "credit",
+            source: "العمل عن بعد",
+            settled: t.isPaid || false,
+          });
+        }
+      });
+    }
+
+    // ==========================================
+    // 🔻 ثانياً: المديونيات (عليه - Debit)
+    // ==========================================
+
+    // أ. التحصيلات التي استلمها ولم يوردها للخزنة
+    if (person.paymentsCollected) {
+      person.paymentsCollected.forEach((p) => {
+        statement.push({
+          id: `COL-${p.id}`,
+          date: p.date.toISOString().split("T")[0],
+          type: "uncollected",
+          description: `مبلغ تم تحصيله لمعاملة ${p.transaction?.transactionCode || ""}`,
+          amount: parseFloat(p.amount),
+          category: "debit",
+          source: "تحصيلات العملاء",
+          settled: false,
+        });
+      });
+    }
+
+    // ب. السلف والمصروفات التي تم صرفها له
+    if (person.disbursements) {
+      person.disbursements.forEach((d) => {
+        statement.push({
+          id: `DIS-${d.id}`,
+          date: d.date.toISOString().split("T")[0],
+          type: "advance",
+          description: `صرف سلفة/عهدة: ${d.notes || d.type}`,
+          amount: parseFloat(d.amount),
+          category: "debit",
+          source: "الخزنة / البنك",
+          settled: false,
+        });
+      });
+    }
+
+    // ج. الدفعات النقدية المسددة له (تسويات سابقة)
+    if (person.settlementsTarget) {
+      person.settlementsTarget.forEach((s) => {
+        if (s.status === "DELIVERED") {
+          statement.push({
+            id: `STL-${s.id}`,
+            date: s.deliveryDate
+              ? s.deliveryDate.toISOString().split("T")[0]
+              : s.createdAt.toISOString().split("T")[0],
+            type: "delivered",
+            description: `دفعة مالية مسلمة له: ${s.notes || ""}`,
+            amount: parseFloat(s.amount),
+            category: "debit", // تعتبر عليه لأنه قبضها واستلمها فتنقص من حسابه
+            source: s.source || "الإدارة المالية",
+            settled: true, // التسليم هو بحد ذاته مسوى
+          });
+        }
+      });
+    }
+
+    // ترتيب السجل حسب التاريخ من الأحدث للأقدم
+    statement.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    res.json({
+      success: true,
+      data: {
+        statement,
+        nettingHistory: [], // يمكننا لاحقاً جلب المقاصات السابقة من جدول مخصص
+      },
+    });
+  } catch (error) {
+    console.error("Get Person Statement Error:", error.message);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const executeNetting = async (req, res) => {
+  try {
+    const { personId, itemIds, totalCredit, totalDebit, netAmount } = req.body;
+
+    // إنشاء سجل تسوية من نوع "مقاصة" لضبط الحسابات
+    const nettingRecord = await prisma.privateSettlement.create({
+      data: {
+        targetType: "مقاصة_شخصية",
+        targetId: personId,
+        amount: Math.abs(netAmount),
+        status: "DELIVERED",
+        source: "نظام المقاصة الآلي",
+        notes: `تمت مقاصة ${itemIds.length} بنود. إجمالي له: ${totalCredit} ر.س | إجمالي عليه: ${totalDebit} ر.س | الصافي: ${netAmount} ر.س`,
+        deliveryDate: new Date(),
+      },
+    });
+
+    // 💡 في الأنظمة المتقدمة يتم الذهاب لكل جدول بناءً على ID وتغيير حالته إلى settled: true
+    // (مثلاً استخراج IDs التي تبدأ بـ FEE- وتحديث المعاملات)
+
+    res.json({
+      success: true,
+      message: "تمت المقاصة بنجاح وتصفية الحسابات",
+      data: nettingRecord,
+    });
+  } catch (error) {
+    console.error("Netting Error:", error.message);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 module.exports = {
   createSettlement,
   deliverSettlement,
@@ -459,4 +660,6 @@ module.exports = {
   getOutsourcePayments,
   createOutsourcePayment,
   createOutsourceSalary,
+  getPersonStatement,
+  executeNetting,
 };

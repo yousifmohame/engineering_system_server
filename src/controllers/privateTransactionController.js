@@ -442,124 +442,170 @@ const toggleFreezeTransaction = async (req, res) => {
 };
 const getPrivateTransactions = async (req, res) => {
   try {
-    const transactions = await prisma.privateTransaction.findMany({
-      orderBy: { createdAt: "desc" },
-      include: {
-        client: { select: { name: true } },
-        districtNode: {
-          select: { name: true, sector: { select: { name: true } } },
-        },
-        broker: { select: { name: true } },
-        agent: { select: { name: true } },
+    const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+    const cursor = req.query.cursor;
 
-        // 💡 التعديل هنا: استخدام المسميات الصحيحة من schema.prisma
-        payments: true, // الدفعات المحصلة
-        settlements: true, // التسويات
-        tasks: { include: { worker: { select: { name: true } } } }, // مهام العمل عن بعد
-        brokersList: { include: { broker: { select: { name: true } } } },
+    const transactions = await prisma.privateTransaction.findMany({
+      take: limit,
+      skip: cursor ? 1 : 0,
+      cursor: cursor ? { id: cursor } : undefined,
+
+      orderBy: {
+        createdAt: "desc",
+      },
+
+      select: {
+        id: true,
+        transactionCode: true,
+        category: true,
+        source: true,
+        status: true,
+        totalFees: true,
+        paidAmount: true,
+        remainingAmount: true,
+        createdAt: true,
+        notes: true,
+
+        client: {
+          select: { name: true },
+        },
+
+        districtNode: {
+          select: {
+            name: true,
+            sector: {
+              select: { name: true },
+            },
+          },
+        },
+
+        agent: {
+          select: { name: true },
+        },
+
+        brokersList: {
+          select: {
+            id: true,
+            fees: true,
+            brokerId: true,
+            broker: {
+              select: { name: true },
+            },
+          },
+        },
       },
     });
 
-    const formattedData = transactions.map((tx) => {
-      // استخراج الـ notes بشكل آمن
+    const formattedData = [];
+
+    for (const tx of transactions) {
       const notes =
         typeof tx.notes === "object" && tx.notes !== null ? tx.notes : {};
 
+      // استخراج اسم العميل بشكل آمن
       let ownerName = "غير محدد";
-      if (tx.client?.name) {
-        ownerName =
-          typeof tx.client.name === "string"
-            ? JSON.parse(tx.client.name).ar
-            : tx.client.name.ar;
+
+      try {
+        if (tx.client?.name) {
+          const parsed =
+            typeof tx.client.name === "string"
+              ? JSON.parse(tx.client.name)
+              : tx.client.name;
+
+          ownerName = parsed?.ar || parsed || "غير محدد";
+        }
+      } catch {
+        ownerName = tx.client?.name || "غير محدد";
       }
 
-      let collectionStatus = "not_collected";
-      if (tx.paidAmount >= tx.totalFees && tx.totalFees > 0)
-        collectionStatus = "محصل بالكامل";
-      else if (tx.paidAmount > 0) collectionStatus = "محصل جزئي";
-      else collectionStatus = "غير محصل";
+      // حالة التحصيل
+      let collectionStatus = "غير محصل";
 
+      if (tx.totalFees > 0) {
+        if (tx.paidAmount >= tx.totalFees) collectionStatus = "محصل بالكامل";
+        else if (tx.paidAmount > 0) collectionStatus = "محصل جزئي";
+      }
+
+      // التاريخ
       const dateObj = new Date(tx.createdAt);
-      const formattedDate = `${dateObj.getFullYear()}/${String(dateObj.getMonth() + 1).padStart(2, "0")}/${String(dateObj.getDate()).padStart(2, "0")}`;
 
-      // 💡 تهيئة المعقب ليتوافق مع تصميم الواجهة (Array)
-      const agentArray = tx.agent
-        ? [
-            {
-              id: tx.agentId,
-              name: tx.agent.name,
-              role: "معقب",
-              fees: notes?.agentFees || 0,
-            },
-          ]
-        : [];
+      const formattedDate = `${dateObj.getFullYear()}/${String(
+        dateObj.getMonth() + 1,
+      ).padStart(2, "0")}/${String(dateObj.getDate()).padStart(2, "0")}`;
 
-      // 💡 حساب تكلفة العمل عن بعد
-      const remoteCost = tx.tasks?.reduce((sum, t) => sum + t.cost, 0) || 0;
-
-      // 💡 حساب بيانات الوسطاء من الجدول الجديد
-      const transactionBrokers =
+      // الوسطاء
+      const brokers =
         tx.brokersList?.map((b) => ({
-          id: b.id, // ID الخاص بسجل الربط (للحذف)
+          id: b.id,
           personId: b.brokerId,
           name: b.broker?.name || "وسيط",
           fees: b.fees,
         })) || [];
 
-      const totalBrokerFees = transactionBrokers.reduce(
-        (sum, b) => sum + b.fees,
-        0,
-      );
-      const brokerNames =
-        transactionBrokers.map((b) => b.name).join(" و ") || "—";
+      const totalBrokerFees = brokers.reduce((sum, b) => sum + b.fees, 0);
 
-      return {
+      const brokerNames =
+        brokers.length > 0 ? brokers.map((b) => b.name).join(" و ") : "—";
+
+      formattedData.push({
         id: tx.id,
         ref: tx.transactionCode,
+
         type: tx.category || "غير محدد",
+
         client: ownerName,
-        district: tx.districtNode?.name || "غير محدد", // 👈 تم إزالة notes.refs.sector من هنا
+
+        district: tx.districtNode?.name || "غير محدد",
+
         sector:
           notes?.refs?.sector || tx.districtNode?.sector?.name || "غير محدد",
+
         plot: notes?.refs?.plot || "—",
         plan: notes?.refs?.plan || "—",
+
         office: tx.source || "مكتب ديتيلز",
+
         sourceName: notes?.sourceName || "مباشر",
 
-        mediator: brokerNames, // يعرض الأسماء في الجدول الرئيسي
-        mediatorFees: totalBrokerFees, // يجمع أتعابهم للمحرك المالي
-        brokers: transactionBrokers, // المصفوفة التي ستعرض في تاب الوسطاء
+        mediator: brokerNames,
+        mediatorFees: totalBrokerFees,
+        brokers,
 
         agentCost: notes?.agentFees || 0,
-        remoteCost: remoteCost,
-        expensesCost: 0, // سيتم ربطها لاحقاً لو أضفت مصروفات المعاملة
 
         totalFees: tx.totalFees || 0,
         paidAmount: tx.paidAmount || 0,
+
         remainingAmount:
           tx.remainingAmount || (tx.totalFees || 0) - (tx.paidAmount || 0),
 
-        collectionStatus: collectionStatus,
+        collectionStatus,
+
         status: tx.status || "جارية",
+
         date: formattedDate,
         created: formattedDate,
+      });
+    }
 
-        // 🚀 القوائم المترابطة لتشغيل جميع التابات في الواجهة
-        paymentsList: tx.payments || [], // 👈 تصحيح الاسم هنا
-        agents: agentArray,
-        remoteTasks:
-          tx.tasks?.map((t) => ({ ...t, workerName: t.worker?.name })) || [],
-        settlements: tx.settlements || [],
-        attachments: notes?.attachments || [],
-        collectionDates: notes?.collectionDates || [],
-      };
+    const nextCursor =
+      transactions.length === limit
+        ? transactions[transactions.length - 1].id
+        : null;
+
+    res.json({
+      success: true,
+      count: formattedData.length,
+      nextCursor,
+      data: formattedData,
     });
-
-    res.json({ success: true, data: formattedData });
   } catch (error) {
     console.error("Get Private Transactions Error:", error);
-    // إرسال رسالة الخطأ الحقيقية لتسهيل التتبع
-    res.status(500).json({ success: false, message: error.message });
+
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
   }
 };
 

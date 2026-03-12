@@ -142,10 +142,56 @@ const addPersonalRecharge = async (req, res) => {
   }
 };
 
+// 6. إضافة حركة بنكية (إيداع / سحب / مصروف) وتحديث الرصيد
+const createBankTransaction = async (req, res) => {
+  try {
+    const { accountId, type, amount, date, notes } = req.body;
+    const parsedAmount = parseFloat(amount);
+
+    if (!parsedAmount || parsedAmount <= 0) {
+      return res.status(400).json({ success: false, message: "المبلغ غير صحيح" });
+    }
+
+    // تحديد هل العملية تزيد أم تنقص الرصيد؟
+    // الإيداع يزود الرصيد، والسحب والمصروف ينقص الرصيد
+    const balanceChange = type === "deposit" ? parsedAmount : -parsedAmount;
+    
+    // ترجمة النوع للعربية لحفظه في الداتابيز
+    const typeAr = type === "deposit" ? "إيداع" : type === "withdrawal" ? "سحب" : "مصروف";
+
+    // استخدام Transaction لضمان إنشاء السجل وتحديث الرصيد معاً
+    const result = await prisma.$transaction([
+      prisma.bankTransaction.create({
+        data: {
+          accountId,
+          type: typeAr,
+          amount: parsedAmount,
+          date: date ? new Date(date) : new Date(),
+          notes: notes || null,
+        },
+      }),
+      prisma.bankAccount.update({
+        where: { id: accountId },
+        data: { systemBalance: { increment: balanceChange } }, // 👈 تحديث رصيد النظام تلقائياً
+      }),
+    ]);
+
+    res.status(201).json({
+      success: true,
+      message: "تم تسجيل العملية وتحديث الرصيد بنجاح",
+      data: result[0],
+    });
+  } catch (error) {
+    console.error("Bank Transaction Error:", error);
+    res.status(500).json({ success: false, message: "فشل تسجيل العملية" });
+  }
+};
+
 module.exports = {
   getBankAccounts,
   createBankAccount,
   updateBankAccount,
   deleteBankAccount,
   addPersonalRecharge,
+  createBankTransaction
 };

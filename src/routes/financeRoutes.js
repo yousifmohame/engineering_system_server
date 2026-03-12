@@ -31,6 +31,8 @@ const {
   createOutsourceSalary,
   getOutsourcePayments,
   createOutsourcePayment,
+  getPersonStatement,
+  executeNetting,
 } = require("../controllers/financeController");
 
 // حماية جميع المسارات (يجب أن يكون المستخدم مسجل الدخول)
@@ -52,5 +54,7 @@ router.post("/settlements/deliver", upload.single("file"), deliverSettlement);
 
 // 3. جرد (خزنة أو حساب بنكي)
 router.post("/inventory", recordInventory);
+router.get("/statement/:personId", getPersonStatement);
+router.post("/netting", executeNetting);
 
 module.exports = router;
