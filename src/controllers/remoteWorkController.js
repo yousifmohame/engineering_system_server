@@ -125,24 +125,66 @@ const deleteRemoteWorker = async (req, res) => {
 };
 
 // 5. تعيين مهام
+// 5. تعيين مهام (مع دعم تسجيل الدفعة الفورية إذا تم تحديدها)
 const assignTasks = async (req, res) => {
   try {
-    const { workerId, transactionId, tasks, isFinal } = req.body;
-    await prisma.$transaction(
-      tasks.map((t) =>
-        prisma.transactionTask.create({
+    const { 
+      workerId, 
+      transactionId, 
+      tasks, 
+      isFinal,
+      // الحقول الجديدة الخاصة بالدفع الفوري من الواجهة
+      isPaid,
+      paymentAmount,
+      paymentCurrency,
+      paymentDate 
+    } = req.body;
+
+    if (!workerId || !transactionId || !tasks || tasks.length === 0) {
+      return res.status(400).json({ success: false, message: "بيانات المهمة غير مكتملة." });
+    }
+
+    // استخدام Transaction لضمان إنشاء المهام والدفعة معاً دون أخطاء
+    await prisma.$transaction(async (prismaDelegate) => {
+      
+      // 1. إنشاء المهام
+      await Promise.all(
+        tasks.map((t) =>
+          prismaDelegate.transactionTask.create({
+            data: {
+              workerId,
+              transactionId,
+              taskName: t.name,
+              cost: parseFloat(t.cost) || 0,
+              isFinal: isFinal || false,
+            },
+          })
+        )
+      );
+
+      // 2. تسجيل دفعة فورية إذا حدد المستخدم ذلك
+      if (isPaid && paymentAmount) {
+        // نحتاج لتسجيلها كأنها "أتعاب معتمدة" ثم "تم تحويلها" حتى لا يختل رصيده
+        // أو ببساطة تسجيل الدفعة مباشرة في PrivateSettlement كحالة DELIVERED
+        
+        await prismaDelegate.privateSettlement.create({
           data: {
-            workerId,
-            transactionId,
-            taskName: t.name,
-            cost: parseFloat(t.cost),
-            isFinal,
-          },
-        }),
-      ),
-    );
-    res.json({ success: true, message: "تم تعيين المهام بنجاح" });
+            targetType: "موظف عن بعد",
+            targetId: workerId,
+            transactionId: transactionId,
+            amount: parseFloat(paymentAmount),
+            status: "DELIVERED", 
+            source: "دفعة فورية مع التعيين",
+            notes: `عملة الدفع: ${paymentCurrency} | تاريخ الدفع: ${paymentDate || new Date().toISOString().split('T')[0]}`,
+          }
+        });
+      }
+      
+    });
+
+    res.json({ success: true, message: "تم تعيين المهام بنجاح" + (isPaid ? " وتم تسجيل الدفعة" : "") });
   } catch (error) {
+    console.error("Assign Tasks Error:", error.message);
     res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -205,6 +247,73 @@ const updateExchangeRate = async (req, res) => {
   }
 };
 
+// ==================================================
+// 8. حذف مهمة عمل عن بعد
+// DELETE /api/remote-workers/tasks/:taskId
+// ==================================================
+const deleteTask = async (req, res) => {
+  try {
+    const { taskId } = req.params;
+    await prisma.transactionTask.delete({
+      where: { id: taskId }
+    });
+    res.json({ success: true, message: "تم حذف المهمة بنجاح" });
+  } catch (error) {
+    console.error("Delete Task Error:", error.message);
+    res.status(500).json({ success: false, message: "تعذر حذف المهمة، قد تكون مرتبطة بسجلات مالية." });
+  }
+};
+
+// ==================================================
+// 9. سداد أتعاب مهمة محددة من داخل المعاملة
+// POST /api/remote-workers/tasks/pay
+// ==================================================
+const payTask = async (req, res) => {
+  try {
+    const { taskId, workerId, transactionId, amountSar, paymentDate, isFullPayment } = req.body;
+
+    if (!taskId || !workerId || !amountSar) {
+      return res.status(400).json({ success: false, message: "البيانات غير مكتملة" });
+    }
+
+    const paymentAmount = parseFloat(amountSar);
+
+    await prisma.$transaction(async (prismaDelegate) => {
+      // 1. تسجيل الدفعة في جدول التسويات 
+      await prismaDelegate.privateSettlement.create({
+        data: {
+          targetType: "موظف عن بعد",
+          targetId: workerId,
+          transactionId: transactionId,
+          amount: paymentAmount,
+          status: "DELIVERED",
+          source: "سداد مهمة مباشرة",
+          notes: `تاريخ الدفع: ${paymentDate} | ${isFullPayment ? 'سداد متبقي كامل' : 'سداد جزئي'}`,
+        }
+      });
+
+      // 2. 💡 تحديث المهمة بالرصيد الجديد
+      const task = await prismaDelegate.transactionTask.findUnique({ where: { id: taskId } });
+      const newPaidAmount = (task.paidAmount || 0) + paymentAmount;
+      const isNowFullyPaid = newPaidAmount >= task.cost;
+
+      await prismaDelegate.transactionTask.update({
+        where: { id: taskId },
+        data: { 
+          paidAmount: newPaidAmount,
+          isPaid: isNowFullyPaid, // تتحول لـ true تلقائياً إذا سدد كل المبلغ
+          isFinal: isNowFullyPaid
+        }
+      });
+    });
+
+    res.json({ success: true, message: "تم تسجيل الدفعة للمهمة بنجاح" });
+  } catch (error) {
+    console.error("Pay Task Error:", error.message);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 module.exports = {
   getRemoteWorkers,
   addRemoteWorker,
@@ -214,4 +323,6 @@ module.exports = {
   addTransfer,
   getExchangeRates,
   updateExchangeRate,
+  deleteTask, // 👈 تمت إضافته
+  payTask,    // 👈 تمت إضافته
 };

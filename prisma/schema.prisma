@@ -1734,6 +1734,8 @@ model TransactionTask {
   taskName      String
   cost          Float
   isFinal       Boolean  @default(false)
+  isPaid        Boolean  @default(false) // 👈 أضف هذا السطر فقط
+  paidAmount    Float    @default(0)
   createdAt     DateTime @default(now())
 
   transaction PrivateTransaction @relation(fields: [transactionId], references: [id])

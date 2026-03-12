@@ -1,7 +1,7 @@
 const { PrismaClient } = require("@prisma/client");
 const prisma = new PrismaClient();
 
-// 1. تسجيل تسوية (مستحقات)
+// 1. تسجيل تسوية (مستحقات أو دفعيات مباشرة)
 const createSettlement = async (req, res) => {
   try {
     const data = req.body;
@@ -9,10 +9,11 @@ const createSettlement = async (req, res) => {
       data: {
         targetType: data.targetType,
         targetId: data.targetId || null,
+        transactionId: data.transactionId || null, // 👈 1. تمت إضافة ربط المعاملة
         amount: parseFloat(data.amount),
         source: data.source,
         notes: data.notes,
-        status: "PENDING",
+        status: data.status || "PENDING",          // 👈 2. أخذ الحالة من الواجهة (DELIVERED)
       },
     });
     res.status(201).json({ success: true, data: settlement });

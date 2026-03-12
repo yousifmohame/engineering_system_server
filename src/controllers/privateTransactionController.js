@@ -115,12 +115,10 @@ const createPrivateTransaction = async (req, res) => {
 
     if (!finalClientId) {
       if (!ownerName) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-            message: "يرجى اختيار المالك أو إدخال اسم المالك الجديد.",
-          });
+        return res.status(400).json({
+          success: false,
+          message: "يرجى اختيار المالك أو إدخال اسم المالك الجديد.",
+        });
       }
 
       const clientCode = await generateClientCode(); // توليد الكود
@@ -520,13 +518,13 @@ const getPrivateTransactions = async (req, res) => {
         ref: tx.transactionCode,
         type: tx.category || "غير محدد",
         client: ownerName,
-        district: notes?.refs?.sector || tx.districtNode?.name || "غير محدد",
+        district: tx.districtNode?.name || "غير محدد", // 👈 تم إزالة notes.refs.sector من هنا
         sector:
           notes?.refs?.sector || tx.districtNode?.sector?.name || "غير محدد",
         plot: notes?.refs?.plot || "—",
         plan: notes?.refs?.plan || "—",
         office: tx.source || "مكتب ديتيلز",
-        sourceName: tx.source || "مباشر",
+        sourceName: notes?.sourceName || "مباشر",
 
         mediator: brokerNames, // يعرض الأسماء في الجدول الرئيسي
         mediatorFees: totalBrokerFees, // يجمع أتعابهم للمحرك المالي
@@ -742,6 +740,195 @@ const removeBrokerFromTransaction = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+
+// ==================================================
+// تحديث حالة المعاملة (التبويب الجديد: حالة المعاملة)
+// POST /api/private-transactions/:id/status
+// ==================================================
+const updateTransactionStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      currentStatus,
+      serviceNumber,
+      hijriYear1,
+      licenseNumber,
+      hijriYear2,
+      oldLicenseNumber,
+      authorityNotes,
+      approvalDate, // 💡 نستقبل تاريخ الاعتماد إذا تم إرساله من الواجهة
+    } = req.body;
+
+    const tx = await prisma.privateTransaction.findUnique({ where: { id } });
+    if (!tx) {
+      return res
+        .status(404)
+        .json({ success: false, message: "المعاملة غير موجودة" });
+    }
+
+    let currentNotes = typeof tx.notes === "object" && tx.notes ? tx.notes : {};
+
+    // مسار المرفق إن وُجد (ملاحظات الجهات)
+    let noteAttachmentPath =
+      currentNotes.transactionStatusData?.noteAttachment || null;
+    if (req.file) {
+      noteAttachmentPath = `/uploads/status_notes/${req.file.filename}`;
+    }
+
+    // تحديث بيانات الحالة داخل الـ JSON (notes)
+    currentNotes.transactionStatusData = {
+      currentStatus: currentStatus || "عند المهندس للدراسة",
+      serviceNumber: serviceNumber || "",
+      hijriYear1: hijriYear1 || "",
+      licenseNumber: licenseNumber || "",
+      hijriYear2: hijriYear2 || "",
+      oldLicenseNumber: oldLicenseNumber || "",
+      authorityNotes: authorityNotes || "",
+      noteAttachment: noteAttachmentPath,
+      // 💡 نحتفظ بتاريخ الاعتماد القديم إذا كان موجوداً ولم يتم إرسال جديد
+      approvalDate:
+        approvalDate ||
+        currentNotes.transactionStatusData?.approvalDate ||
+        null,
+    };
+
+    await prisma.privateTransaction.update({
+      where: { id },
+      data: { notes: currentNotes },
+    });
+
+    res.json({ success: true, message: "تم تحديث حالة المعاملة بنجاح" });
+  } catch (error) {
+    console.error("Update Transaction Status Error:", error.message);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+// ==================================================
+// تحديث بيانات المعاملة (الأساسية والمالية والتسكين والمرفقات)
+// PUT /api/private-transactions/:id
+// ==================================================
+const updatePrivateTransaction = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      year,
+      month,
+      client,
+      districtId,
+      sector,
+      type,
+      office,
+      sourceName,
+      totalFees,
+      mediatorFees,
+      agentCost,
+      notes, // 👈 1. استلام الـ notes من الواجهة (التي تحتوي على المرفقات بعد الحذف)
+    } = req.body;
+
+    const tx = await prisma.privateTransaction.findUnique({ where: { id } });
+    if (!tx) {
+      return res
+        .status(404)
+        .json({ success: false, message: "المعاملة غير موجودة" });
+    }
+
+    let newTransactionCode = tx.transactionCode;
+    let newCreatedAt = tx.createdAt;
+
+    // 1. التحقق من التسكين (تغيير السنة والشهر لتوليد كود جديد)
+    if (year && month) {
+      const currentYear = tx.createdAt.getFullYear().toString();
+      const currentMonth = (tx.createdAt.getMonth() + 1)
+        .toString()
+        .padStart(2, "0");
+
+      if (year !== currentYear || month !== currentMonth) {
+        const prefix = `${year}-${month}-`;
+
+        const lastTx = await prisma.privateTransaction.findFirst({
+          where: { transactionCode: { startsWith: prefix } },
+          orderBy: { transactionCode: "desc" },
+        });
+
+        let nextNumber = 1;
+        if (lastTx) {
+          try {
+            const parts = lastTx.transactionCode.split("-");
+            const lastNumberStr = parts[2];
+            nextNumber = parseInt(lastNumberStr, 10) + 1;
+          } catch (e) {
+            nextNumber = 1;
+          }
+        }
+        newTransactionCode = `${prefix}${String(nextNumber).padStart(5, "0")}`;
+        newCreatedAt = new Date(`${year}-${month}-01T10:00:00Z`);
+      }
+    }
+
+    // 2. تحديث اسم العميل
+    if (client && tx.clientId) {
+      await prisma.client.update({
+        where: { id: tx.clientId },
+        data: { name: { ar: client, en: "", details: {} } },
+      });
+    }
+
+    // 3. تحديث الـ JSON الخاص بالملاحظات
+    let currentNotes =
+      typeof tx.notes === "object" && tx.notes !== null ? tx.notes : {};
+
+    // 💡 السطر السحري لحل مشكلة الحذف: تحديث المرفقات إذا تم إرسالها بعد حذف ملف منها
+    if (notes && notes.attachments !== undefined) {
+      currentNotes.attachments = notes.attachments;
+    }
+
+    if (!currentNotes.refs) currentNotes.refs = {};
+    if (sector) currentNotes.refs.sector = sector;
+
+    // 4. التحديث الجذري للأتعاب داخل notes
+    if (agentCost !== undefined && agentCost !== null) {
+      currentNotes.agentFees = parseFloat(agentCost) || 0;
+    }
+
+    if (mediatorFees !== undefined && mediatorFees !== null) {
+      currentNotes.mediatorFees = parseFloat(mediatorFees) || 0;
+    }
+
+    if (sourceName !== undefined) {
+      currentNotes.sourceName = sourceName;
+    }
+
+    // 5. الحسابات المالية
+    const parsedTotalFees =
+      totalFees !== undefined ? parseFloat(totalFees) : tx.totalFees;
+    const remainingAmount = parsedTotalFees - (tx.paidAmount || 0);
+
+    // 6. الحفظ النهائي للتعديلات
+    const updatedTx = await prisma.privateTransaction.update({
+      where: { id },
+      data: {
+        transactionCode: newTransactionCode,
+        createdAt: newCreatedAt,
+        category: type || tx.category,
+        source: office || tx.source,
+        totalFees: parsedTotalFees,
+        remainingAmount: remainingAmount < 0 ? 0 : remainingAmount,
+        districtId: districtId || tx.districtId,
+        notes: currentNotes,
+      },
+    });
+
+    res.json({
+      success: true,
+      message: "تم التحديث بنجاح",
+      data: updatedTx,
+    });
+  } catch (error) {
+    console.error("Update Transaction Error:", error.message);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 // 💡 تحديث التصدير (Exports)
 module.exports = {
   createPrivateTransaction,
@@ -756,4 +943,6 @@ module.exports = {
   assignAgentToTransaction,
   assignBrokerToTransaction,
   removeBrokerFromTransaction,
+  updateTransactionStatus,
+  updatePrivateTransaction,
 };
