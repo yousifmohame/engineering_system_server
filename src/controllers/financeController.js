@@ -13,7 +13,7 @@ const createSettlement = async (req, res) => {
         amount: parseFloat(data.amount),
         source: data.source,
         notes: data.notes,
-        status: data.status || "PENDING",          // 👈 2. أخذ الحالة من الواجهة (DELIVERED)
+        status: data.status || "PENDING", // 👈 2. أخذ الحالة من الواجهة (DELIVERED)
       },
     });
     res.status(201).json({ success: true, data: settlement });
@@ -157,8 +157,9 @@ const getMonthlySettlementData = async (req, res) => {
       const notes = typeof tx.notes === "object" ? tx.notes : {};
       const mediatorFees = parseFloat(notes?.mediatorFees || 0);
       const agentCost = parseFloat(notes?.agentFees || tx.agentCost || 0);
-      const remoteCost = tx.tasks?.reduce((sum, t) => sum + (t.cost || 0), 0) || 0;
-      
+      const remoteCost =
+        tx.tasks?.reduce((sum, t) => sum + (t.cost || 0), 0) || 0;
+
       const cost = agentCost + remoteCost + mediatorFees;
       const profit = (tx.totalFees || 0) - cost;
 
@@ -173,14 +174,19 @@ const getMonthlySettlementData = async (req, res) => {
         ref: tx.transactionCode,
         owner: tx.client || "غير محدد",
         district: tx.districtId || "غير محدد", // يمكن ربطها باسم الحي الفعلي
-        mediator: tx.brokersList?.map(b => b.broker?.name).join(" و ") || "—",
+        mediator: tx.brokersList?.map((b) => b.broker?.name).join(" و ") || "—",
         agent: tx.agent?.name || "—",
         totalPrice: tx.totalFees || 0,
         collected: tx.paidAmount || 0,
         remaining: tx.remainingAmount || 0,
         totalCosts: cost,
         netProfit: profit,
-        status: (tx.paidAmount >= tx.totalFees && tx.totalFees > 0) ? "settled" : (tx.paidAmount > 0 ? "partial" : "pending"),
+        status:
+          tx.paidAmount >= tx.totalFees && tx.totalFees > 0
+            ? "settled"
+            : tx.paidAmount > 0
+              ? "partial"
+              : "pending",
       };
     });
 
@@ -195,27 +201,41 @@ const getMonthlySettlementData = async (req, res) => {
           let txCount = 0;
 
           if (roleType === "معقب") {
-            const hisTxs = transactions.filter(t => t.agentId === p.id);
+            const hisTxs = transactions.filter((t) => t.agentId === p.id);
             txCount = hisTxs.length;
-            totalFees = hisTxs.reduce((sum, t) => sum + parseFloat(t.notes?.agentFees || t.agentCost || 0), 0);
+            totalFees = hisTxs.reduce(
+              (sum, t) =>
+                sum + parseFloat(t.notes?.agentFees || t.agentCost || 0),
+              0,
+            );
           } else if (roleType === "وسيط") {
-            const hisTxs = transactions.filter(t => t.brokersList?.some(b => b.brokerId === p.id));
+            const hisTxs = transactions.filter((t) =>
+              t.brokersList?.some((b) => b.brokerId === p.id),
+            );
             txCount = hisTxs.length;
-            hisTxs.forEach(t => {
-              const brokerRecord = t.brokersList.find(b => b.brokerId === p.id);
+            hisTxs.forEach((t) => {
+              const brokerRecord = t.brokersList.find(
+                (b) => b.brokerId === p.id,
+              );
               if (brokerRecord) totalFees += brokerRecord.fees;
             });
           } else if (roleType === "موظف عن بعد") {
-            const hisTasks = transactions.flatMap(t => t.tasks).filter(t => t.workerId === p.id);
+            const hisTasks = transactions
+              .flatMap((t) => t.tasks)
+              .filter((t) => t.workerId === p.id);
             txCount = hisTasks.length; // Number of tasks
             totalFees = hisTasks.reduce((sum, t) => sum + (t.cost || 0), 0);
           }
 
-          const paid = p.settlementsTarget.reduce((sum, s) => sum + s.amount, 0);
+          const paid = p.settlementsTarget.reduce(
+            (sum, s) => sum + s.amount,
+            0,
+          );
           const remaining = Math.max(0, totalFees - paid);
-          
+
           let deliveryStatus = "not_delivered";
-          if (paid >= totalFees && totalFees > 0) deliveryStatus = "fully_delivered";
+          if (paid >= totalFees && totalFees > 0)
+            deliveryStatus = "fully_delivered";
           else if (paid > 0) deliveryStatus = "partial_delivery";
 
           return {
@@ -258,9 +278,8 @@ const getMonthlySettlementData = async (req, res) => {
         mediators,
         agents,
         remoteWorkers,
-      }
+      },
     });
-
   } catch (error) {
     console.error("Get Monthly Settlement Error:", error.message);
     res.status(500).json({ success: false, message: error.message });
@@ -274,13 +293,13 @@ const getMonthlySettlementData = async (req, res) => {
 const executeMonthlySettlement = async (req, res) => {
   try {
     const { year, month, settlementType } = req.body;
-    
+
     // هنا تقوم ببرمجة لوجيك "إغلاق الشهر"
     // مثل: تغيير حالة المعاملات إلى "مكتملة"، أو إنشاء سجل في جدول History
 
-    res.json({ 
-      success: true, 
-      message: `تم اعتماد وإغلاق شهر ${month}/${year} بنجاح.` 
+    res.json({
+      success: true,
+      message: `تم اعتماد وإغلاق شهر ${month}/${year} بنجاح.`,
     });
   } catch (error) {
     console.error("Execute Settlement Error:", error.message);
@@ -288,7 +307,147 @@ const executeMonthlySettlement = async (req, res) => {
   }
 };
 
+// ============================================================================
+// 💡 نظام رواتب المتعاونين الخارجيين (Outsource Salaries)
+// ============================================================================
 
+// 1. جلب سجلات الرواتب
+const getOutsourceSalaries = async (req, res) => {
+  try {
+    const { month } = req.query; // مثال: "2026-03"
+
+    const whereClause = {};
+    if (month && month !== "all") {
+      whereClause.period = month;
+    }
+
+    // نفترض أنك أنشأت جدول OutsourceSalary في Prisma
+    const salaries = await prisma.outsourceSalary.findMany({
+      where: whereClause,
+      orderBy: { createdAt: "desc" },
+    });
+
+    res.json({ success: true, data: salaries });
+  } catch (error) {
+    console.error("Get Salaries Error:", error.message);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// 2. تسجيل راتب / مستحق جديد كمديونية
+const createOutsourceSalary = async (req, res) => {
+  try {
+    const data = req.body;
+
+    const newSalary = await prisma.outsourceSalary.create({
+      data: {
+        employeeId: data.employeeId,
+        employeeName: data.employeeName,
+        period: data.period,
+        startDate: data.startDate,
+        endDate: data.endDate,
+        daysCount: data.daysCount,
+        dailyRate: data.dailyRate,
+        grossAmount: data.grossAmount,
+        deductions: data.deductions,
+        netAmount: data.netAmount,
+        roundedAmount: data.roundedAmount,
+        status: "unpaid",
+        paidAmount: 0,
+        remainingAmount: data.roundedAmount,
+        paymentType: data.paymentType,
+      },
+    });
+
+    res
+      .status(201)
+      .json({ success: true, data: newSalary, message: "تم تسجيل الراتب" });
+  } catch (error) {
+    console.error("Create Salary Error:", error.message);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// 3. جلب سجل الدفعات
+const getOutsourcePayments = async (req, res) => {
+  try {
+    // نفترض أنك أنشأت جدول OutsourcePayment في Prisma
+    const payments = await prisma.outsourcePayment.findMany({
+      orderBy: { paymentDate: "desc" },
+    });
+
+    res.json({ success: true, data: payments });
+  } catch (error) {
+    console.error("Get Payments Error:", error.message);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// 4. تسديد دفعة من الراتب (جزئي أو كلي)
+const createOutsourcePayment = async (req, res) => {
+  try {
+    const {
+      salaryRecordId,
+      amount,
+      paymentMethod,
+      paymentDate,
+      paymentTime,
+      currency,
+      notes,
+      isPartial,
+    } = req.body;
+
+    // استخدام Transaction لضمان تحديث الراتب وإنشاء الدفعة معاً
+    const result = await prisma.$transaction(async (prismaDelegate) => {
+      // 1. جلب سجل الراتب
+      const salary = await prismaDelegate.outsourceSalary.findUnique({
+        where: { id: salaryRecordId },
+      });
+
+      if (!salary) throw new Error("سجل الراتب غير موجود");
+      if (amount > salary.remainingAmount)
+        throw new Error("المبلغ أكبر من المتبقي");
+
+      // 2. تحديث المبالغ والحالة في الراتب
+      const newPaidAmount = salary.paidAmount + amount;
+      const newRemainingAmount = salary.roundedAmount - newPaidAmount;
+      let newStatus = "partial";
+      if (newRemainingAmount <= 0) newStatus = "paid";
+
+      await prismaDelegate.outsourceSalary.update({
+        where: { id: salaryRecordId },
+        data: {
+          paidAmount: newPaidAmount,
+          remainingAmount: newRemainingAmount,
+          status: newStatus,
+        },
+      });
+
+      // 3. إنشاء سجل الدفعة
+      const newPayment = await prismaDelegate.outsourcePayment.create({
+        data: {
+          salaryRecordId,
+          amount,
+          paymentMethod,
+          paymentDate,
+          paymentTime,
+          currency,
+          notes,
+          isPartial,
+        },
+      });
+
+      return newPayment;
+    });
+
+    res
+      .status(201)
+      .json({ success: true, data: result, message: "تم تسجيل الدفعة بنجاح" });
+  } catch (error) {
+    console.error("Create Payment Error:", error.message);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
 module.exports = {
   createSettlement,
   deliverSettlement,
@@ -296,4 +455,8 @@ module.exports = {
   createExpense,
   getMonthlySettlementData,
   executeMonthlySettlement,
+  getOutsourceSalaries,
+  getOutsourcePayments,
+  createOutsourcePayment,
+  createOutsourceSalary,
 };

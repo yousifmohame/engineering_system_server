@@ -27,6 +27,10 @@ const {
   recordInventory,
   getMonthlySettlementData,
   executeMonthlySettlement,
+  getOutsourceSalaries,
+  createOutsourceSalary,
+  getOutsourcePayments,
+  createOutsourcePayment,
 } = require("../controllers/financeController");
 
 // حماية جميع المسارات (يجب أن يكون المستخدم مسجل الدخول)
@@ -37,6 +41,11 @@ router.post("/settlements", createSettlement);
 
 router.get("/monthly-settlement", getMonthlySettlementData);
 router.post("/monthly-settlement/execute", executeMonthlySettlement);
+// مسارات رواتب المتعاونين الخارجيين
+router.get("/outsource-salaries", getOutsourceSalaries);
+router.post("/outsource-salaries", createOutsourceSalary);
+router.get("/outsource-payments", getOutsourcePayments);
+router.post("/outsource-payments", createOutsourcePayment);
 
 // 2. تسليم تسوية (دفع فعلي مع إمكانية إرفاق صورة)
 router.post("/settlements/deliver", upload.single("file"), deliverSettlement);

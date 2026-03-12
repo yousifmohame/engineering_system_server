@@ -1695,6 +1695,10 @@ model Person {
 
   isLocalOnly Boolean @default(true) // 💡 true = هذا الشخص تم إنشاؤه في النظام الفرعي ولا يرحل للرئيسي
 
+  idNumber      String? // رقم الهوية أو الإقامة
+  monthlySalary Float? // الراتب الشهري
+  jobTitle      String? // المسمى الوظيفي
+
   // 👈 جميع العلاقات العكسية (لتسهيل استخراج كشف حساب/ملف للشخص)
   paymentsCollected PrivatePayment[] @relation("PaymentCollector")
   paymentsReceived  PrivatePayment[] @relation("PaymentReceiver")
@@ -1799,4 +1803,40 @@ model SystemSettings {
   specialAccounts Json? @default("[{\"id\":1,\"systemName\":\"حسابات العبودي\",\"reportName\":\"العبودي\"},{\"id\":2,\"systemName\":\"حسابات إبراهيم الراجحي\",\"reportName\":\"إبراهيم الراجحي\"},{\"id\":3,\"systemName\":\"حسابات أحمد طلعت\",\"reportName\":\"أحمد طلعت\"},{\"id\":4,\"systemName\":\"حسابات محمد فؤاد\",\"reportName\":\"محمد فؤاد\"}]")
 
   updatedAt DateTime @updatedAt
+}
+
+model OutsourceSalary {
+  id              String   @id @default(uuid())
+  employeeId      String
+  employeeName    String
+  period          String
+  startDate       String
+  endDate         String
+  daysCount       Int
+  dailyRate       Float
+  grossAmount     Float
+  deductions      Float
+  netAmount       Float
+  roundedAmount   Float
+  status          String // "paid", "partial", "unpaid"
+  paidAmount      Float    @default(0)
+  remainingAmount Float
+  paymentType     String
+  createdAt       DateTime @default(now())
+
+  payments OutsourcePayment[]
+}
+
+model OutsourcePayment {
+  id             String          @id @default(uuid())
+  salaryRecordId String
+  salary         OutsourceSalary @relation(fields: [salaryRecordId], references: [id])
+  amount         Float
+  paymentMethod  String
+  paymentDate    String
+  paymentTime    String
+  currency       String
+  notes          String?
+  isPartial      Boolean
+  createdAt      DateTime        @default(now())
 }

@@ -119,7 +119,7 @@ const getPersons = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
-// 2. إضافة شخص جديد
+// 1. إضافة شخص جديد
 const createPerson = async (req, res) => {
   try {
     const data = req.body;
@@ -134,7 +134,6 @@ const createPerson = async (req, res) => {
       }));
     }
 
-    // تجهيز تفاصيل التحويل إن وجدت
     let transferDetails = null;
     if (data.transferDetails) {
       try {
@@ -147,26 +146,27 @@ const createPerson = async (req, res) => {
         personCode,
         name: data.name,
         role: data.role,
-        phone: data.phone,
-        whatsapp: data.whatsapp,
-        telegram: data.telegram,
-        email: data.email,
-        country: data.country,
+        phone: data.phone || "",
+        whatsapp: data.whatsapp || "",
+        telegram: data.telegram || "",
+        email: data.email || null,
+        country: data.country || "",
+        isActive: data.isActive === "true" || data.isActive === true,
         preferredCurrency: data.preferredCurrency || "SAR",
-        transferMethod: data.transferMethod,
+        transferMethod: data.transferMethod || "",
         transferDetails: transferDetails,
         firstNameAr: data.firstNameAr,
-        secondNameAr: data.secondNameAr,
-        thirdNameAr: data.thirdNameAr,
-        fourthNameAr: data.fourthNameAr,
-        firstNameEn: data.firstNameEn,
-        secondNameEn: data.secondNameEn,
-        thirdNameEn: data.thirdNameEn,
-        fourthNameEn: data.fourthNameEn,
         agreementType: data.agreementType,
-        notes: data.notes,
-        isLocalOnly: true, // 💡 بناءً على قاعدتك: يتم إنشاءه محلياً ولا يتزامن
+        notes: data.notes || null, // 👈 عاد كنص عادي
+        isLocalOnly: true,
         attachments: attachmentsList.length > 0 ? attachmentsList : undefined,
+
+        // ✅ حفظ الحقول الجديدة مباشرة في أعمدتها
+        idNumber: data.idNumber || null,
+        monthlySalary: data.monthlySalary
+          ? parseFloat(data.monthlySalary)
+          : null,
+        jobTitle: data.jobTitle || null,
       },
     });
 
@@ -177,7 +177,7 @@ const createPerson = async (req, res) => {
   }
 };
 
-// 💡 دالة تعديل شخص
+// 2. تعديل شخص
 const updatePerson = async (req, res) => {
   try {
     const { id } = req.params;
@@ -212,11 +212,11 @@ const updatePerson = async (req, res) => {
       where: { id },
       data: {
         name: data.name || existingPerson.name,
-        role: data.role || existingPerson.role, // 💡 بمجرد تغيير الرول من الواجهة سينتقل بكل حساباته!
+        role: data.role || existingPerson.role,
         phone: data.phone || existingPerson.phone,
         whatsapp: data.whatsapp || existingPerson.whatsapp,
         telegram: data.telegram || existingPerson.telegram,
-        email: data.email || existingPerson.email,
+        email: data.email !== undefined ? data.email : existingPerson.email,
         country: data.country || existingPerson.country,
         preferredCurrency:
           data.preferredCurrency || existingPerson.preferredCurrency,
@@ -224,8 +224,22 @@ const updatePerson = async (req, res) => {
         transferDetails: transferDetails,
         firstNameAr: data.firstNameAr || existingPerson.firstNameAr,
         agreementType: data.agreementType || existingPerson.agreementType,
-        notes: data.notes || existingPerson.notes,
+        notes: data.notes !== undefined ? data.notes : existingPerson.notes, // 👈 نص عادي
+        isActive:
+          data.isActive !== undefined
+            ? data.isActive === "true" || data.isActive === true
+            : existingPerson.isActive,
         attachments: updatedAttachments,
+
+        // ✅ التحديث المباشر للحقول الجديدة
+        idNumber:
+          data.idNumber !== undefined ? data.idNumber : existingPerson.idNumber,
+        monthlySalary:
+          data.monthlySalary !== undefined
+            ? parseFloat(data.monthlySalary)
+            : existingPerson.monthlySalary,
+        jobTitle:
+          data.jobTitle !== undefined ? data.jobTitle : existingPerson.jobTitle,
       },
     });
 
