@@ -55,6 +55,8 @@ const {
   removeBrokerFromTransaction,
   updateTransactionStatus,
   updatePrivateTransaction,
+  addPrivateExpense,
+  deleteCollectionDate,
 } = require("../controllers/privateTransactionController");
 
 router.use(protect);
@@ -73,15 +75,16 @@ router.post("/:id/brokers", assignBrokerToTransaction);
 router.delete("/brokers/:brokerRecordId", removeBrokerFromTransaction);
 router.post("/:id/agents", assignAgentToTransaction);
 
-// 💡 تحديث حالة المعاملة (يستقبل ملفاً باسم file)
+// 💡 تحديث حالة المعاملة (يستقبل أي ملفات مرسلة)
 router.post(
   "/:id/status",
-  uploadStatusNote.single("file"),
-  updateTransactionStatus,
+  uploadStatusNote.any(), // 👈 التعديل هنا مهم جداً لاستقبال مصفوفة الملفات
+  updateTransactionStatus
 );
 router.put("/:id", updatePrivateTransaction);
 router.delete("/:id", deletePrivateTransaction);
 router.patch("/:id/toggle-freeze", toggleFreezeTransaction);
+router.post("/:id/expenses", addPrivateExpense);
 
 // 💡 مسار رفع المرفقات (تستقبل ملف باسم files كما كتبناه في الفرونت)
 router.post(
@@ -92,5 +95,5 @@ router.post(
 
 // 💡 مسار مواعيد التحصيل
 router.post("/:id/collection-dates", addCollectionDate);
-
+router.delete("/:id/collection-dates/:dateId", deleteCollectionDate); // 👈 المسار الجديد
 module.exports = router;

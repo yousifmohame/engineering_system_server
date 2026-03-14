@@ -2,6 +2,7 @@ const { PrismaClient } = require("@prisma/client");
 const prisma = new PrismaClient();
 
 // 1. جلب جميع المصروفات
+// 1. جلب جميع المصروفات
 const getExpenses = async (req, res) => {
   try {
     const expenses = await prisma.officeExpense.findMany({
@@ -9,7 +10,7 @@ const getExpenses = async (req, res) => {
       include: {
         payer: { select: { name: true, id: true } }, // جلب الدافع
         payee: { select: { name: true, id: true } }, // 💡 جلب المستفيد
-      }
+      },
     });
 
     const formattedData = expenses.map((exp) => ({
@@ -17,18 +18,20 @@ const getExpenses = async (req, res) => {
       item: exp.item,
       amount: exp.amount,
       payer: exp.payer?.name || exp.payerName || "الشركة",
-      payerId: exp.payer?.id || "", 
+      payerId: exp.payer?.id || "",
       method: exp.method,
       source: exp.source,
       date: exp.expenseDate ? exp.expenseDate.toISOString().split("T")[0] : "",
       notes: exp.notes || "—",
-      // 💡 معالجة اسم المستفيد
       payee: exp.payee?.name || exp.payeeName || "—",
       payeeId: exp.payee?.id || "",
       hasAttachment: !!exp.attachmentUrl,
       attachmentUrl: exp.attachmentUrl,
       isClearable: exp.isClearable,
       linkToSettlement: exp.linkToSettlement,
+      // 💡 إضافة حقل isSettled بناءً على اللوجيك الخاص بك
+      // يمكنك تغييره ليعتمد على جدول التسويات الفعلي لاحقاً، حالياً سنربطه بـ linkToSettlement كمثال
+      isSettled: exp.linkToSettlement === true,
     }));
 
     res.json({ success: true, data: formattedData });
@@ -38,7 +41,7 @@ const getExpenses = async (req, res) => {
   }
 };
 
-// 2. تسجيل مصروف جديد 
+// 2. تسجيل مصروف جديد
 const createExpense = async (req, res) => {
   try {
     const data = req.body;
@@ -53,7 +56,8 @@ const createExpense = async (req, res) => {
       expenseDate: data.date ? new Date(data.date) : new Date(),
       notes: data.notes,
       isClearable: data.isClearable === "true" || data.isClearable === true,
-      linkToSettlement: data.linkToSettlement === "true" || data.linkToSettlement === true,
+      linkToSettlement:
+        data.linkToSettlement === "true" || data.linkToSettlement === true,
       attachmentUrl: attachmentPath,
     };
 
@@ -61,14 +65,14 @@ const createExpense = async (req, res) => {
     if (data.payerId && data.payerId !== "") {
       expenseData.payer = { connect: { id: data.payerId } };
     } else {
-      expenseData.payerName = "الشركة"; 
+      expenseData.payerName = "الشركة";
     }
 
     // 💡 معالجة المستفيد (Payee)
     if (data.payeeId && data.payeeId !== "") {
       expenseData.payee = { connect: { id: data.payeeId } };
     } else {
-      expenseData.payeeName = data.payeeName || "جهة غير محددة"; 
+      expenseData.payeeName = data.payeeName || "جهة غير محددة";
     }
 
     const newExpense = await prisma.officeExpense.create({ data: expenseData });
@@ -84,7 +88,7 @@ const updateExpense = async (req, res) => {
   try {
     const { id } = req.params;
     const data = req.body;
-    
+
     let updateData = {
       item: data.item,
       amount: parseFloat(data.amount) || 0,
@@ -92,11 +96,13 @@ const updateExpense = async (req, res) => {
       source: data.source,
       expenseDate: data.date ? new Date(data.date) : undefined,
       notes: data.notes,
-      isClearable: data.isClearable === 'true' || data.isClearable === true,
-      linkToSettlement: data.linkToSettlement === 'true' || data.linkToSettlement === true,
+      isClearable: data.isClearable === "true" || data.isClearable === true,
+      linkToSettlement:
+        data.linkToSettlement === "true" || data.linkToSettlement === true,
     };
 
-    if (req.file) updateData.attachmentUrl = `/uploads/expenses/${req.file.filename}`;
+    if (req.file)
+      updateData.attachmentUrl = `/uploads/expenses/${req.file.filename}`;
 
     // تحديث الدافع
     if (data.payerId && data.payerId !== "") {
@@ -118,7 +124,7 @@ const updateExpense = async (req, res) => {
 
     const updatedExpense = await prisma.officeExpense.update({
       where: { id },
-      data: updateData
+      data: updateData,
     });
 
     res.json({ success: true, data: updatedExpense });

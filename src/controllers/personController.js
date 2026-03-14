@@ -141,6 +141,13 @@ const createPerson = async (req, res) => {
       } catch (e) {}
     }
 
+    let transferMethods = [];
+    if (data.transferMethods) {
+      try {
+        transferMethods = JSON.parse(data.transferMethods);
+      } catch (e) {}
+    }
+
     const newPerson = await prisma.person.create({
       data: {
         personCode,
@@ -153,7 +160,7 @@ const createPerson = async (req, res) => {
         country: data.country || "",
         isActive: data.isActive === "true" || data.isActive === true,
         preferredCurrency: data.preferredCurrency || "SAR",
-        transferMethod: data.transferMethod || "",
+        transferMethod: JSON.stringify(transferMethods),
         transferDetails: transferDetails,
         firstNameAr: data.firstNameAr,
         agreementType: data.agreementType,
@@ -207,6 +214,7 @@ const updatePerson = async (req, res) => {
         transferDetails = JSON.parse(data.transferDetails);
       } catch (e) {}
     }
+
 
     const updatedPerson = await prisma.person.update({
       where: { id },

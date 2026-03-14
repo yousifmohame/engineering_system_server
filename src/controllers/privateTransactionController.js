@@ -34,36 +34,33 @@ const generatePrivateTxCode = async () => {
 };
 
 // ==================================================
-// دالة توليد كود العميل تلقائياً (مثال: C-001)
+// دالة توليد كود العميل تلقائياً بذكاء وأمان
 // ==================================================
 const generateClientCode = async () => {
+  const year = new Date().getFullYear();
+  const prefix = `CLT-${year}-`;
+
+  // 👈 البحث عن أعلى كود في هذه السنة تحديداً
   const lastClient = await prisma.client.findFirst({
-    orderBy: { createdAt: "desc" },
+    where: { clientCode: { startsWith: prefix } },
+    orderBy: { clientCode: "desc" }, // ترتيب تنازلي حسب الكود نفسه
   });
 
-  const year = new Date().getFullYear();
+  let nextNumber = 1;
 
-  if (!lastClient || !lastClient.clientCode) {
-    return `CLT-${year}-001`;
+  if (lastClient && lastClient.clientCode) {
+    const parts = lastClient.clientCode.split("-");
+    const lastNumber = parseInt(parts[2], 10);
+    if (!isNaN(lastNumber)) {
+      nextNumber = lastNumber + 1;
+    }
   }
 
-  // استخراج الرقم الأخير فقط
-  const parts = lastClient.clientCode.split("-");
-  const lastNumber = parseInt(parts[2]);
-
-  if (isNaN(lastNumber)) {
-    return `CLT-${year}-001`;
-  }
-
-  const nextNumber = String(lastNumber + 1).padStart(3, "0");
-
-  return `CLT-${year}-${nextNumber}`;
+  // توليد الكود الجديد مع 3 أصفار
+  return `${prefix}${String(nextNumber).padStart(3, "0")}`;
 };
 
-// ==================================================
-// 1. إنشاء معاملة خاصة جديدة
 // POST /api/private-transactions
-// ==================================================
 const createPrivateTransaction = async (req, res) => {
   try {
     const {
@@ -77,7 +74,8 @@ const createPrivateTransaction = async (req, res) => {
       clientId,
       ownerName,
       ownerIdNumber,
-      ownerMobile, // 👈 أضفنا استدعاء رقم الجوال هنا
+      ownerMobile,
+      clientType, // 👈 1. استقبلنا نوع العميل من الفرونت إند
 
       // الموقع والمراجع
       districtId,
@@ -97,6 +95,8 @@ const createPrivateTransaction = async (req, res) => {
       sourceName,
       sourcePercent,
 
+      extraNotes, // 👈 استقبال الملاحظات الإضافية (الضرائب)
+
       // الماليات والأطراف
       totalFees,
       firstPayment,
@@ -109,8 +109,7 @@ const createPrivateTransaction = async (req, res) => {
       engOfficeBrokerId,
     } = req.body;
 
-    // 1. معالجة العميل (إذا كان عميل جديد سريع، نقوم بإنشائه أولاً في الداتابيز)
-    // 1. معالجة العميل (إذا كان عميل جديد سريع، نقوم بإنشائه أولاً في الداتابيز)
+    // 1. معالجة العميل
     let finalClientId = clientId;
 
     if (!finalClientId) {
@@ -121,39 +120,40 @@ const createPrivateTransaction = async (req, res) => {
         });
       }
 
-      const clientCode = await generateClientCode(); // توليد الكود
+      // توليد الكود الآمن
+      const clientCode = await generateClientCode();
 
-      // 💡 حماية قاعدة البيانات: الهوية إجبارية وفريدة (Unique) في الـ Schema
-      // إذا لم يُدخل المستخدم رقم هوية، نولد له رقم مؤقت فريد حتى لا ينكسر النظام
       const uniqueIdNumber =
         ownerIdNumber && ownerIdNumber.trim() !== ""
           ? ownerIdNumber
           : `TMP-${Date.now()}`;
 
-      // إنشاء عميل جديد بتنسيق يطابق الـ Prisma Schema 100%
+      // إنشاء عميل جديد
       const newClient = await prisma.client.create({
         data: {
           clientCode: clientCode,
           mobile: ownerMobile || "بدون رقم",
           idNumber: uniqueIdNumber,
-          type: "فرد", // 👈 حقل إجباري حسب Schema
+          type: clientType || "فرد سعودي", // 👈 2. حفظ النوع الحقيقي المُرسل من الواجهة
 
-          // 👈 الحقول التالية إجبارية كـ JSON
           name: { ar: ownerName, en: "", details: {} },
           contact: { mobile: ownerMobile || "بدون رقم", email: "", phone: "" },
-          identification: { idType: "هوية وطنية", idNumber: uniqueIdNumber },
+          identification: {
+            idType: "هوية وطنية / سجل تجاري",
+            idNumber: uniqueIdNumber,
+          },
 
           isActive: true,
         },
       });
       finalClientId = newClient.id;
     }
+
     // 2. معالجة الأرقام والبيانات
     const transactionCode = await generatePrivateTxCode();
     const parsedTotalFees = totalFees ? parseFloat(totalFees) : 0;
     const parsedFirstPayment = firstPayment ? parseFloat(firstPayment) : 0;
 
-    // تحديد عنوان المعاملة
     const txTitle =
       !isInternalNameHidden && internalName
         ? `${internalName} - ${transactionCode}`
@@ -197,6 +197,8 @@ const createPrivateTransaction = async (req, res) => {
             name: sourceName,
             percent: sourcePercent ? parseFloat(sourcePercent) : 0,
           },
+          // 👈 دمج بيانات الضرائب اللي أرسلناها من الفرونت إند في حقل extraNotes
+          ...(extraNotes && typeof extraNotes === "object" ? extraNotes : {}),
           refs: {
             plots: Array.isArray(plots) ? plots : [],
             plan: plan || null,
@@ -205,7 +207,7 @@ const createPrivateTransaction = async (req, res) => {
             serviceNo: serviceNo || null,
             requestNo: requestNo || null,
             licenseNo: licenseNo || null,
-            ownerMobile: ownerMobile || null, // حفظ الرقم كمرجع إضافي في الملاحظات
+            ownerMobile: ownerMobile || null,
           },
           statuses: {
             collection:
@@ -449,11 +451,7 @@ const getPrivateTransactions = async (req, res) => {
       take: limit,
       skip: cursor ? 1 : 0,
       cursor: cursor ? { id: cursor } : undefined,
-
-      orderBy: {
-        createdAt: "desc",
-      },
-
+      orderBy: { createdAt: "desc" },
       select: {
         id: true,
         transactionCode: true,
@@ -464,35 +462,26 @@ const getPrivateTransactions = async (req, res) => {
         paidAmount: true,
         remainingAmount: true,
         createdAt: true,
-        notes: true,
+        notes: true, // 👈 مهم جداً لكي تقرأ الواجهة (الضرائب والمصاريف والمرفقات)
 
-        client: {
-          select: { name: true },
-        },
-
+        client: { select: { name: true } },
         districtNode: {
-          select: {
-            name: true,
-            sector: {
-              select: { name: true },
-            },
-          },
+          select: { name: true, sector: { select: { name: true } } },
         },
-
-        agent: {
-          select: { name: true },
-        },
-
+        agent: { select: { name: true } },
         brokersList: {
           select: {
             id: true,
             fees: true,
             brokerId: true,
-            broker: {
-              select: { name: true },
-            },
+            broker: { select: { name: true } },
           },
         },
+
+        // 👈 علاقات جديدة يجب جلبها للواجهة المتقدمة
+        tasks: true, // مهام العمل عن بعد
+        payments: true, // الدفعات
+        settlements: true, // التسويات
       },
     });
 
@@ -502,38 +491,28 @@ const getPrivateTransactions = async (req, res) => {
       const notes =
         typeof tx.notes === "object" && tx.notes !== null ? tx.notes : {};
 
-      // استخراج اسم العميل بشكل آمن
       let ownerName = "غير محدد";
-
       try {
         if (tx.client?.name) {
           const parsed =
             typeof tx.client.name === "string"
               ? JSON.parse(tx.client.name)
               : tx.client.name;
-
           ownerName = parsed?.ar || parsed || "غير محدد";
         }
       } catch {
         ownerName = tx.client?.name || "غير محدد";
       }
 
-      // حالة التحصيل
       let collectionStatus = "غير محصل";
-
       if (tx.totalFees > 0) {
         if (tx.paidAmount >= tx.totalFees) collectionStatus = "محصل بالكامل";
         else if (tx.paidAmount > 0) collectionStatus = "محصل جزئي";
       }
 
-      // التاريخ
       const dateObj = new Date(tx.createdAt);
+      const formattedDate = `${dateObj.getFullYear()}/${String(dateObj.getMonth() + 1).padStart(2, "0")}/${String(dateObj.getDate()).padStart(2, "0")}`;
 
-      const formattedDate = `${dateObj.getFullYear()}/${String(
-        dateObj.getMonth() + 1,
-      ).padStart(2, "0")}/${String(dateObj.getDate()).padStart(2, "0")}`;
-
-      // الوسطاء
       const brokers =
         tx.brokersList?.map((b) => ({
           id: b.id,
@@ -543,48 +522,41 @@ const getPrivateTransactions = async (req, res) => {
         })) || [];
 
       const totalBrokerFees = brokers.reduce((sum, b) => sum + b.fees, 0);
-
       const brokerNames =
         brokers.length > 0 ? brokers.map((b) => b.name).join(" و ") : "—";
 
       formattedData.push({
         id: tx.id,
         ref: tx.transactionCode,
-
+        internalName: notes?.internalName || "",
         type: tx.category || "غير محدد",
-
         client: ownerName,
-
         district: tx.districtNode?.name || "غير محدد",
-
         sector:
           notes?.refs?.sector || tx.districtNode?.sector?.name || "غير محدد",
-
         plot: notes?.refs?.plot || "—",
         plan: notes?.refs?.plan || "—",
-
         office: tx.source || "مكتب ديتيلز",
-
         sourceName: notes?.sourceName || "مباشر",
-
         mediator: brokerNames,
         mediatorFees: totalBrokerFees,
         brokers,
-
         agentCost: notes?.agentFees || 0,
-
         totalFees: tx.totalFees || 0,
         paidAmount: tx.paidAmount || 0,
-
         remainingAmount:
           tx.remainingAmount || (tx.totalFees || 0) - (tx.paidAmount || 0),
-
         collectionStatus,
-
         status: tx.status || "جارية",
-
         date: formattedDate,
-        created: formattedDate,
+        created: tx.createdAt, // 👈 إرسال التاريخ الأصلي أيضاً
+
+        // 👈 تمرير البيانات الجديدة التي تحتاجها الواجهة
+        notes: notes,
+        remoteTasks: tx.tasks,
+        paymentsList: tx.payments,
+        settlements: tx.settlements,
+        expenses: notes?.expenses || [],
       });
     }
 
@@ -592,7 +564,6 @@ const getPrivateTransactions = async (req, res) => {
       transactions.length === limit
         ? transactions[transactions.length - 1].id
         : null;
-
     res.json({
       success: true,
       count: formattedData.length,
@@ -601,11 +572,7 @@ const getPrivateTransactions = async (req, res) => {
     });
   } catch (error) {
     console.error("Get Private Transactions Error:", error);
-
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -645,7 +612,7 @@ const deletePrivatePayment = async (req, res) => {
   }
 };
 
-// 💡 3. رفع مرفقات المعاملة
+// 💡 3. رفع مرفقات المعاملة مع الوصف والتوثيق
 const addTransactionAttachment = async (req, res) => {
   try {
     const { id } = req.params;
@@ -654,18 +621,24 @@ const addTransactionAttachment = async (req, res) => {
         .status(400)
         .json({ success: false, message: "لم يتم إرسال ملف" });
 
-    // ملاحظة: إذا كان لديك جدول TransactionAttachment استخدمه،
-    // وإلا يمكنك حفظ المرفقات كمصفوفة JSON داخل حقل notes أو attachments
+    // 👈 استقبال الوصف واسم الموظف من الـ Request Body
+    const { description, uploadedBy } = req.body;
 
-    // سنعتبر أنك تحفظها في حقل notes.attachments مؤقتاً:
     const tx = await prisma.privateTransaction.findUnique({ where: { id } });
+    if (!tx)
+      return res
+        .status(404)
+        .json({ success: false, message: "المعاملة غير موجودة" });
+
     let currentNotes = typeof tx.notes === "object" && tx.notes ? tx.notes : {};
     let attachments = currentNotes.attachments || [];
 
     attachments.push({
-      name: req.file.originalname,
+      name: description || req.file.originalname, // 👈 استخدام الوصف كاسم للملف
       url: `/uploads/receipts/${req.file.filename}`,
       size: req.file.size,
+      uploadedBy: uploadedBy || "النظام", // 👈 تسجيل اسم الرافع
+      date: new Date().toISOString(), // 👈 تسجيل وقت الرفع
     });
 
     currentNotes.attachments = attachments;
@@ -788,7 +761,7 @@ const removeBrokerFromTransaction = async (req, res) => {
 };
 
 // ==================================================
-// تحديث حالة المعاملة (التبويب الجديد: حالة المعاملة)
+// تحديث حالة المعاملة
 // POST /api/private-transactions/:id/status
 // ==================================================
 const updateTransactionStatus = async (req, res) => {
@@ -801,27 +774,66 @@ const updateTransactionStatus = async (req, res) => {
       licenseNumber,
       hijriYear2,
       oldLicenseNumber,
-      authorityNotes,
-      approvalDate, // 💡 نستقبل تاريخ الاعتماد إذا تم إرساله من الواجهة
+      newAuthorityNote,
+      addedBy,
+      approvalDate,
     } = req.body;
 
     const tx = await prisma.privateTransaction.findUnique({ where: { id } });
-    if (!tx) {
+    if (!tx)
       return res
         .status(404)
         .json({ success: false, message: "المعاملة غير موجودة" });
-    }
 
     let currentNotes = typeof tx.notes === "object" && tx.notes ? tx.notes : {};
+    let authorityHistory = currentNotes.authorityNotesHistory || [];
+    let attachments = currentNotes.attachments || []; // المرفقات العامة
 
-    // مسار المرفق إن وُجد (ملاحظات الجهات)
-    let noteAttachmentPath =
-      currentNotes.transactionStatusData?.noteAttachment || null;
-    if (req.file) {
-      noteAttachmentPath = `/uploads/status_notes/${req.file.filename}`;
+    // 💡 معالجة الملفات المرفوعة باستخدام req.files
+    let noteAttachmentPath = null;
+
+    if (req.files && req.files.length > 0) {
+      req.files.forEach((file) => {
+        // 1. إذا كان المرفق يخص "الملاحظات" (noteAttachment)
+        if (file.fieldname === "file") {
+          noteAttachmentPath = `/uploads/status_notes/${file.filename}`;
+        }
+        // 2. إذا كان المرفق يخص "الاعتماد" (approvalFiles)
+        else if (file.fieldname === "approvalFiles") {
+          // استخراج الاسم المرادف الذي أرسله المستخدم في req.body.approvalNames
+          // (إذا كان هناك ملف واحد سيكون String، وإذا كانوا أكثر سيكون Array)
+          let customName = "مرفق اعتماد";
+          if (Array.isArray(req.body.approvalNames)) {
+            const index = req.files
+              .filter((f) => f.fieldname === "approvalFiles")
+              .indexOf(file);
+            customName = req.body.approvalNames[index] || customName;
+          } else if (req.body.approvalNames) {
+            customName = req.body.approvalNames;
+          }
+
+          // إضافة المرفق إلى قائمة المرفقات العامة للمعاملة
+          attachments.push({
+            name: customName,
+            url: `/uploads/status_notes/${file.filename}`,
+            size: file.size,
+            uploadedBy: addedBy || "النظام",
+            date: new Date().toISOString(),
+          });
+        }
+      });
     }
 
-    // تحديث بيانات الحالة داخل الـ JSON (notes)
+    // إضافة ملاحظة جديدة إن وجدت
+    if (newAuthorityNote && newAuthorityNote.trim() !== "") {
+      authorityHistory.push({
+        text: newAuthorityNote,
+        addedBy: addedBy || "موظف",
+        date: new Date().toISOString(),
+        attachment: noteAttachmentPath,
+      });
+    }
+
     currentNotes.transactionStatusData = {
       currentStatus: currentStatus || "عند المهندس للدراسة",
       serviceNumber: serviceNumber || "",
@@ -829,14 +841,15 @@ const updateTransactionStatus = async (req, res) => {
       licenseNumber: licenseNumber || "",
       hijriYear2: hijriYear2 || "",
       oldLicenseNumber: oldLicenseNumber || "",
-      authorityNotes: authorityNotes || "",
-      noteAttachment: noteAttachmentPath,
-      // 💡 نحتفظ بتاريخ الاعتماد القديم إذا كان موجوداً ولم يتم إرسال جديد
+      noteAttachment: noteAttachmentPath, // آخر مرفق ملاحظة
       approvalDate:
         approvalDate ||
         currentNotes.transactionStatusData?.approvalDate ||
         null,
     };
+
+    currentNotes.authorityNotesHistory = authorityHistory;
+    currentNotes.attachments = attachments; // 👈 حفظ المرفقات الجديدة
 
     await prisma.privateTransaction.update({
       where: { id },
@@ -849,6 +862,7 @@ const updateTransactionStatus = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+
 // ==================================================
 // تحديث بيانات المعاملة (الأساسية والمالية والتسكين والمرفقات)
 // PUT /api/private-transactions/:id
@@ -869,6 +883,8 @@ const updatePrivateTransaction = async (req, res) => {
       mediatorFees,
       agentCost,
       notes, // 👈 1. استلام الـ notes من الواجهة (التي تحتوي على المرفقات بعد الحذف)
+      internalName,
+      isInternalNameHidden,
     } = req.body;
 
     const tx = await prisma.privateTransaction.findUnique({ where: { id } });
@@ -928,6 +944,11 @@ const updatePrivateTransaction = async (req, res) => {
       currentNotes.attachments = notes.attachments;
     }
 
+    // 👈 (الجديد) أضف هذا السطر للسماح للباك إند بتحديث وحذف الملاحظات:
+    if (notes && notes.authorityNotesHistory !== undefined) {
+      currentNotes.authorityNotesHistory = notes.authorityNotesHistory;
+    }
+
     if (!currentNotes.refs) currentNotes.refs = {};
     if (sector) currentNotes.refs.sector = sector;
 
@@ -944,6 +965,18 @@ const updatePrivateTransaction = async (req, res) => {
       currentNotes.sourceName = sourceName;
     }
 
+    let newTitle = tx.title;
+    if (internalName !== undefined) {
+      currentNotes.internalName = internalName;
+      currentNotes.isInternalNameHidden = isInternalNameHidden || false;
+
+      // إعادة بناء العنوان بناءً على التعديل الجديد
+      newTitle =
+        !isInternalNameHidden && internalName
+          ? `${internalName} - ${newTransactionCode}`
+          : `${type || tx.category || "معاملة"} - ${newTransactionCode}`;
+    }
+
     // 5. الحسابات المالية
     const parsedTotalFees =
       totalFees !== undefined ? parseFloat(totalFees) : tx.totalFees;
@@ -954,6 +987,7 @@ const updatePrivateTransaction = async (req, res) => {
       where: { id },
       data: {
         transactionCode: newTransactionCode,
+        title: newTitle,
         createdAt: newCreatedAt,
         category: type || tx.category,
         source: office || tx.source,
@@ -975,6 +1009,89 @@ const updatePrivateTransaction = async (req, res) => {
   }
 };
 
+// ==================================================
+// إضافة مصروف تشغيلي إضافي للمعاملة
+// POST /api/private-transactions/:id/expenses
+// ==================================================
+const addPrivateExpense = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { amount, description, date, addedBy } = req.body;
+
+    if (!amount || !description) {
+      return res
+        .status(400)
+        .json({ success: false, message: "بيانات المصروف ناقصة" });
+    }
+
+    const tx = await prisma.privateTransaction.findUnique({ where: { id } });
+    if (!tx) {
+      return res
+        .status(404)
+        .json({ success: false, message: "المعاملة غير موجودة" });
+    }
+
+    // إضافة المصروف إما في جدول منفصل (إذا وجد) أو بداخل المصفوفة في المعاملة
+    // بافتراض أنك تخزنها داخل حقل JSON أو علاقة مباشرة (سنضعها في notes مؤقتاً كالتالي)
+    let currentNotes = typeof tx.notes === "object" && tx.notes ? tx.notes : {};
+    let expenses = currentNotes.expenses || [];
+
+    expenses.push({
+      id: Date.now().toString(),
+      amount: parseFloat(amount),
+      description: description,
+      date: date ? new Date(date).toISOString() : new Date().toISOString(),
+      addedBy: addedBy || "موظف النظام",
+    });
+
+    currentNotes.expenses = expenses;
+
+    await prisma.privateTransaction.update({
+      where: { id },
+      data: { notes: currentNotes },
+    });
+
+    res.json({ success: true, message: "تم إضافة المصروف بنجاح" });
+  } catch (error) {
+    console.error("Add Expense Error:", error.message);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ==================================================
+// حذف موعد تحصيل
+// DELETE /api/private-transactions/:id/collection-dates/:dateId
+// ==================================================
+const deleteCollectionDate = async (req, res) => {
+  try {
+    const { id, dateId } = req.params;
+
+    const tx = await prisma.privateTransaction.findUnique({ where: { id } });
+    if (!tx) {
+      return res
+        .status(404)
+        .json({ success: false, message: "المعاملة غير موجودة" });
+    }
+
+    let currentNotes = typeof tx.notes === "object" && tx.notes ? tx.notes : {};
+    let dates = currentNotes.collectionDates || [];
+
+    // فلترة المواعيد وإزالة الموعد الذي يطابق الـ dateId
+    currentNotes.collectionDates = dates.filter((d) => d.id !== dateId);
+
+    // حفظ التعديلات
+    await prisma.privateTransaction.update({
+      where: { id },
+      data: { notes: currentNotes },
+    });
+
+    res.json({ success: true, message: "تم حذف الموعد بنجاح" });
+  } catch (error) {
+    console.error("Delete Collection Date Error:", error.message);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 // 💡 تحديث التصدير (Exports)
 module.exports = {
   createPrivateTransaction,
@@ -991,4 +1108,6 @@ module.exports = {
   removeBrokerFromTransaction,
   updateTransactionStatus,
   updatePrivateTransaction,
+  addPrivateExpense,
+  deleteCollectionDate,
 };

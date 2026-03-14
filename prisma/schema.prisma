@@ -1489,6 +1489,17 @@ model CoopOfficeFee {
   status String  @default("غير مدفوع")
   notes  String? @db.Text
 
+  // 💡 الحقول الجديدة التي تمت إضافتها من التحديث الأخير
+  transactionId    String? // للربط بالمعاملة الأم
+  requestType      String? // نوع الطلب (إصدار، تجديد...)
+  providedServices String? @db.Text // الخدمات المقدمة (نص حر)
+  uploadStatus     String? // حالة الرفع على النظام
+  licenseNumber    String? // رقم الرخصة
+  licenseYear      String? // سنة الرخصة
+  serviceNumber    String? // رقم الخدمة
+  serviceYear      String? // سنة الخدمة
+  entityName       String? // اسم الجهة
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
