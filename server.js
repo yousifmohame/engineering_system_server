@@ -16,7 +16,7 @@ function ensureUploadsDirectory() {
   const personsDir = path.join(__dirname, "uploads", "persons");
   const financeDir = path.join(__dirname, "uploads", "finance");
   const transfersDir = path.join(__dirname, "uploads", "transfers");
-  
+  const quick_entriesDir = path.join(__dirname, "uploads", "quick_entries");
 
   // مصفوفة تحتوي على كل المجلدات للتأكد من إنشائها
   const directories = [
@@ -26,7 +26,8 @@ function ensureUploadsDirectory() {
     disbursementsDir,
     personsDir,
     financeDir,
-    transfersDir
+    transfersDir,
+    quick_entriesDir,
   ];
 
   directories.forEach((dir) => {

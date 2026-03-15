@@ -1864,3 +1864,47 @@ model OutsourcePayment {
   isPartial      Boolean
   createdAt      DateTime        @default(now())
 }
+
+// ===============================================
+// 💡 نظام التسجيل السريع (Quick Entries)
+// ===============================================
+
+model QuickEntry {
+  id            String   @id @default(cuid())
+  entryCode     String   @unique
+  date          DateTime @db.Date
+  time          String
+  type          String
+  description   String   @db.Text
+  amount        Float?
+  relatedPerson String?
+  priority      String   @default("normal")
+  attachments   String[]
+
+  status String @default("pending")
+
+  processedDetails Json?
+  processedAt      DateTime?
+
+  // 💡 التعديل هنا: استخدام نصوص بدلاً من علاقات لمنع أي مشاكل
+  recordedBy  String  @default("موظف النظام")
+  processedBy String?
+
+  comments QuickEntryComment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model QuickEntryComment {
+  id   String @id @default(cuid())
+  text String @db.Text
+
+  entryId String
+  entry   QuickEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+
+  // 💡 التعديل هنا
+  author String @default("مستخدم")
+
+  createdAt DateTime @default(now())
+}

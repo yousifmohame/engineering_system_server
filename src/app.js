@@ -70,6 +70,9 @@ app.use("/api/financial-dashboard", financialDashboardRoutes);
 const remoteWorkRoutes = require("./routes/remoteWorkRoutes");
 app.use("/api/remote-workers", remoteWorkRoutes);
 
+const quickEntryRoutes = require("./routes/quickEntryRoutes");
+app.use("/api/quick-entries", quickEntryRoutes);
+
 const clientRoutes = require("./routes/clientRoutes");
 app.use("/api/clients", clientRoutes);
 
