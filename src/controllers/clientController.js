@@ -625,7 +625,7 @@ const getClientById = async (req, res) => {
 const getSimpleClients = async (req, res) => {
   try {
     const { search } = req.query;
-    const where = { isActive: true };
+    const where = {};
 
     if (search) {
       where.OR = [
@@ -646,8 +646,9 @@ const getSimpleClients = async (req, res) => {
       },
       where,
       orderBy: { clientCode: "asc" },
-      // 💡 تم إزالة حقل take: 50 من هنا ليجلب كل العملاء
     });
+
+    console.log("🚀 عدد العملاء الذين تم جلبهم للدروب داون:", clients.length);
 
     const simpleList = clients.map((client) => {
       const fullName = getFullName(client.name);
