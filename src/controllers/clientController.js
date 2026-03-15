@@ -187,7 +187,7 @@ const checkClientId = async (req, res) => {
 // ==================================================
 const getAllClients = async (req, res) => {
   try {
-    const { search, limit } = req.query;
+    const { search } = req.query; // 💡 تم إزالة الـ limit
     const where = {};
 
     // فلترة البحث من الباك إند (تعمل جنباً إلى جنب مع بحث الفرونت إند)
@@ -204,14 +204,13 @@ const getAllClients = async (req, res) => {
 
     const clients = await prisma.client.findMany({
       where,
-      take: limit ? parseInt(limit) : undefined,
+      // 💡 تم إزالة حقل take ليجلب العدد الكامل للعملاء
       orderBy: { createdAt: "desc" },
       include: {
-        // 👈 هذا هو الجزء المفقود والمهم جداً للواجهة (ClientsLog)
         _count: {
           select: {
-            transactions: true, // لعمود "المعاملات" في الجدول
-            attachments: true, // لعمود "الوثائق" في الجدول
+            transactions: true,
+            attachments: true,
           },
         },
       },
@@ -647,17 +646,15 @@ const getSimpleClients = async (req, res) => {
       },
       where,
       orderBy: { clientCode: "asc" },
-      take: 50,
+      // 💡 تم إزالة حقل take: 50 من هنا ليجلب كل العملاء
     });
 
     const simpleList = clients.map((client) => {
-      // ✅ استخدام الدالة المحدثة لضمان عدم عودة نص فارغ
       const fullName = getFullName(client.name);
 
       return {
         id: client.id,
-        name: `${fullName} (${client.clientCode})`, // الاسم للعرض في القائمة
-        // بيانات إضافية قد تحتاجها الواجهة
+        name: `${fullName} (${client.clientCode})`,
         clientCode: client.clientCode,
         mobile: client.mobile,
         idNumber: client.idNumber,
