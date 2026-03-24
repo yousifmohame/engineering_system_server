@@ -73,6 +73,9 @@ app.use("/api/remote-workers", remoteWorkRoutes);
 const quickEntryRoutes = require("./routes/quickEntryRoutes");
 app.use("/api/quick-entries", quickEntryRoutes);
 
+const intermediaryOfficesRoutes = require("./routes/intermediaryOfficesRoutes");
+app.use("/api/intermediary-offices", intermediaryOfficesRoutes);
+
 const clientRoutes = require("./routes/clientRoutes");
 app.use("/api/clients", clientRoutes);
 

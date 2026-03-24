@@ -1355,6 +1355,9 @@ model PrivateTransaction {
   agentId String?
   agent   Person? @relation("TxAgent", fields: [agentId], references: [id])
 
+  officeId String
+  office   CoopOffice @relation(fields: [officeId], references: [id])
+
   stakeholderId String?
   stakeholder   Person? @relation("TxStakeholder", fields: [stakeholderId], references: [id])
 
@@ -1473,9 +1476,10 @@ model CoopOffice {
   isLinkedToSystem Boolean @default(false)
   notes            String? @db.Text
 
-  createdAt DateTime        @default(now())
-  updatedAt DateTime        @updatedAt
-  fees      CoopOfficeFee[]
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+  fees               CoopOfficeFee[]
+  PrivateTransaction PrivateTransaction[]
 }
 
 model CoopOfficeFee {
@@ -1907,4 +1911,96 @@ model QuickEntryComment {
   author String @default("مستخدم")
 
   createdAt DateTime @default(now())
+}
+
+// ===============================================
+// 💡 إدارة المكاتب الوسيطة (Intermediary Offices)
+// ===============================================
+
+model IntermediaryOffice {
+  id                 String   @id @default(cuid())
+  code               String   @unique
+  nameAr             String
+  nameEn             String?
+  commercialRegister String
+  engineeringLicense String?
+  vatNumber          String?
+  vatStatus          String   @default("غير مسجل") // مسجل، غير مسجل
+  nationalAddress    String?
+  city               String
+  region             String?
+  email              String?
+  phone              String?
+  whatsapp           String?
+  website            String?
+  specializations    String[]
+  internalNotes      String?  @db.Text
+
+  status           String  @default("نشط") // نشط، موقوف، مجمد
+  suspensionReason String? @db.Text
+  relationshipType String  @default("وسيط") // وسيط، شريك، مكتب تابع
+
+  contactPerson String?
+  contactMobile String?
+
+  receivableBalance   Float   @default(0)
+  lastTransactionCode String? @default("-")
+  lastTransactionDate String? @default("-")
+
+  contacts          OfficeContact[]
+  officialAssets    OfficeAsset[]
+  intermediaryLinks IntermediaryLink[]
+
+  // علاقة مع المعاملات (يجب أن يكون لديك حقل officeId في جدول PrivateTransaction)
+  // transactions    PrivateTransaction[] 
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model OfficeContact {
+  id                 String  @id @default(cuid())
+  name               String
+  position           String?
+  mobile             String
+  email              String?
+  notes              String? @db.Text
+  isAuthorizedSigner Boolean @default(false)
+
+  officeId String
+  office   IntermediaryOffice @relation(fields: [officeId], references: [id], onDelete: Cascade)
+}
+
+model OfficeAsset {
+  id           String  @id @default(cuid())
+  type         String // logo, stamp, signature, etc.
+  label        String
+  fileName     String?
+  fileType     String?
+  content      String? @db.Text
+  version      Int     @default(1)
+  isActive     Boolean @default(true)
+  approvedBy   String?
+  approvedDate String?
+  settings     Json?
+
+  uploadedBy   String?
+  uploadedAt   String?
+  uploadedTime String?
+  usageCount   Int     @default(0)
+
+  officeId String
+  office   IntermediaryOffice @relation(fields: [officeId], references: [id], onDelete: Cascade)
+}
+
+model IntermediaryLink {
+  id               String  @id @default(cuid())
+  intermediaryName String
+  role             String
+  commissionType   String  @default("percentage")
+  commissionValue  Float   @default(0)
+  isDefault        Boolean @default(false)
+
+  officeId String
+  office   IntermediaryOffice @relation(fields: [officeId], references: [id], onDelete: Cascade)
 }
