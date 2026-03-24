@@ -1355,8 +1355,9 @@ model PrivateTransaction {
   agentId String?
   agent   Person? @relation("TxAgent", fields: [agentId], references: [id])
 
-  officeId String
-  office   CoopOffice @relation(fields: [officeId], references: [id])
+  // داخل جدول PrivateTransaction
+  officeId String?     // 👈 أضف علامة استفهام هنا
+  office   IntermediaryOffice? @relation(fields: [officeId], references: [id]) // 👈 وأضف علامة استفهام هنا أيضاً
 
   stakeholderId String?
   stakeholder   Person? @relation("TxStakeholder", fields: [stakeholderId], references: [id])
