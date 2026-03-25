@@ -106,7 +106,7 @@ exports.restartServer = (req, res) => {
 // 4. 💡 الدالة الجديدة: أخذ نسخة احتياطية من مجلد المرفقات (Uploads)
 exports.downloadUploadsBackup = (req, res) => {
   // حدد مسار مجلد uploads لديك (تأكد أن المسار صحيح حسب هيكل مشروعك)
-  const uploadsDir = path.join(process.cwd(), 'uploads');
+  const uploadsDir = path.join(__dirname, '../../uploads'); 
 
   if (!fs.existsSync(uploadsDir)) {
     return res.status(404).json({ error: 'مجلد المرفقات غير موجود' });
