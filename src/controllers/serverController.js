@@ -1,5 +1,6 @@
 const si = require('systeminformation');
 const { exec } = require('child_process');
+const archiver = require('archiver');
 const path = require('path');
 const fs = require('fs');
 const { URL } = require('url');
@@ -100,4 +101,38 @@ exports.restartServer = (req, res) => {
   setTimeout(() => {
     exec('pm2 restart backend');
   }, 1000);
+};
+
+// 4. 💡 الدالة الجديدة: أخذ نسخة احتياطية من مجلد المرفقات (Uploads)
+exports.downloadUploadsBackup = (req, res) => {
+  // حدد مسار مجلد uploads لديك (تأكد أن المسار صحيح حسب هيكل مشروعك)
+  const uploadsDir = path.join(__dirname, '../../uploads'); 
+
+  if (!fs.existsSync(uploadsDir)) {
+    return res.status(404).json({ error: 'مجلد المرفقات غير موجود' });
+  }
+
+  const date = new Date().toISOString().split('T')[0];
+  const zipFileName = `uploads_backup_${date}.zip`;
+
+  // إعداد الهيدر ليتم تحميل الملف كـ ZIP
+  res.attachment(zipFileName);
+
+  const archive = archiver('zip', {
+    zlib: { level: 9 } // أقصى درجات الضغط لتقليل مساحة الملف
+  });
+
+  archive.on('error', (err) => {
+    console.error('Archiver Error:', err);
+    res.status(500).end('حدث خطأ أثناء ضغط الملفات');
+  });
+
+  // ربط مخرجات الضغط بالـ Response مباشرة
+  archive.pipe(res);
+
+  // إضافة محتوى مجلد uploads إلى ملف الـ ZIP
+  archive.directory(uploadsDir, false);
+
+  // إنهاء عملية الضغط وإرسال الملف
+  archive.finalize();
 };
