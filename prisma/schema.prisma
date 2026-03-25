@@ -1356,7 +1356,7 @@ model PrivateTransaction {
   agent   Person? @relation("TxAgent", fields: [agentId], references: [id])
 
   // داخل جدول PrivateTransaction
-  officeId String?     // 👈 أضف علامة استفهام هنا
+  officeId String? // 👈 أضف علامة استفهام هنا
   office   IntermediaryOffice? @relation(fields: [officeId], references: [id]) // 👈 وأضف علامة استفهام هنا أيضاً
 
   stakeholderId String?
@@ -1369,6 +1369,8 @@ model PrivateTransaction {
   engOfficeBroker   Person?             @relation("TxEngBroker", fields: [engOfficeBrokerId], references: [id])
   tasks             TransactionTask[]
   brokersList       TransactionBroker[]
+  CoopOffice        CoopOffice?         @relation(fields: [coopOfficeId], references: [id])
+  coopOfficeId      String?
 
   @@index([clientId])
   @@index([districtId])
@@ -1955,8 +1957,9 @@ model IntermediaryOffice {
   // علاقة مع المعاملات (يجب أن يكون لديك حقل officeId في جدول PrivateTransaction)
   // transactions    PrivateTransaction[] 
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+  PrivateTransaction PrivateTransaction[]
 }
 
 model OfficeContact {
@@ -2004,4 +2007,36 @@ model IntermediaryLink {
 
   officeId String
   office   IntermediaryOffice @relation(fields: [officeId], references: [id], onDelete: Cascade)
+}
+
+// ===============================================
+// سجل الرخص المركزي (Permits Registry)
+// ===============================================
+model Permit {
+  id                String  @id @default(cuid())
+  permitNumber      String  @unique
+  year              Int
+  type              String
+  form              String // يدوي، أصفر، أخضر
+  ownerName         String
+  idNumber          String?
+  district          String?
+  sector            String?
+  plotNumber        String?
+  planNumber        String?
+  usage             String?
+  landArea          Float?
+  engineeringOffice String?
+  source            String // نظام المعاملات، رفع يدوي (AI)، بوابة بلدي، استيراد
+  qrStatus          String  @default("غير متوفر") // مقروء، يحتاج مراجعة، غير متوفر
+  aiStatus          String  @default("غير مطبق") // تم التحليل، يحتاج مراجعة، فشل التحليل، غير مطبق
+  copies            Int     @default(1)
+  notes             String  @default("")
+  attachmentUrl     String? // رابط ملف الرخصة المرفق
+
+  componentsData String? @db.Text // لتخزين الـ JSON
+  boundariesData String? @db.Text // لتخزين الـ JSON
+
+  archiveDate DateTime @default(now()) @db.Date
+  updatedAt   DateTime @updatedAt
 }

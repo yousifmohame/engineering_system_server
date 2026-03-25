@@ -76,6 +76,9 @@ app.use("/api/quick-entries", quickEntryRoutes);
 const intermediaryOfficesRoutes = require("./routes/intermediaryOfficesRoutes");
 app.use("/api/intermediary-offices", intermediaryOfficesRoutes);
 
+const permitRoutes = require("./routes/permitRoutes");
+app.use("/api/permits", permitRoutes);
+
 const clientRoutes = require("./routes/clientRoutes");
 app.use("/api/clients", clientRoutes);
 
