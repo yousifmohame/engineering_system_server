@@ -15,7 +15,6 @@ const generatePersonCode = async () => {
 };
 
 // 1. جلب جميع الأشخاص مع إحصائيات حقيقية من العلاقات
-// 1. جلب جميع الأشخاص مع إحصائيات حقيقية من العلاقات
 const getPersons = async (req, res) => {
   try {
     const persons = await prisma.person.findMany({
@@ -24,7 +23,6 @@ const getPersons = async (req, res) => {
         disbursements: {
           select: { requestNumber: true, type: true, amount: true },
         },
-
         // 💡 جلب المعاملة المرتبطة لكي نعرض رقم المرجع (ref) في الواجهة
         settlementsTarget: {
           include: { transaction: { select: { transactionCode: true } } },
@@ -32,7 +30,6 @@ const getPersons = async (req, res) => {
         paymentsCollected: {
           include: { transaction: { select: { transactionCode: true } } },
         },
-
         // جلب المعاملات التي شارك فيها
         brokeredTransactions: {
           include: { districtNode: { select: { name: true } } },
@@ -77,15 +74,21 @@ const getPersons = async (req, res) => {
 
       // 💡 تنسيق البيانات للتابات في الواجهة الأمامية
       const formattedSettlements = (p.settlementsTarget || []).map((s) => ({
+        id: s.id,
         ref: s.transaction?.transactionCode || "تسوية عامة",
         status: s.status,
         amount: s.amount,
+        createdAt: s.createdAt,
+        source: s.source,
       }));
 
       const formattedCollections = (p.paymentsCollected || []).map((c) => ({
+        id: c.id,
         ref: c.transaction?.transactionCode || "تحصيل عام",
         method: c.method,
         amount: c.amount,
+        date: c.date,
+        periodRef: c.periodRef,
       }));
 
       // فصل البيانات غير المطلوبة لتخفيف الـ Response
@@ -101,8 +104,8 @@ const getPersons = async (req, res) => {
       return {
         ...personData,
         transactionsList: uniqueTransactions,
-        settlementsTarget: formattedSettlements, // 👈 إعادة إرسالها للواجهة بشكل منسق
-        paymentsCollected: formattedCollections, // 👈 إعادة إرسالها للواجهة بشكل منسق
+        settlementsTarget: formattedSettlements,
+        paymentsCollected: formattedCollections,
         stats: {
           transactions: transactionsCount,
           settlements: settlementsCount,
@@ -119,7 +122,8 @@ const getPersons = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
-// 1. إضافة شخص جديد
+
+// 2. إضافة شخص جديد
 const createPerson = async (req, res) => {
   try {
     const data = req.body;
@@ -142,9 +146,10 @@ const createPerson = async (req, res) => {
     }
 
     let transferMethods = [];
-    if (data.transferMethods) {
+    if (data.transferMethod) {
+      // 💡 تم التعديل إلى transferMethod كما ترسله الواجهة
       try {
-        transferMethods = JSON.parse(data.transferMethods);
+        transferMethods = JSON.parse(data.transferMethod);
       } catch (e) {}
     }
 
@@ -162,13 +167,22 @@ const createPerson = async (req, res) => {
         preferredCurrency: data.preferredCurrency || "SAR",
         transferMethod: JSON.stringify(transferMethods),
         transferDetails: transferDetails,
-        firstNameAr: data.firstNameAr,
         agreementType: data.agreementType,
-        notes: data.notes || null, // 👈 عاد كنص عادي
+        notes: data.notes || null,
         isLocalOnly: true,
         attachments: attachmentsList.length > 0 ? attachmentsList : undefined,
 
-        // ✅ حفظ الحقول الجديدة مباشرة في أعمدتها
+        // ✅ حفظ جميع الأسماء
+        firstNameAr: data.firstNameAr || null,
+        secondNameAr: data.secondNameAr || null,
+        thirdNameAr: data.thirdNameAr || null,
+        fourthNameAr: data.fourthNameAr || null,
+        firstNameEn: data.firstNameEn || null,
+        secondNameEn: data.secondNameEn || null,
+        thirdNameEn: data.thirdNameEn || null,
+        fourthNameEn: data.fourthNameEn || null,
+
+        // ✅ حفظ الحقول الجديدة
         idNumber: data.idNumber || null,
         monthlySalary: data.monthlySalary
           ? parseFloat(data.monthlySalary)
@@ -184,7 +198,7 @@ const createPerson = async (req, res) => {
   }
 };
 
-// 2. تعديل شخص
+// 3. تعديل شخص
 const updatePerson = async (req, res) => {
   try {
     const { id } = req.params;
@@ -215,29 +229,64 @@ const updatePerson = async (req, res) => {
       } catch (e) {}
     }
 
-
     const updatedPerson = await prisma.person.update({
       where: { id },
       data: {
         name: data.name || existingPerson.name,
         role: data.role || existingPerson.role,
-        phone: data.phone || existingPerson.phone,
-        whatsapp: data.whatsapp || existingPerson.whatsapp,
-        telegram: data.telegram || existingPerson.telegram,
+        phone: data.phone !== undefined ? data.phone : existingPerson.phone,
+        whatsapp:
+          data.whatsapp !== undefined ? data.whatsapp : existingPerson.whatsapp,
+        telegram:
+          data.telegram !== undefined ? data.telegram : existingPerson.telegram,
         email: data.email !== undefined ? data.email : existingPerson.email,
-        country: data.country || existingPerson.country,
+        country:
+          data.country !== undefined ? data.country : existingPerson.country,
         preferredCurrency:
           data.preferredCurrency || existingPerson.preferredCurrency,
         transferMethod: data.transferMethod || existingPerson.transferMethod,
         transferDetails: transferDetails,
-        firstNameAr: data.firstNameAr || existingPerson.firstNameAr,
         agreementType: data.agreementType || existingPerson.agreementType,
-        notes: data.notes !== undefined ? data.notes : existingPerson.notes, // 👈 نص عادي
+        notes: data.notes !== undefined ? data.notes : existingPerson.notes,
         isActive:
           data.isActive !== undefined
             ? data.isActive === "true" || data.isActive === true
             : existingPerson.isActive,
         attachments: updatedAttachments,
+
+        // ✅ التحديث المباشر لجميع الأسماء
+        firstNameAr:
+          data.firstNameAr !== undefined
+            ? data.firstNameAr
+            : existingPerson.firstNameAr,
+        secondNameAr:
+          data.secondNameAr !== undefined
+            ? data.secondNameAr
+            : existingPerson.secondNameAr,
+        thirdNameAr:
+          data.thirdNameAr !== undefined
+            ? data.thirdNameAr
+            : existingPerson.thirdNameAr,
+        fourthNameAr:
+          data.fourthNameAr !== undefined
+            ? data.fourthNameAr
+            : existingPerson.fourthNameAr,
+        firstNameEn:
+          data.firstNameEn !== undefined
+            ? data.firstNameEn
+            : existingPerson.firstNameEn,
+        secondNameEn:
+          data.secondNameEn !== undefined
+            ? data.secondNameEn
+            : existingPerson.secondNameEn,
+        thirdNameEn:
+          data.thirdNameEn !== undefined
+            ? data.thirdNameEn
+            : existingPerson.thirdNameEn,
+        fourthNameEn:
+          data.fourthNameEn !== undefined
+            ? data.fourthNameEn
+            : existingPerson.fourthNameEn,
 
         // ✅ التحديث المباشر للحقول الجديدة
         idNumber:
@@ -258,7 +307,7 @@ const updatePerson = async (req, res) => {
   }
 };
 
-// 💡 دالة حذف شخص
+// 4. دالة حذف شخص
 const deletePerson = async (req, res) => {
   try {
     const { id } = req.params;
@@ -272,7 +321,7 @@ const deletePerson = async (req, res) => {
   }
 };
 
-// 💡 دالة جديدة لحذف مرفق محدد لشخص
+// 5. دالة لحذف مرفق محدد لشخص
 const removePersonAttachment = async (req, res) => {
   try {
     const { id } = req.params;
@@ -284,10 +333,8 @@ const removePersonAttachment = async (req, res) => {
         .status(404)
         .json({ success: false, message: "الشخص غير موجود" });
 
-    // إذا لم يكن هناك مرفقات أصلاً
     if (!person.attachments) return res.json({ success: true, data: person });
 
-    // تصفية المرفقات وإزالة المرفق المطلوب
     const updatedAttachments = person.attachments.filter(
       (att) => att.url !== fileUrl,
     );
@@ -308,7 +355,6 @@ const removePersonAttachment = async (req, res) => {
   }
 };
 
-// 💡 لا تنسَ تصدير الدالة الجديدة هنا
 module.exports = {
   getPersons,
   createPerson,
