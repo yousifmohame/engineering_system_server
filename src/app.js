@@ -4,34 +4,83 @@ const cors = require("cors");
 const helmet = require("helmet");
 const morgan = require("morgan");
 const path = require("path");
+const fs = require("fs"); // 💡 استيراد مكتبة الملفات المدمجة
 
 const app = express();
 
+// ==================================================
+// 1. إعدادات الأمان (Helmet)
+// 💡 تم تعطيل CSP مؤقتاً للسماح للمتصفح بفتح الـ PDF داخل iframe
+// ==================================================
 app.use(
-  "/uploads",
-  express.static(path.join(__dirname, "../uploads"), {
-    setHeaders: function (res, path, stat) {
-      res.set("Access-Control-Allow-Origin", "*"); // السماح للواجهة بالوصول للملفات
-      res.set("Access-Control-Allow-Methods", "GET, OPTIONS");
-      res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
-      res.set("Cross-Origin-Resource-Policy", "cross-origin");
-      if (!path.match(/\.[a-zA-Z0-9]+$/)) {
-        res.set("Content-Type", "application/pdf");
-        res.set("Content-Disposition", "inline"); // inline تعني "اعرضه ولا تحمله"
-      }
-    },
+  helmet({
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+    contentSecurityPolicy: false,
   }),
 );
 
 app.use(cors());
-app.use(helmet());
 app.use(morgan("dev"));
 app.use(express.json({ limit: "100mb" }));
 app.use(express.urlencoded({ limit: "100mb", extended: true }));
 
-app.use("/api/uploads", express.static(path.join(__dirname, "../uploads")));
-app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
+// ==================================================
+// 💡 2. نظام خدمة الملفات الديناميكي الشامل (Dynamic Streaming)
+// ==================================================
+const serveDynamicFile = (req, res, next) => {
+  try {
+    const decodedPath = decodeURIComponent(req.path);
+    const filePath = path.join(__dirname, "../uploads", decodedPath);
 
+    // 1. التحقق من وجود الملف
+    if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
+      return res
+        .status(404)
+        .json({ success: false, message: "الملف غير موجود" });
+    }
+
+    // 2. قراءة البصمة الحقيقية للملف (أول 4 بايت) لمعرفة نوعه
+    const buffer = Buffer.alloc(4);
+    const fd = fs.openSync(filePath, "r");
+    fs.readSync(fd, buffer, 0, 4, 0);
+    fs.closeSync(fd);
+
+    const hex = buffer.toString("hex").toUpperCase();
+    let mimeType = "application/octet-stream";
+
+    // مقارنة البصمة (Magic Bytes)
+    if (hex.startsWith("25504446")) mimeType = "application/pdf";
+    else if (hex.startsWith("FFD8FF")) mimeType = "image/jpeg";
+    else if (hex.startsWith("89504E47")) mimeType = "image/png";
+    else {
+      // الاعتماد على الامتداد كحل أخير
+      const ext = path.extname(filePath).toLowerCase();
+      if (ext === ".pdf") mimeType = "application/pdf";
+      else if (ext === ".jpg" || ext === ".jpeg") mimeType = "image/jpeg";
+      else if (ext === ".png") mimeType = "image/png";
+    }
+
+    // 3. إعداد الترويسات الصحيحة لإجبار المتصفح على "عرض" الملف (inline)
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Content-Type", mimeType);
+    res.setHeader("Content-Disposition", "inline");
+
+    // 4. إرسال الملف بنظام التدفق (Stream) لأداء صاروخي
+    const stream = fs.createReadStream(filePath);
+    stream.pipe(res);
+  } catch (error) {
+    console.error("File Server Error:", error);
+    res.status(500).send("خطأ داخلي في السيرفر أثناء قراءة الملف");
+  }
+};
+
+// 💡 3. تطبيق الدالة الديناميكية على جميع مسارات الرفع (بدون تكرار)
+app.use("/uploads", serveDynamicFile);
+app.use("/api/uploads", serveDynamicFile);
+
+// ==================================================
+// 4. توجيه مسارات الـ API
+// ==================================================
 const authRoutes = require("./routes/authRoutes");
 app.use("/api/auth", authRoutes);
 
