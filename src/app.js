@@ -15,6 +15,10 @@ app.use(
       res.set("Access-Control-Allow-Methods", "GET, OPTIONS");
       res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
       res.set("Cross-Origin-Resource-Policy", "cross-origin");
+      if (!path.match(/\.[a-zA-Z0-9]+$/)) {
+        res.set("Content-Type", "application/pdf");
+        res.set("Content-Disposition", "inline"); // inline تعني "اعرضه ولا تحمله"
+      }
     },
   }),
 );

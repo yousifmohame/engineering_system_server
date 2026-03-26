@@ -490,45 +490,52 @@ const getPlans = async (req, res) => {
 };
 
 // إنشاء مخطط جديد
+// إنشاء مخطط جديد (نسخة آمنة تدعم الإضافة السريعة والكاملة)
 const createPlan = async (req, res) => {
   try {
-    const {
-      planNumber,
-      oldNumber,
-      status,
-      isWithout,
-      properties,
-      plots,
-      districtIds,
-    } = req.body;
+    const data = req.body;
 
-    // توليد كود داخلي (مثال: PLAN-001)
+    // 1. توليد كود داخلي (مثال: PLAN-001)
     const count = await prisma.riyadhPlan.count();
     const internalCode = `PLAN-${String(count + 1).padStart(3, "0")}`;
 
+    // 2. معالجة وتأمين البيانات (توفير قيم افتراضية للإضافة السريعة)
+    // إذا لم يرسل planNumber، نأخذ name (المرسل من الإضافة السريعة)، وإلا نضع رقماً مؤقتاً
+    const finalPlanNumber = data.isWithout
+      ? "بدون"
+      : data.planNumber ||
+        data.name ||
+        `مؤقت-${Math.floor(Math.random() * 1000)}`;
+
     const newPlan = await prisma.riyadhPlan.create({
       data: {
-        planNumber: isWithout ? "بدون" : planNumber,
-        oldNumber,
-        internalCode,
-        status,
-        isWithout,
-        properties: parseInt(properties || 0),
-        plots: parseInt(plots || 0),
-        // ربط المخطط بالأحياء المختارة (إذا تم تمرير districtIds)
+        planNumber: finalPlanNumber,
+        oldNumber: data.oldNumber || null,
+        internalCode: internalCode,
+        status: data.status || "معتمد", // 💡 قيمة افتراضية هامة
+        isWithout: data.isWithout === true || data.isWithout === "true", // 💡 تحويل آمن للبوليان لتجنب كراش Prisma
+        properties: parseInt(data.properties || 0),
+        plots: parseInt(data.plots || 0),
+
+        // ربط المخطط بالأحياء المختارة (فقط إذا تم تمريرها)
         districts:
-          districtIds && districtIds.length > 0
-            ? {
-                connect: districtIds.map((id) => ({ id })),
-              }
+          data.districtIds &&
+          Array.isArray(data.districtIds) &&
+          data.districtIds.length > 0
+            ? { connect: data.districtIds.map((id) => ({ id })) }
             : undefined,
       },
       include: { districts: true },
     });
+
     res.status(201).json(newPlan);
   } catch (error) {
-    if (error.code === "P2002")
-      return res.status(400).json({ message: "رقم المخطط مسجل مسبقاً" });
+    console.error("🔥 Create Plan Error:", error); // 👈 لطباعة الخطأ الدقيق في التيرمنال إذا حدث
+    if (error.code === "P2002") {
+      return res
+        .status(400)
+        .json({ message: "رقم المخطط مسجل مسبقاً بالنظام!" });
+    }
     res.status(500).json({ message: "فشل إنشاء المخطط", error: error.message });
   }
 };
@@ -581,7 +588,6 @@ const deletePlan = async (req, res) => {
     res.status(500).json({ message: "فشل حذف المخطط", error: error.message });
   }
 };
-
 
 // دالة مساعدة لحساب نسبة النمو
 const calculateGrowth = (current, previous) => {

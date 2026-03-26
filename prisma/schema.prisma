@@ -2033,6 +2033,15 @@ model Permit {
   copies            Int     @default(1)
   notes             String  @default("")
   attachmentUrl     String? // رابط ملف الرخصة المرفق
+  mainUsage         String?
+  subUsage          String?
+  detailedReport    String? @db.Text
+
+  // حقول الربط اليدوي
+  linkedTransactionId String?
+  linkedOwnershipId   String?
+  linkedClientId      String?
+  linkedOfficeId      String?
 
   componentsData String? @db.Text // لتخزين الـ JSON
   boundariesData String? @db.Text // لتخزين الـ JSON

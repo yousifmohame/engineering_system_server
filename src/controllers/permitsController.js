@@ -9,10 +9,7 @@ const { OpenAI } = require("openai");
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 // ==========================================
-// 💡 تحليل الرخصة بالذكاء الاصطناعي (يدعم PDF والصور)
-// ==========================================
-// ==========================================
-// 💡 تحليل رخص البناء بالذكاء الاصطناعي (محدث بدقة فائقة)
+// 💡 تحليل رخص البناء بالذكاء الاصطناعي (محدث بدقة فائقة + تقرير مفصل)
 // ==========================================
 const analyzePermitAI = async (req, res) => {
   try {
@@ -47,7 +44,7 @@ const analyzePermitAI = async (req, res) => {
         `🚀 جاري معالجة ${pagesToProcess} صفحة بدقة عالية (300 DPI)...`,
       );
 
-      // 💡 التعديل الأهم: زيادة الدقة لـ 300 والأبعاد لتناسب ورقة A4 واضحة جداً
+      // دقة 300 DPI لضمان قراءة الجداول الصغيرة بوضوح تام
       const options = {
         density: 300,
         format: "jpeg",
@@ -70,12 +67,16 @@ const analyzePermitAI = async (req, res) => {
         .json({ success: false, message: "نوع الملف غير مدعوم." });
     }
 
-    // 💡 برومبت صارم جداً يمنع التخمين ويستخرج كافة التفاصيل
-    // 💡 برومبت صارم جداً يمنع التخمين ويستخرج كافة التفاصيل (تم إضافة كلمة JSON إجبارياً)
+    // 💡 برومبت هندسي صارم جداً (يستخرج الجداول بدقة، يقسم الاستخدام، ويكتب تقريراً)
     const prompt = `
-    أنت خبير قانوني وهندسي محلف في المملكة العربية السعودية.
-    أمامك صورة لرخصة بناء أو فسح أو مسودة رخصة.
-    تحذير هام جداً 🚨: استخرج النصوص والأرقام كما هي مكتوبة في الصورة **بالحرف والرقم**. يُمنع منعاً باتاً تخمين أو تأليف أي بيانات غير واضحة. إذا كانت المعلومة مفقودة أرجع null أو نص فارغ "".
+    أنت خبير قانوني وهندسي محلف ومستشار في البلديات بالمملكة العربية السعودية.
+    أمامك صورة لرخصة بناء، فسح، أو مسودة رخصة.
+    تحذير هام 🚨: استخرج النصوص والأرقام كما هي مكتوبة في الصورة **بالحرف والرقم**. يُمنع منعاً باتاً تخمين أو تأليف أي بيانات. إذا كانت المعلومة مفقودة تماماً أرجع null للأرقام أو "" للنصوص.
+
+    مطلوب منك الانتباه الشديد لما يلي:
+    1. **الاستخدام:** قسّمه إلى "mainUsage" (التصنيف الرئيسي مثل: سكني، تجاري، تعليمي) و "subUsage" (التصنيف الفرعي مثل: فيلا، مستودع، شقق مفروشة، مكاتب).
+    2. **الجداول:** ابحث في الصورة عن جدول "مكونات البناء" وجدول "الحدود والأبعاد". اقرأ صفوفها بدقة متناهية ولا تفوت أي صف.
+    3. **التقرير المفصل:** اكتب ملخصاً هندسياً احترافياً باللغة العربية (detailedReport) يشرح طبيعة الرخصة، موقعها، مكوناتها الأساسية، وأي ملاحظات هامة أو اشتراطات مذكورة.
 
     قد يحتوي الملف على أكثر من رخصة، استخرجها كلها داخل مصفوفة "permits" وأعد النتيجة بصيغة JSON حصرية.
     
@@ -86,7 +87,7 @@ const analyzePermitAI = async (req, res) => {
           "permitNumber": "رقم الرخصة",
           "issueDate": "تاريخ إصدارها (إن وجد)",
           "expiryDate": "تاريخ انتهائها (إن وجد)",
-          "year": "سنة الرخصة (استنتجها من التاريخ الهجري أو الميلادي كأربع أرقام)",
+          "year": "سنة الرخصة (استنتجها من التاريخ الهجري كأربع أرقام)",
           "type": "نوع الطلب أو الرخصة (مثال: بناء جديد، تعديل، تجديد...)",
           "ownerName": "اسم صاحب الرخصة بالكامل",
           "idNumber": "رقم الهوية أو السجل (أرقام فقط)",
@@ -94,17 +95,19 @@ const analyzePermitAI = async (req, res) => {
           "sector": "البلدية أو القطاع",
           "plotNumber": "رقم قطعة الأرض",
           "planNumber": "رقم المخطط",
-          "usage": "الاستخدام",
+          "mainUsage": "التصنيف الرئيسي (مثال: تجاري)",
+          "subUsage": "التصنيف الفرعي (مثال: مكاتب ومحلات)",
           "landArea": مساحة الأرض (رقم Number فقط),
           "engineeringOffice": "المكتب الهندسي المصمم أو المشرف",
-          "form": "شكل الرخصة (أخضر للحديثة، أصفر، أو يدوي للقديمة)",
-          "notes": "أي ملاحظات مكتوبة في الرخصة",
+          "form": "شكل الرخصة (أخضر، أصفر، أو يدوي)",
+          "notes": "الملاحظات والاشتراطات المكتوبة",
           "componentsData": [
-            { "name": "اسم المكون", "usage": "الاستخدام", "area": المساحة (Number), "units": عدد الوحدات أو الغرف (Number) }
+            { "name": "اسم المكون", "usage": "الاستخدام المكتوب للمكون", "area": المساحة (Number), "units": عدد الوحدات أو الغرف (Number) }
           ],
           "boundariesData": [
-            { "direction": "الاتجاه (شمال/جنوب/شرق/غرب)", "length": الطول (Number), "neighbor": "الحدود / يحدها" }
-          ]
+            { "direction": "الاتجاه (شمال/جنوب/شرق/غرب)", "length": الطول (Number), "neighbor": "يحدها" }
+          ],
+          "detailedReport": "تقرير هندسي مفصل واحترافي يشرح الرخصة ومحتوياتها بشكل مقالي واضح"
         }
       ]
     }
@@ -122,7 +125,7 @@ const analyzePermitAI = async (req, res) => {
       model: "gpt-4o",
       messages: [{ role: "user", content: contentArray }],
       response_format: { type: "json_object" },
-      temperature: 0.0, // 💡 الصفر يضمن دقة تطابق تصل لـ 100% وعدم التأليف
+      temperature: 0.0, // ضمان الدقة وعدم التأليف
     });
 
     const parsedData = JSON.parse(response.choices[0].message.content);
@@ -186,6 +189,9 @@ const createPermit = async (req, res) => {
         plotNumber: data.plotNumber || "",
         planNumber: data.planNumber || "",
         usage: data.usage || "",
+        mainUsage: data.mainUsage || "غير محدد",
+        subUsage: data.subUsage || "",
+        detailedReport: data.detailedReport || null,
         landArea: safeLandArea,
         engineeringOffice: data.engineeringOffice || "",
         source: data.source || "يدوي",
@@ -232,6 +238,14 @@ const updatePermit = async (req, res) => {
     if (data.plotNumber !== undefined) updateData.plotNumber = data.plotNumber;
     if (data.planNumber !== undefined) updateData.planNumber = data.planNumber;
     if (data.usage !== undefined) updateData.usage = data.usage;
+    if (data.mainUsage !== undefined) updateData.mainUsage = data.mainUsage;
+    if (data.subUsage !== undefined) updateData.subUsage = data.subUsage;
+    if (data.detailedReport !== undefined) updateData.detailedReport = data.detailedReport;
+    // دعم تحديث حقول الربط اليدوي
+    if (data.linkedTransactionId !== undefined) updateData.linkedTransactionId = data.linkedTransactionId;
+    if (data.linkedOwnershipId !== undefined) updateData.linkedOwnershipId = data.linkedOwnershipId;
+    if (data.linkedClientId !== undefined) updateData.linkedClientId = data.linkedClientId;
+    if (data.linkedOfficeId !== undefined) updateData.linkedOfficeId = data.linkedOfficeId;
     if (data.engineeringOffice !== undefined)
       updateData.engineeringOffice = data.engineeringOffice;
     if (data.source !== undefined) updateData.source = data.source;

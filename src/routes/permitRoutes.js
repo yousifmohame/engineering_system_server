@@ -8,12 +8,33 @@ const {
   createPermit,
   updatePermit,
   deletePermit,
-  analyzePermitAI
+  analyzePermitAI,
 } = require("../controllers/permitsController");
 const { protect } = require("../middleware/authMiddleware");
 
-// إعداد Multer لرفع ملفات الرخص
-const upload = multer({ dest: "uploads/permits/" });
+const path = require("path");
+
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, "uploads/permits/"); // تأكد من مسار المجلد لديك
+  },
+  filename: function (req, file, cb) {
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    let ext = path.extname(file.originalname);
+
+    // 💡 الحل الجذري: إذا كان الملف بدون امتداد، نستنتج الامتداد من نوع الملف (MimeType)
+    if (!ext) {
+      if (file.mimetype === "application/pdf") ext = ".pdf";
+      else if (file.mimetype === "image/jpeg") ext = ".jpg";
+      else if (file.mimetype === "image/png") ext = ".png";
+      else ext = ".pdf"; // افتراضي إذا كان نوعاً غير معروف في نظام هندسي
+    }
+
+    cb(null, file.fieldname + "-" + uniqueSuffix + ext);
+  },
+});
+
+const upload = multer({ storage: storage });
 
 router.use(protect); // حماية المسارات
 
@@ -25,6 +46,6 @@ router.put("/:id", upload.single("file"), updatePermit);
 
 router.delete("/:id", deletePermit);
 
-router.post('/analyze', upload.single('file'), analyzePermitAI);
+router.post("/analyze", upload.single("file"), analyzePermitAI);
 
 module.exports = router;

@@ -263,7 +263,7 @@ const createPrivateTransaction = async (req, res) => {
 };
 
 // ==================================================
-// 2. جلب قائمة المعاملات
+// 2. جلب قائمة المعاملات (مع دعم الربط التلقائي للرخص)
 // GET /api/private-transactions
 // ==================================================
 const getPrivateTransactions = async (req, res) => {
@@ -271,10 +271,39 @@ const getPrivateTransactions = async (req, res) => {
     const limit = Math.min(parseInt(req.query.limit) || 50, 200);
     const cursor = req.query.cursor;
 
+    // 💡 1. استقبال متغيرات الربط التلقائي من الفرونت إند
+    const { permitNumber, year } = req.query;
+
+    const where = {};
+
+    // 💡 2. هندسة البحث الذكي للربط التلقائي
+    if (permitNumber) {
+      // بما أن رقم الرخصة محفوظ كـ JSON، نطلب من Prisma البحث في المسارات المحتملة لرقم الرخصة
+      where.OR = [
+        { notes: { path: ["refs", "licenseNo"], equals: permitNumber } },
+        {
+          notes: {
+            path: ["transactionStatusData", "licenseNumber"],
+            equals: permitNumber,
+          },
+        },
+      ];
+
+      // يمكن إضافة الفلترة بالسنة إذا أردت دقة أعلى (عادة رقم الرخصة كافٍ لأنه فريد)
+      /*
+      if (year) {
+        where.AND = [
+          { notes: { path: ["transactionStatusData", "hijriYear1"], equals: String(year) } }
+        ];
+      }
+      */
+    }
+
     const transactions = await prisma.privateTransaction.findMany({
       take: limit,
       skip: cursor ? 1 : 0,
       cursor: cursor ? { id: cursor } : undefined,
+      where, // 👈 3. تمرير شروط البحث هنا
       orderBy: { createdAt: "desc" },
       select: {
         id: true,
@@ -388,6 +417,7 @@ const getPrivateTransactions = async (req, res) => {
       data: formattedData,
     });
   } catch (error) {
+    console.error("🔥 Get Transactions Error:", error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
