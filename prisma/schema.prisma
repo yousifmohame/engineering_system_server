@@ -1317,29 +1317,54 @@ model PrivateTransaction {
   description String?
   category    String? // نوع المعاملة (إصدار، تعديل...)
   complexity  String? // نوع الرفع (برافع، بدون...)
-  source      String? // مصدر المعاملة
+  source      String? // المكتب المنفذ الخارجي الحر
+  createdBy   String? @default("مدير النظام")
 
-  // 💡 1. إضافة حقل منشئ المعاملة لسهولة التتبع
-  createdBy String? @default("مدير النظام")
+  // 💡 [احترافي] فصل بيانات الملاك لدعم تعدد الملاك بشكل صريح
+  clientId   String
+  client     Client  @relation("ClientPrivateTransactions", fields: [clientId], references: [id])
+  clientType String? // نوع العميل (فرد، شركة، ورثة...)
+  ownerNames String? @db.Text // أسماء الملاك المتعددين (أحمد و محمد)
+  ownerIds   String? // هويات الملاك المتعددين
 
-  // --- البيانات المالية ---
-  totalFees       Float? @default(0)
-  paidAmount      Float? @default(0)
-  remainingAmount Float? @default(0)
-
-  // --- التفاصيل ---
-  authorities String[]
-  attachments String[]
-  notes       Json?    @default("{}")
-
-  // --- العلاقات الأساسية ---
-  clientId String
-  client   Client @relation("ClientPrivateTransactions", fields: [clientId], references: [id])
-
+  // 💡 [احترافي] فصل بيانات الموقع والمساحة لسهولة الفلترة والبحث
   districtId   String?
   districtNode RiyadhDistrict? @relation("DistrictPrivateTransactions", fields: [districtId], references: [id])
+  districtName String? // اسم الحي (نص حر في حال لم يكن مسجلاً)
+  sector       String?
+  planNumber   String? // رقم المخطط
+  plots        String[] // أرقام القطع كـ Array
+  landArea     Float? // مساحة الأرض (Float لتقبل الكسور)
+  oldDeed      String? // رقم الصك القديم
 
-  // 👈 علاقات عكسية (One-to-Many) للربط المالي
+  // 💡 [احترافي] فصل أرقام المنصات
+  serviceNo String?
+  requestNo String?
+  licenseNo String?
+
+  // --- البيانات المالية والضريبية ---
+  totalFees       Float?  @default(0)
+  paidAmount      Float?  @default(0)
+  remainingAmount Float?  @default(0)
+  firstPayment    Float?  @default(0) // الدفعة الأولى المحصلة
+  feeType         String? @default("نهائي") // مبدئي / نهائي
+
+  // 💡 [احترافي] فصل بيانات الضريبة لتسهيل التقارير المحاسبية الختامية
+  taxType   String? @default("بدون احتساب ضريبة")
+  netAmount Float?  @default(0) // المبلغ الصافي
+  taxAmount Float?  @default(0) // قيمة الضريبة المضافة
+
+  // 💡 [احترافي] بيانات المصدر وتوزيع الأرباح
+  sourceType    String? @default("مباشر")
+  sourceName    String?
+  sourcePercent Float?  @default(0)
+
+  // --- التفاصيل الإضافية ---
+  authorities String[]
+  attachments String[]
+  notes       Json?    @default("{}") // مخصص فقط لسجل الأحداث (Logs) والملاحظات العشوائية
+
+  // --- العلاقات العكسية للتسويات ---
   payments      PrivatePayment[]
   settlements   PrivateSettlement[]
   disbursements Disbursement[]
@@ -1355,9 +1380,8 @@ model PrivateTransaction {
   agentId String?
   agent   Person? @relation("TxAgent", fields: [agentId], references: [id])
 
-  // داخل جدول PrivateTransaction
-  officeId String? // 👈 أضف علامة استفهام هنا
-  office   IntermediaryOffice? @relation(fields: [officeId], references: [id]) // 👈 وأضف علامة استفهام هنا أيضاً
+  officeId String?
+  office   IntermediaryOffice? @relation(fields: [officeId], references: [id])
 
   stakeholderId String?
   stakeholder   Person? @relation("TxStakeholder", fields: [stakeholderId], references: [id])
@@ -1366,11 +1390,13 @@ model PrivateTransaction {
   receiver   Person? @relation("TxReceiver", fields: [receiverId], references: [id])
 
   engOfficeBrokerId String?
-  engOfficeBroker   Person?             @relation("TxEngBroker", fields: [engOfficeBrokerId], references: [id])
-  tasks             TransactionTask[]
-  brokersList       TransactionBroker[]
-  CoopOffice        CoopOffice?         @relation(fields: [coopOfficeId], references: [id])
-  coopOfficeId      String?
+  engOfficeBroker   Person? @relation("TxEngBroker", fields: [engOfficeBrokerId], references: [id])
+
+  tasks       TransactionTask[]
+  brokersList TransactionBroker[]
+
+  coopOfficeId String?
+  CoopOffice   CoopOffice? @relation(fields: [coopOfficeId], references: [id])
 
   @@index([clientId])
   @@index([districtId])
@@ -2013,13 +2039,18 @@ model IntermediaryLink {
 // سجل الرخص المركزي (Permits Registry)
 // ===============================================
 model Permit {
-  id                String  @id @default(cuid())
-  permitNumber      String  @unique
-  year              Int
-  type              String
-  form              String // يدوي، أصفر، أخضر
-  ownerName         String
-  idNumber          String?
+  id           String  @id @default(cuid())
+  permitNumber String  @unique
+  year         Int
+  type         String
+  form         String
+  ownerName    String
+  idNumber     String?
+
+  // 💡 [احترافي] تواريخ الرخصة
+  issueDate  String? // تاريخ الإصدار
+  expiryDate String? // تاريخ الانتهاء الهجري
+
   district          String?
   sector            String?
   plotNumber        String?
@@ -2027,24 +2058,24 @@ model Permit {
   usage             String?
   landArea          Float?
   engineeringOffice String?
-  source            String // نظام المعاملات، رفع يدوي (AI)، بوابة بلدي، استيراد
-  qrStatus          String  @default("غير متوفر") // مقروء، يحتاج مراجعة، غير متوفر
-  aiStatus          String  @default("غير مطبق") // تم التحليل، يحتاج مراجعة، فشل التحليل، غير مطبق
+  source            String
+  qrStatus          String  @default("غير متوفر")
+  aiStatus          String  @default("غير مطبق")
   copies            Int     @default(1)
   notes             String  @default("")
-  attachmentUrl     String? // رابط ملف الرخصة المرفق
+  attachmentUrl     String?
   mainUsage         String?
   subUsage          String?
   detailedReport    String? @db.Text
 
-  // حقول الربط اليدوي
   linkedTransactionId String?
   linkedOwnershipId   String?
   linkedClientId      String?
   linkedOfficeId      String?
+  extraAttachments    String? @db.Text
 
-  componentsData String? @db.Text // لتخزين الـ JSON
-  boundariesData String? @db.Text // لتخزين الـ JSON
+  componentsData String? @db.Text
+  boundariesData String? @db.Text
 
   archiveDate DateTime @default(now()) @db.Date
   updatedAt   DateTime @updatedAt

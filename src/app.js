@@ -4,14 +4,11 @@ const cors = require("cors");
 const helmet = require("helmet");
 const morgan = require("morgan");
 const path = require("path");
-const fs = require("fs"); // 💡 استيراد مكتبة الملفات المدمجة
+const fs = require("fs");
 
 const app = express();
 
-// ==================================================
-// 1. إعدادات الأمان (Helmet)
-// 💡 تم تعطيل CSP مؤقتاً للسماح للمتصفح بفتح الـ PDF داخل iframe
-// ==================================================
+// تعطيل سياسات الأمان التي تمنع عرض الـ PDF في المتصفح
 app.use(
   helmet({
     crossOriginResourcePolicy: { policy: "cross-origin" },
@@ -25,21 +22,19 @@ app.use(express.json({ limit: "100mb" }));
 app.use(express.urlencoded({ limit: "100mb", extended: true }));
 
 // ==================================================
-// 💡 2. نظام خدمة الملفات الديناميكي الشامل (Dynamic Streaming)
+// 💡 نظام خدمة الملفات الاحترافي (Dynamic Streaming)
+// يكتشف نوع الملف من الداخل حتى لو لم يكن له امتداد
 // ==================================================
 const serveDynamicFile = (req, res, next) => {
   try {
     const decodedPath = decodeURIComponent(req.path);
     const filePath = path.join(__dirname, "../uploads", decodedPath);
 
-    // 1. التحقق من وجود الملف
     if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
-      return res
-        .status(404)
-        .json({ success: false, message: "الملف غير موجود" });
+      return res.status(404).send("الملف غير موجود");
     }
 
-    // 2. قراءة البصمة الحقيقية للملف (أول 4 بايت) لمعرفة نوعه
+    // قراءة أول 4 بايت من الملف (Magic Bytes)
     const buffer = Buffer.alloc(4);
     const fd = fs.openSync(filePath, "r");
     fs.readSync(fd, buffer, 0, 4, 0);
@@ -48,38 +43,34 @@ const serveDynamicFile = (req, res, next) => {
     const hex = buffer.toString("hex").toUpperCase();
     let mimeType = "application/octet-stream";
 
-    // مقارنة البصمة (Magic Bytes)
     if (hex.startsWith("25504446")) mimeType = "application/pdf";
     else if (hex.startsWith("FFD8FF")) mimeType = "image/jpeg";
     else if (hex.startsWith("89504E47")) mimeType = "image/png";
     else {
-      // الاعتماد على الامتداد كحل أخير
       const ext = path.extname(filePath).toLowerCase();
       if (ext === ".pdf") mimeType = "application/pdf";
       else if (ext === ".jpg" || ext === ".jpeg") mimeType = "image/jpeg";
       else if (ext === ".png") mimeType = "image/png";
     }
 
-    // 3. إعداد الترويسات الصحيحة لإجبار المتصفح على "عرض" الملف (inline)
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Content-Type", mimeType);
-    res.setHeader("Content-Disposition", "inline");
+    res.setHeader("Content-Disposition", "inline"); // inline = عرض في المتصفح (لا تقم بالتحميل)
 
-    // 4. إرسال الملف بنظام التدفق (Stream) لأداء صاروخي
     const stream = fs.createReadStream(filePath);
     stream.pipe(res);
   } catch (error) {
     console.error("File Server Error:", error);
-    res.status(500).send("خطأ داخلي في السيرفر أثناء قراءة الملف");
+    res.status(500).send("خطأ في السيرفر");
   }
 };
 
-// 💡 3. تطبيق الدالة الديناميكية على جميع مسارات الرفع (بدون تكرار)
+// توجيه كل طلبات الملفات إلى الدالة الذكية
 app.use("/uploads", serveDynamicFile);
-app.use("/api/uploads", serveDynamicFile);
+app.use("/api/uploads", serveDynamicFile); // 👈 هذا هو المسار الذي سيطلبه الفرونت إند
 
 // ==================================================
-// 4. توجيه مسارات الـ API
+// مسارات الـ API
 // ==================================================
 const authRoutes = require("./routes/authRoutes");
 app.use("/api/auth", authRoutes);

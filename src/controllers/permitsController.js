@@ -4,20 +4,82 @@ const { fromBuffer } = require("pdf2pic");
 const { PDFDocument } = require("pdf-lib");
 const fs = require("fs");
 const { OpenAI } = require("openai");
-
+const { z } = require("zod");
 // تأكد من وضع مفتاح OpenAI في ملف .env
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
+const { findBestMatchAI } = require("../services/aiMatchingService");
 // ==========================================
 // 💡 تحليل رخص البناء بالذكاء الاصطناعي (محدث بدقة فائقة + تقرير مفصل)
 // ==========================================
+const PermitSchema = z.object({
+  permitNumber: z.string().nullable().catch(""),
+  issueDate: z.string().nullable().catch(""),
+  expiryDate: z.string().nullable().catch(""),
+  year: z.string().nullable().catch(new Date().getFullYear().toString()),
+  type: z.string().nullable().catch("غير محدد"),
+  ownerName: z.string().nullable().catch(""),
+  idNumber: z.string().nullable().catch(""),
+  district: z.string().nullable().catch(""),
+  sector: z.string().nullable().catch(""),
+  plotNumber: z.string().nullable().catch(""),
+  planNumber: z.string().nullable().catch(""),
+  mainUsage: z.string().nullable().catch("سكني"),
+  subUsage: z.string().nullable().catch(""),
+  landArea: z
+    .union([z.number(), z.string()])
+    .nullable()
+    .catch("")
+    .transform((val) => Number(val) || 0),
+  engineeringOffice: z.string().nullable().catch(""),
+  form: z.string().nullable().catch("أخضر"),
+  notes: z.string().nullable().catch(""),
+  componentsData: z
+    .array(
+      z.object({
+        name: z.string().catch("مكون غير معروف"),
+        usage: z.string().nullable().catch(""),
+        area: z
+          .union([z.number(), z.string()])
+          .nullable()
+          .catch("")
+          .transform((val) => Number(val) || 0),
+        units: z
+          .union([z.number(), z.string()])
+          .nullable()
+          .catch("")
+          .transform((val) => Number(val) || 0),
+      }),
+    )
+    .catch([]),
+  boundariesData: z
+    .array(
+      z.object({
+        direction: z.string().catch("اتجاه غير معروف"),
+        length: z
+          .union([z.number(), z.string()])
+          .nullable()
+          .catch("")
+          .transform((val) => Number(val) || 0),
+        neighbor: z.string().nullable().catch(""),
+      }),
+    )
+    .catch([]),
+  detailedReport: z.string().catch("لم يتم توليد تقرير مفصل."),
+});
+
+// ==========================================
+// 💡 تحليل رخص البناء بالذكاء الاصطناعي (Enterprise Version)
+// ==========================================
 const analyzePermitAI = async (req, res) => {
+  let tempFilePath = null;
+
   try {
     let fileBuffer;
     let mimeType;
 
     if (req.file) {
-      fileBuffer = fs.readFileSync(req.file.path);
+      tempFilePath = req.file.path; // حفظ المسار لاستخدامه في الحذف المضمون
+      fileBuffer = fs.readFileSync(tempFilePath);
       mimeType = req.file.mimetype;
     } else if (req.body.imageBase64) {
       const { imageBase64 } = req.body;
@@ -35,18 +97,16 @@ const analyzePermitAI = async (req, res) => {
 
     let imagesToSend = [];
 
+    // 1. معالجة وتجهيز الملفات بدقة عالية
     if (mimeType === "application/pdf") {
       const pdfDoc = await PDFDocument.load(fileBuffer);
       const totalPages = pdfDoc.getPageCount();
       const pagesToProcess = Math.min(totalPages, 5);
 
-      console.log(
-        `🚀 جاري معالجة ${pagesToProcess} صفحة بدقة عالية (300 DPI)...`,
-      );
+      console.log(`🚀 جاري معالجة ${pagesToProcess} صفحة بدقة عالية...`);
 
-      // دقة 300 DPI لضمان قراءة الجداول الصغيرة بوضوح تام
       const options = {
-        density: 300,
+        density: 500, // تنبيه: 500 ممتازة جداً للدقة ولكنها قد تستهلك RAM أعلى وتأخذ وقتاً أطول. إذا واجهت بطء اجعلها 300
         format: "jpeg",
         width: 2480,
         height: 3508,
@@ -67,16 +127,17 @@ const analyzePermitAI = async (req, res) => {
         .json({ success: false, message: "نوع الملف غير مدعوم." });
     }
 
-    // 💡 برومبت هندسي صارم جداً (يستخرج الجداول بدقة، يقسم الاستخدام، ويكتب تقريراً)
+    // 2. البرومبت الصارم (تمت إضافة أمر إجبار الأرقام الإنجليزية)
     const prompt = `
     أنت خبير قانوني وهندسي محلف ومستشار في البلديات بالمملكة العربية السعودية.
     أمامك صورة لرخصة بناء، فسح، أو مسودة رخصة.
-    تحذير هام 🚨: استخرج النصوص والأرقام كما هي مكتوبة في الصورة **بالحرف والرقم**. يُمنع منعاً باتاً تخمين أو تأليف أي بيانات. إذا كانت المعلومة مفقودة تماماً أرجع null للأرقام أو "" للنصوص.
+    تحذير هام 🚨: استخرج النصوص كما هي مكتوبة في الصورة. يُمنع منعاً باتاً تخمين أو تأليف أي بيانات. إذا كانت المعلومة مفقودة تماماً أرجع null للأرقام أو "" للنصوص.
 
     مطلوب منك الانتباه الشديد لما يلي:
     1. **الاستخدام:** قسّمه إلى "mainUsage" (التصنيف الرئيسي مثل: سكني، تجاري، تعليمي) و "subUsage" (التصنيف الفرعي مثل: فيلا، مستودع، شقق مفروشة، مكاتب).
     2. **الجداول:** ابحث في الصورة عن جدول "مكونات البناء" وجدول "الحدود والأبعاد". اقرأ صفوفها بدقة متناهية ولا تفوت أي صف.
     3. **التقرير المفصل:** اكتب ملخصاً هندسياً احترافياً باللغة العربية (detailedReport) يشرح طبيعة الرخصة، موقعها، مكوناتها الأساسية، وأي ملاحظات هامة أو اشتراطات مذكورة.
+    4. **الأرقام ⚠️:** قم باستخراج وتحويل كافة الأرقام (أرقام الرخص، التواريخ، المساحات، الهويات) إلى الصيغة الإنجليزية (0-9) حصراً. يُمنع استخدام الأرقام العربية الهندية (٠-٩).
 
     قد يحتوي الملف على أكثر من رخصة، استخرجها كلها داخل مصفوفة "permits" وأعد النتيجة بصيغة JSON حصرية.
     
@@ -105,7 +166,7 @@ const analyzePermitAI = async (req, res) => {
             { "name": "اسم المكون", "usage": "الاستخدام المكتوب للمكون", "area": المساحة (Number), "units": عدد الوحدات أو الغرف (Number) }
           ],
           "boundariesData": [
-            { "direction": "الاتجاه (شمال/جنوب/شرق/غرب)", "length": الطول (Number), "neighbor": "يحدها" }
+            { "direction": "الاتجاه (شمال/جنوب/شرق/غرب)", "length": الطول (Number), "neighbor": "حدودها" }
           ],
           "detailedReport": "تقرير هندسي مفصل واحترافي يشرح الرخصة ومحتوياتها بشكل مقالي واضح"
         }
@@ -121,26 +182,100 @@ const analyzePermitAI = async (req, res) => {
       });
     });
 
+    // 3. الاتصال بنموذج الذكاء الاصطناعي
     const response = await openai.chat.completions.create({
       model: "gpt-4o",
       messages: [{ role: "user", content: contentArray }],
       response_format: { type: "json_object" },
-      temperature: 0.0, // ضمان الدقة وعدم التأليف
+      temperature: 0.0,
     });
 
-    const parsedData = JSON.parse(response.choices[0].message.content);
+    // 💡 الفلتر السحري: استبدال أي رقم هندي (٠-٩) برقم إنجليزي (0-9) في النص الخام قبل الـ JSON.parse
+    let rawContent = response.choices[0].message.content;
+    rawContent = rawContent.replace(/[٠-٩]/g, (d) => "٠١٢٣٤٥٦٧٨٩".indexOf(d));
 
-    if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+    const parsedData = JSON.parse(rawContent);
+    let rawPermits = parsedData.permits || [];
 
-    res.json({ success: true, data: parsedData.permits || [] });
+    // 4. 🛡️ تمرير البيانات عبر طبقة الحماية Zod
+    const validatedPermits = rawPermits.map((permit) =>
+      PermitSchema.parse(permit),
+    );
+
+    // ==========================================
+    // 💡 السحر هنا: المطابقة الذكية في الباك إند (Backend AI Matching)
+    // ==========================================
+    console.log("🔄 جاري المطابقة الذكية مع قاعدة البيانات...");
+
+    // جلب القوائم من قاعدة البيانات مرة واحدة لتسريع العملية (تم تصحيح أسماء الجداول والحقول)
+    const dbClients = await prisma.client.findMany({
+      select: { id: true, name: true, idNumber: true },
+    });
+    const dbOffices = await prisma.intermediaryOffice.findMany({
+      select: { id: true, nameAr: true, nameEn: true },
+    });
+
+    // 💡 التعديل هنا: استخدام riyadhDistrict بدلاً من riyadhNeighborhood
+    const dbDistricts = await prisma.riyadhDistrict.findMany({
+      select: { id: true, name: true },
+    });
+
+    // 💡 التعديل هنا: مسح حقل name لأنه غير موجود في جدول المخططات، والاعتماد على planNumber فقط
+    const dbPlans = await prisma.riyadhPlan.findMany({
+      select: { id: true, planNumber: true },
+    });
+
+    // المرور على كل رخصة مستخرجة ومحاولة ربطها بالذكاء الاصطناعي
+    const smartLinkedPermits = await Promise.all(
+      validatedPermits.map(async (permit) => {
+        // تشغيل المطابقة بالتوازي (Parallel) لأقصى سرعة
+        const [
+          matchedClientId,
+          matchedOfficeId,
+          matchedDistrictId,
+          matchedPlanId,
+        ] = await Promise.all([
+          findBestMatchAI(permit.ownerName, dbClients, "Client/العميل"),
+          findBestMatchAI(
+            permit.engineeringOffice,
+            dbOffices,
+            "Engineering Office/المكتب الهندسي",
+          ),
+          findBestMatchAI(permit.district, dbDistricts, "District/الحي"),
+          findBestMatchAI(permit.planNumber, dbPlans, "Plan Number/المخطط"),
+        ]);
+
+        return {
+          ...permit,
+          linkedClientId: matchedClientId,
+          linkedOfficeId: matchedOfficeId,
+          linkedDistrictId: matchedDistrictId,
+          linkedPlanId: matchedPlanId,
+        };
+      }),
+    );
+
+    // إرسال الرخص الذكية المربوطة بالكامل للفرونت إند
+    res.json({ success: true, data: smartLinkedPermits });
+
+    // res.json({ success: true, data: validatedPermits });
   } catch (error) {
-    if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-    console.error("AI Analysis Error:", error);
+    console.error("🔥 AI Analysis Error:", error);
     res.status(500).json({
       success: false,
       message: "فشل تحليل الرخصة",
       details: error.message,
     });
+  } finally {
+    // 5. 🧹 الحذف المضمون (Guaranteed Cleanup)
+    if (tempFilePath && fs.existsSync(tempFilePath)) {
+      try {
+        fs.unlinkSync(tempFilePath);
+        console.log(`🗑️ تم تنظيف الملف المؤقت: ${tempFilePath}`);
+      } catch (cleanupError) {
+        console.error("⚠️ فشل في حذف الملف المؤقت:", cleanupError);
+      }
+    }
   }
 };
 
@@ -240,17 +375,23 @@ const updatePermit = async (req, res) => {
     if (data.usage !== undefined) updateData.usage = data.usage;
     if (data.mainUsage !== undefined) updateData.mainUsage = data.mainUsage;
     if (data.subUsage !== undefined) updateData.subUsage = data.subUsage;
-    if (data.detailedReport !== undefined) updateData.detailedReport = data.detailedReport;
+    if (data.detailedReport !== undefined)
+      updateData.detailedReport = data.detailedReport;
     // دعم تحديث حقول الربط اليدوي
-    if (data.linkedTransactionId !== undefined) updateData.linkedTransactionId = data.linkedTransactionId;
-    if (data.linkedOwnershipId !== undefined) updateData.linkedOwnershipId = data.linkedOwnershipId;
-    if (data.linkedClientId !== undefined) updateData.linkedClientId = data.linkedClientId;
-    if (data.linkedOfficeId !== undefined) updateData.linkedOfficeId = data.linkedOfficeId;
+    if (data.linkedTransactionId !== undefined)
+      updateData.linkedTransactionId = data.linkedTransactionId;
+    if (data.linkedOwnershipId !== undefined)
+      updateData.linkedOwnershipId = data.linkedOwnershipId;
+    if (data.linkedClientId !== undefined)
+      updateData.linkedClientId = data.linkedClientId;
+    if (data.linkedOfficeId !== undefined)
+      updateData.linkedOfficeId = data.linkedOfficeId;
     if (data.engineeringOffice !== undefined)
       updateData.engineeringOffice = data.engineeringOffice;
     if (data.source !== undefined) updateData.source = data.source;
     if (data.notes !== undefined) updateData.notes = data.notes;
     if (data.aiStatus !== undefined) updateData.aiStatus = data.aiStatus;
+    if (data.extraAttachments !== undefined) updateData.extraAttachments = data.extraAttachments;
 
     // 💡 حماية الأرقام في التعديل
     if (data.year !== undefined) {

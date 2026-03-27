@@ -391,8 +391,7 @@ const createClient = async (req, res) => {
 
 // تحديث عميل
 // ===============================================
-// تحديث عميل
-// ===============================================
+
 const updateClient = async (req, res) => {
   const { id: clientId } = req.params;
   try {
@@ -400,7 +399,7 @@ const updateClient = async (req, res) => {
     const existingClient = await prisma.client.findUnique({
       where: { id: clientId },
       include: {
-        transactions: true, // نحتاج المعاملات لحساب الدرجة بدقة
+        transactions: true,
       },
     });
 
@@ -422,17 +421,19 @@ const updateClient = async (req, res) => {
       identification: req.body.identification
         ? { ...existingClient.identification, ...req.body.identification }
         : existingClient.identification,
+      // 💡 التعديل هنا: إضافة دمج بيانات الوكيل
+      representative: req.body.representative
+        ? { ...existingClient.representative, ...req.body.representative }
+        : existingClient.representative,
     };
 
     // 3. إعادة حساب النسبة والدرجة التلقائية
     const completionPercentage = calculateCompletionPercentage(mergedData);
     const gradeInfo = calculateClientGrade(mergedData, completionPercentage);
 
-    // إعطاء الأولوية للتقييم المرسل يدوياً، وإلا استخدم المحسوب آلياً
     const finalGrade =
       req.body.grade !== undefined ? req.body.grade : gradeInfo.grade;
 
-    // 💡 الحل السحري: تنظيف الإيميل والجوال لمنع التضارب (Unique Constraint)
     const finalEmail =
       req.body.email && req.body.email.trim() !== ""
         ? req.body.email.trim()
@@ -443,7 +444,7 @@ const updateClient = async (req, res) => {
       where: { id: clientId },
       data: {
         mobile: req.body.mobile,
-        email: finalEmail, // 👈 استخدام الإيميل المعالج هنا
+        email: finalEmail,
         idNumber: req.body.idNumber,
         type: req.body.type,
         category: req.body.category,
@@ -462,6 +463,10 @@ const updateClient = async (req, res) => {
         address: req.body.address ? req.body.address : undefined,
         identification: req.body.identification
           ? req.body.identification
+          : undefined,
+        // 💡 التعديل الأهم هنا: إخبار Prisma بتحديث حقل الوكيل في قاعدة البيانات
+        representative: req.body.representative
+          ? req.body.representative
           : undefined,
 
         completionPercentage,
@@ -489,7 +494,6 @@ const updateClient = async (req, res) => {
       },
     });
 
-    // تسجيل النشاط (Activity Log)
     if (req.user) {
       try {
         await prisma.activityLog.create({
@@ -508,7 +512,6 @@ const updateClient = async (req, res) => {
 
     res.json(updatedClient);
   } catch (error) {
-    // 💡 اصطياد الخطأ بشكل ذكي لمعرفة الحقل المتضارب بالضبط
     if (error.code === "P2002") {
       const target = error.meta?.target || [];
       let fieldName = "بيانات معينة";

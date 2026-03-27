@@ -95,7 +95,7 @@ const generateClientCode = async () => {
 };
 
 // ==================================================
-// 1. إنشاء معاملة جديدة
+// 1. إنشاء معاملة جديدة (Enterprise Grade Edition)
 // POST /api/private-transactions
 // ==================================================
 const createPrivateTransaction = async (req, res) => {
@@ -112,9 +112,11 @@ const createPrivateTransaction = async (req, res) => {
       ownerMobile,
       clientType,
       districtId,
+      district,
       sector,
       plots,
       plan,
+      landArea,
       oldDeed,
       serviceNo,
       requestNo,
@@ -147,23 +149,33 @@ const createPrivateTransaction = async (req, res) => {
           message: "يرجى اختيار المالك أو إدخال اسم المالك الجديد.",
         });
       }
+
       const clientCode = await generateClientCode();
       const uniqueIdNumber =
         ownerIdNumber && ownerIdNumber.trim() !== ""
           ? ownerIdNumber
           : `TMP-${Date.now()}`;
 
+      const isMultiple = ownerName.includes(" و ");
+      const dbClientName = isMultiple
+        ? `مُلاّك (${ownerName.substring(0, 15)}...)`
+        : ownerName;
+
       const newClient = await prisma.client.create({
         data: {
           clientCode: clientCode,
           mobile: ownerMobile || "بدون رقم",
-          idNumber: uniqueIdNumber,
+          idNumber: uniqueIdNumber.substring(0, 20),
           type: clientType || "فرد سعودي",
-          name: { ar: ownerName, en: "", details: {} },
+          name: {
+            ar: dbClientName,
+            en: "",
+            details: { fullOwnerNames: ownerName },
+          },
           contact: { mobile: ownerMobile || "بدون رقم", email: "", phone: "" },
           identification: {
             idType: "هوية وطنية / سجل تجاري",
-            idNumber: uniqueIdNumber,
+            idNumber: uniqueIdNumber.substring(0, 20),
           },
           isActive: true,
         },
@@ -180,6 +192,18 @@ const createPrivateTransaction = async (req, res) => {
         ? `${internalName} - ${transactionCode}`
         : `${transactionType || "معاملة"} - ${transactionCode}`;
 
+    const taxData = extraNotes?.taxData || {};
+
+    // 💡 جلب اسم المعقب (إن وجد) لتسجيله في بطاقة المعقبين تلقائياً
+    let fetchedAgentName = "معقب (أساسي)";
+    if (followUpAgentId) {
+      const agentPerson = await prisma.person.findUnique({
+        where: { id: followUpAgentId },
+      });
+      if (agentPerson) fetchedAgentName = agentPerson.name;
+    }
+
+    // 💡 الإنشاء المترابط (Nested Write)
     const newTransaction = await prisma.privateTransaction.create({
       data: {
         transactionCode,
@@ -188,42 +212,83 @@ const createPrivateTransaction = async (req, res) => {
         complexity: surveyType || "بدون رفع",
         source: source || "مكتب ديتيلز",
         status: "in_progress",
+        createdBy: addedBy || "مدير النظام",
+
+        clientId: finalClientId,
+        clientType: clientType || null,
+        ownerNames: ownerName || null,
+        ownerIds: ownerIdNumber || null,
+
+        districtId: districtId || null,
+        districtName: district || null,
+        sector: sector || null,
+        planNumber: plan || null,
+        plots: Array.isArray(plots) ? plots : [],
+        landArea: landArea ? parseFloat(landArea) : null,
+        oldDeed: oldDeed || null,
+
+        serviceNo: serviceNo || null,
+        requestNo: requestNo || null,
+        licenseNo: licenseNo || null,
+
         totalFees: parsedTotalFees,
         paidAmount: parsedFirstPayment,
         remainingAmount: parsedTotalFees - parsedFirstPayment,
-        clientId: finalClientId,
-        districtId: districtId || null,
+        firstPayment: parsedFirstPayment,
+        feeType: feeType || "نهائي",
+
+        taxType: taxData.taxType || "بدون احتساب ضريبة",
+        netAmount: taxData.netAmount
+          ? parseFloat(taxData.netAmount)
+          : parsedTotalFees,
+        taxAmount: taxData.taxAmount ? parseFloat(taxData.taxAmount) : 0,
+
+        sourceType: sourceType || "مباشر",
+        sourceName: sourceName || null,
+        sourcePercent: sourcePercent ? parseFloat(sourcePercent) : 0,
+
         authorities: Array.isArray(entities) ? entities : [],
         attachments: Array.isArray(receivedAttachmentsList)
           ? receivedAttachmentsList
           : [],
+
         brokerId: brokerId || null,
         agentId: followUpAgentId || null,
         stakeholderId: stakeholderId || null,
         receiverId: receiverId || null,
         engOfficeBrokerId: engOfficeBrokerId || null,
+
+        // 💡 [السر هنا]: إنشاء كارت الوسيط في جدول TransactionBroker تلقائياً
+        brokersList: brokerId
+          ? {
+              create: [
+                {
+                  brokerId: brokerId,
+                  fees: mediatorFees ? parseFloat(mediatorFees) : 0,
+                },
+              ],
+            }
+          : undefined,
+
         notes: {
           internalName: internalName || null,
           isInternalNameHidden: isInternalNameHidden || false,
-          feeType: feeType || "نهائي",
-          agentFees: agentFees ? parseFloat(agentFees) : 0,
+          ownerMobile: ownerMobile || null,
           mediatorFees: mediatorFees ? parseFloat(mediatorFees) : 0,
-          sourceDistribution: {
-            type: sourceType,
-            name: sourceName,
-            percent: sourcePercent ? parseFloat(sourcePercent) : 0,
-          },
-          ...(extraNotes && typeof extraNotes === "object" ? extraNotes : {}),
-          refs: {
-            plots: Array.isArray(plots) ? plots : [],
-            plan: plan || null,
-            sector: sector || null,
-            oldDeed: oldDeed || null,
-            serviceNo: serviceNo || null,
-            requestNo: requestNo || null,
-            licenseNo: licenseNo || null,
-            ownerMobile: ownerMobile || null,
-          },
+          agentFees: agentFees ? parseFloat(agentFees) : 0,
+
+          // 💡 [السر هنا]: إنشاء كارت المعقب في المصفوفة تلقائياً
+          agents: followUpAgentId
+            ? [
+                {
+                  id: followUpAgentId,
+                  name: fetchedAgentName,
+                  role: "مراجعة وتعقيب",
+                  fees: agentFees ? parseFloat(agentFees) : 0,
+                },
+              ]
+            : [],
+
           statuses: {
             collection:
               parsedFirstPayment >= parsedTotalFees && parsedTotalFees > 0
@@ -238,7 +303,6 @@ const createPrivateTransaction = async (req, res) => {
       },
     });
 
-    // 💡 توثيق إنشاء المعاملة
     await logTransactionEvent(
       prisma,
       newTransaction.id,
@@ -270,16 +334,15 @@ const getPrivateTransactions = async (req, res) => {
   try {
     const limit = Math.min(parseInt(req.query.limit) || 50, 200);
     const cursor = req.query.cursor;
-
-    // 💡 1. استقبال متغيرات الربط التلقائي من الفرونت إند
     const { permitNumber, year } = req.query;
 
     const where = {};
 
-    // 💡 2. هندسة البحث الذكي للربط التلقائي
+    // 💡 1. فلترة احترافية وسريعة: نستخدم الأعمدة المستقلة مباشرة، مع إبقاء البحث في notes للبيانات القديمة
     if (permitNumber) {
-      // بما أن رقم الرخصة محفوظ كـ JSON، نطلب من Prisma البحث في المسارات المحتملة لرقم الرخصة
       where.OR = [
+        { licenseNo: permitNumber },
+        { requestNo: permitNumber },
         { notes: { path: ["refs", "licenseNo"], equals: permitNumber } },
         {
           notes: {
@@ -288,26 +351,19 @@ const getPrivateTransactions = async (req, res) => {
           },
         },
       ];
-
-      // يمكن إضافة الفلترة بالسنة إذا أردت دقة أعلى (عادة رقم الرخصة كافٍ لأنه فريد)
-      /*
-      if (year) {
-        where.AND = [
-          { notes: { path: ["transactionStatusData", "hijriYear1"], equals: String(year) } }
-        ];
-      }
-      */
     }
 
     const transactions = await prisma.privateTransaction.findMany({
       take: limit,
       skip: cursor ? 1 : 0,
       cursor: cursor ? { id: cursor } : undefined,
-      where, // 👈 3. تمرير شروط البحث هنا
+      where,
       orderBy: { createdAt: "desc" },
+      // 💡 2. استدعاء الأعمدة الجديدة بشكل صريح لتقليل استهلاك الرام
       select: {
         id: true,
         transactionCode: true,
+        title: true,
         category: true,
         source: true,
         status: true,
@@ -316,6 +372,19 @@ const getPrivateTransactions = async (req, res) => {
         remainingAmount: true,
         createdAt: true,
         notes: true,
+
+        // 👈 الأعمدة الجديدة الصريحة
+        ownerNames: true,
+        districtName: true,
+        sector: true,
+        planNumber: true,
+        plots: true,
+        landArea: true,
+        taxType: true,
+        netAmount: true,
+        taxAmount: true,
+        sourceName: true,
+
         client: { select: { name: true } },
         districtNode: {
           select: { name: true, sector: { select: { name: true } } },
@@ -338,17 +407,21 @@ const getPrivateTransactions = async (req, res) => {
     const formattedData = transactions.map((tx) => {
       const notes =
         typeof tx.notes === "object" && tx.notes !== null ? tx.notes : {};
-      let ownerName = "غير محدد";
-      try {
-        if (tx.client?.name) {
-          const parsed =
-            typeof tx.client.name === "string"
-              ? JSON.parse(tx.client.name)
-              : tx.client.name;
-          ownerName = parsed?.ar || parsed || "غير محدد";
+
+      // 💡 3. قراءة أسماء الملاك من العمود الصريح أولاً (سرعة ودقة)
+      let ownerName = tx.ownerNames || notes.fullOwnerNames || "غير محدد";
+      if (ownerName === "غير محدد") {
+        try {
+          if (tx.client?.name) {
+            const parsed =
+              typeof tx.client.name === "string"
+                ? JSON.parse(tx.client.name)
+                : tx.client.name;
+            ownerName = parsed?.ar || parsed || "غير محدد";
+          }
+        } catch {
+          ownerName = tx.client?.name || "غير محدد";
         }
-      } catch {
-        ownerName = tx.client?.name || "غير محدد";
       }
 
       let collectionStatus = "غير محصل";
@@ -374,21 +447,45 @@ const getPrivateTransactions = async (req, res) => {
       return {
         id: tx.id,
         ref: tx.transactionCode,
-        internalName: notes?.internalName || "",
+        internalName: notes?.internalName || tx.title?.split(" - ")[0] || "",
         type: tx.category || "غير محدد",
         client: ownerName,
-        district: tx.districtNode?.name || "غير محدد",
+
+        // 💡 4. جلب البيانات من الأعمدة الحديثة، مع خطة بديلة للبيانات القديمة
+        district:
+          tx.districtName ||
+          notes?.refs?.districtName ||
+          tx.districtNode?.name ||
+          "غير محدد",
         sector:
-          notes?.refs?.sector || tx.districtNode?.sector?.name || "غير محدد",
-        plot: notes?.refs?.plots || "—",
-        plan: notes?.refs?.plan || "—",
+          tx.sector ||
+          notes?.refs?.sector ||
+          tx.districtNode?.sector?.name ||
+          "غير محدد",
+        plot:
+          tx.plots && tx.plots.length > 0
+            ? tx.plots.join(" ، ")
+            : notes?.refs?.plots || "—",
+        plan: tx.planNumber || notes?.refs?.plan || "—",
+        landArea: tx.landArea || notes?.refs?.landArea || 0,
+
         office: tx.source || "مكتب ديتيلز",
-        sourceName: notes?.sourceName || "مباشر",
+        sourceName: tx.sourceName || notes?.sourceName || "مباشر",
         mediator: brokerNames,
         mediatorFees: totalBrokerFees,
         brokers,
         agentCost: notes?.agentFees || 0,
         totalFees: tx.totalFees || 0,
+
+        // 💡 5. دمج وتجميع بيانات الضريبة لإرسالها للواجهة
+        taxData: tx.taxType
+          ? {
+              taxType: tx.taxType,
+              netAmount: tx.netAmount,
+              taxAmount: tx.taxAmount,
+            }
+          : notes?.taxData || null,
+
         paidAmount: tx.paidAmount || 0,
         agents: notes?.agents || [],
         remainingAmount:
