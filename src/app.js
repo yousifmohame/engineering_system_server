@@ -8,11 +8,15 @@ const fs = require("fs");
 
 const app = express();
 
-// تعطيل سياسات الأمان التي تمنع عرض الـ PDF في المتصفح
+// ==================================================
+// 💡 إعدادات الأمان (Helmet)
+// تم تعطيل frameguard للسماح بفتح الـ PDF داخل iframe في النظام
+// ==================================================
 app.use(
   helmet({
-    crossOriginResourcePolicy: { policy: "cross-origin" },
+    crossOriginResourcePolicy: false, // 👈 مهم جداً ليعمل الـ iframe
     contentSecurityPolicy: false,
+    frameguard: false, // 👈 تعطيل X-Frame-Options
   }),
 );
 
@@ -23,51 +27,44 @@ app.use(express.urlencoded({ limit: "100mb", extended: true }));
 
 // ==================================================
 // 💡 نظام خدمة الملفات الاحترافي (Dynamic Streaming)
-// يكتشف نوع الملف من الداخل حتى لو لم يكن له امتداد
 // ==================================================
 const serveDynamicFile = (req, res, next) => {
   try {
     const decodedPath = decodeURIComponent(req.path);
+    // تأكد أن المسار صحيح ويشير لمجلد uploads في الروت (خارج src)
     const filePath = path.join(__dirname, "../uploads", decodedPath);
 
     if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
       return res.status(404).send("الملف غير موجود");
     }
 
-    // قراءة أول 4 بايت من الملف (Magic Bytes)
-    const buffer = Buffer.alloc(4);
-    const fd = fs.openSync(filePath, "r");
-    fs.readSync(fd, buffer, 0, 4, 0);
-    fs.closeSync(fd);
-
-    const hex = buffer.toString("hex").toUpperCase();
+    // تحديد نوع الملف (MIME Type)
     let mimeType = "application/octet-stream";
+    const ext = path.extname(filePath).toLowerCase();
 
-    if (hex.startsWith("25504446")) mimeType = "application/pdf";
-    else if (hex.startsWith("FFD8FF")) mimeType = "image/jpeg";
-    else if (hex.startsWith("89504E47")) mimeType = "image/png";
-    else {
-      const ext = path.extname(filePath).toLowerCase();
-      if (ext === ".pdf") mimeType = "application/pdf";
-      else if (ext === ".jpg" || ext === ".jpeg") mimeType = "image/jpeg";
-      else if (ext === ".png") mimeType = "image/png";
-    }
+    if (ext === ".pdf") mimeType = "application/pdf";
+    else if (ext === ".jpg" || ext === ".jpeg") mimeType = "image/jpeg";
+    else if (ext === ".png") mimeType = "image/png";
+    else if (ext === ".webp") mimeType = "image/webp";
 
+    // 💡 1. إرسال الهيدرز الأمنية الصحيحة أولاً (تسمح بـ iframe)
+    res.removeHeader("X-Frame-Options"); // تأكيد الإزالة
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Content-Type", mimeType);
-    res.setHeader("Content-Disposition", "inline"); // inline = عرض في المتصفح (لا تقم بالتحميل)
+    res.setHeader("Content-Disposition", "inline"); // inline = عرض وليس تحميل
 
+    // 💡 2. إرسال الملف (Streaming)
     const stream = fs.createReadStream(filePath);
     stream.pipe(res);
   } catch (error) {
     console.error("File Server Error:", error);
-    res.status(500).send("خطأ في السيرفر");
+    res.status(500).send("خطأ في السيرفر أثناء قراءة الملف");
   }
 };
 
-// توجيه كل طلبات الملفات إلى الدالة الذكية
+// 💡 ربط المسارات بدالة خدمة الملفات
 app.use("/uploads", serveDynamicFile);
-app.use("/api/uploads", serveDynamicFile); // 👈 هذا هو المسار الذي سيطلبه الفرونت إند
+app.use("/api/uploads", serveDynamicFile); // المسار الذي يطلبه الفرونت إند غالباً
 
 // ==================================================
 // مسارات الـ API
