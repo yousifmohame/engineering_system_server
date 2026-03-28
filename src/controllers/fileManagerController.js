@@ -140,4 +140,59 @@ const deleteItems = async (req, res) => {
   }
 };
 
-module.exports = { getFolderContents, createFolder, uploadFiles, deleteItems };
+// 💡 6. جلب تصنيفات المجلدات
+const getCategories = async (req, res) => {
+  try {
+    const categories = await prisma.folderCategory.findMany({
+      orderBy: { order: "asc" },
+    });
+
+    // إذا كانت قاعدة البيانات فارغة، نرد بمصفوفة فارغة وسيقوم الفرونت إند باستخدام الافتراضية
+    res.json({ success: true, data: categories });
+  } catch (error) {
+    console.error("Error fetching categories:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// 💡 7. حفظ وتحديث تصنيفات المجلدات (استبدال كامل)
+const saveCategories = async (req, res) => {
+  try {
+    const { categories } = req.body;
+
+    if (!categories || !Array.isArray(categories)) {
+      return res
+        .status(400)
+        .json({ success: false, message: "بيانات غير صالحة" });
+    }
+
+    // استخدام Prisma Transaction لمسح القديم وإدخال الجديد لضمان التزامن
+    await prisma.$transaction([
+      prisma.folderCategory.deleteMany({}), // مسح كل التصنيفات القديمة
+      prisma.folderCategory.createMany({
+        data: categories.map((cat, index) => ({
+          id: cat.id, // نحتفظ بالـ ID القادم من الفرونت إند
+          name: cat.name,
+          icon: cat.icon,
+          color: cat.color,
+          order: cat.order || index + 1,
+        })),
+      }),
+    ]);
+
+    res.json({ success: true, message: "تم حفظ إعدادات المجلدات بنجاح" });
+  } catch (error) {
+    console.error("Error saving categories:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// لا تنس إضافة الدوال الجديدة للاكسبورت:
+module.exports = {
+  getFolderContents,
+  createFolder,
+  uploadFiles,
+  deleteItems,
+  getCategories, // 👈 إضافة
+  saveCategories, // 👈 إضافة
+};

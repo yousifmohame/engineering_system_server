@@ -2120,3 +2120,17 @@ model TransactionFile {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 }
+
+// ==========================================
+// 💡 إعدادات تصنيفات المجلدات
+// ==========================================
+model FolderCategory {
+  id    String @id @default(cuid())
+  name  String // اسم التصنيف (مثل: مرفقات، صكوك)
+  icon  String // الرمز (Emoji)
+  color String // كود اللون (Hex)
+  order Int    @default(0) // ترتيب العرض
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

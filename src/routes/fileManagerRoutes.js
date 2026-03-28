@@ -11,6 +11,8 @@ const {
   createFolder,
   uploadFiles,
   deleteItems,
+  getCategories,  // 👈
+  saveCategories  // 👈
 } = require("../controllers/fileManagerController"); // 👈 تأكد من مسار الكنترولر الصحيح
 
 // ==========================================
@@ -34,5 +36,9 @@ router.post("/upload", uploadFiles);
 // URL: POST /api/files/delete
 // استخدمنا POST بدلاً من DELETE لأنه يرسل Arrays (مصفوفات) في الـ Body بشكل أسهل وأكثر أماناً
 router.post("/delete", deleteItems);
+
+// 💡 المسارات الجديدة للتصنيفات
+router.get("/categories", getCategories);
+router.post("/categories", saveCategories);
 
 module.exports = router;
