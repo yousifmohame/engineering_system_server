@@ -195,6 +195,11 @@ app.use("/api/properties", propertyRoutes);
 const serverRoutes = require("./routes/serverRoutes");
 app.use("/api/server", serverRoutes);
 
+// استيراد مسار الملفات
+const fileManagerRoutes = require("./routes/fileManagerRoutes");
+// ربط المسار بـ /api/files (كما يطلبها الفرونت إند)
+app.use("/api/files", fileManagerRoutes);
+
 // فحص صحة السيرفر
 app.get("/", (req, res) => {
   res.json({ status: "Online", message: "Engineering System API v1" });

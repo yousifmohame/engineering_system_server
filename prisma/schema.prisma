@@ -1398,6 +1398,9 @@ model PrivateTransaction {
   coopOfficeId String?
   CoopOffice   CoopOffice? @relation(fields: [coopOfficeId], references: [id])
 
+  folders TransactionFolder[]
+  files   TransactionFile[]
+
   @@index([clientId])
   @@index([districtId])
 }
@@ -2079,4 +2082,41 @@ model Permit {
 
   archiveDate DateTime @default(now()) @db.Date
   updatedAt   DateTime @updatedAt
+}
+
+model TransactionFolder {
+  id             String  @id @default(cuid())
+  name           String
+  color          String? @default("#FDB022")
+  isSystemFolder Boolean @default(false)
+
+  transactionId String
+  transaction   PrivateTransaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+
+  parentId  String?
+  parent    TransactionFolder?  @relation("FolderHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
+  children  TransactionFolder[] @relation("FolderHierarchy")
+  files     TransactionFile[]
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+}
+
+model TransactionFile {
+  id           String @id @default(cuid())
+  name         String
+  originalName String
+  mimeType     String
+  extension    String
+  size         Int
+  url          String
+
+  folderId String?
+  folder   TransactionFolder? @relation(fields: [folderId], references: [id], onDelete: Cascade)
+
+  transactionId String
+  transaction   PrivateTransaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+
+  uploadedBy String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 }
