@@ -291,9 +291,8 @@ const getPermits = async (req, res) => {
   }
 };
 
-// إضافة رخصة جديدة
 // ==========================================
-// 💡 إضافة رخصة جديدة (معالجة آمنة للأرقام والجداول)
+// 💡 إضافة رخصة جديدة (يسمح بالتكرار الآن)
 // ==========================================
 const createPermit = async (req, res) => {
   try {
@@ -304,7 +303,6 @@ const createPermit = async (req, res) => {
       attachmentUrl = `/uploads/permits/${req.file.filename}`;
     }
 
-    // 💡 حماية الأرقام لتجنب خطأ NaN في Prisma
     const parsedYear = parseInt(data.year);
     const safeYear = isNaN(parsedYear) ? new Date().getFullYear() : parsedYear;
 
@@ -319,6 +317,10 @@ const createPermit = async (req, res) => {
         form: data.form || "غير محدد",
         ownerName: data.ownerName || "بدون اسم",
         idNumber: data.idNumber || "",
+
+        issueDate: data.issueDate || null,
+        expiryDate: data.expiryDate || null,
+
         district: data.district || "",
         sector: data.sector || "",
         plotNumber: data.plotNumber || "",
@@ -334,7 +336,6 @@ const createPermit = async (req, res) => {
         aiStatus: data.source === "رفع يدوي (AI)" ? "تم التحليل" : "غير مطبق",
         attachmentUrl: attachmentUrl,
 
-        // 💡 إضافة الجداول المستخرجة من الذكاء الاصطناعي
         componentsData: data.componentsData || "[]",
         boundariesData: data.boundariesData || "[]",
       },
@@ -342,18 +343,14 @@ const createPermit = async (req, res) => {
 
     res.status(201).json({ success: true, data: newPermit });
   } catch (error) {
-    console.error("Create Permit Error:", error); // مفيد لمعرفة تفاصيل الخطأ في التيرمنال
-    if (error.code === "P2002") {
-      return res
-        .status(400)
-        .json({ success: false, message: "رقم الرخصة مسجل مسبقاً!" });
-    }
+    console.error("Create Permit Error:", error);
+    // 👈 تم مسح كود الاعتراض على التكرار من هنا
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
 // ==========================================
-// 💡 تعديل بيانات الرخصة (ديناميكية وآمنة)
+// 💡 تعديل بيانات الرخصة (يسمح بالتكرار الآن)
 // ==========================================
 const updatePermit = async (req, res) => {
   try {
@@ -368,6 +365,10 @@ const updatePermit = async (req, res) => {
     if (data.form !== undefined) updateData.form = data.form;
     if (data.ownerName !== undefined) updateData.ownerName = data.ownerName;
     if (data.idNumber !== undefined) updateData.idNumber = data.idNumber;
+
+    if (data.issueDate !== undefined) updateData.issueDate = data.issueDate;
+    if (data.expiryDate !== undefined) updateData.expiryDate = data.expiryDate;
+
     if (data.district !== undefined) updateData.district = data.district;
     if (data.sector !== undefined) updateData.sector = data.sector;
     if (data.plotNumber !== undefined) updateData.plotNumber = data.plotNumber;
@@ -377,7 +378,7 @@ const updatePermit = async (req, res) => {
     if (data.subUsage !== undefined) updateData.subUsage = data.subUsage;
     if (data.detailedReport !== undefined)
       updateData.detailedReport = data.detailedReport;
-    // دعم تحديث حقول الربط اليدوي
+
     if (data.linkedTransactionId !== undefined)
       updateData.linkedTransactionId = data.linkedTransactionId;
     if (data.linkedOwnershipId !== undefined)
@@ -391,9 +392,9 @@ const updatePermit = async (req, res) => {
     if (data.source !== undefined) updateData.source = data.source;
     if (data.notes !== undefined) updateData.notes = data.notes;
     if (data.aiStatus !== undefined) updateData.aiStatus = data.aiStatus;
-    if (data.extraAttachments !== undefined) updateData.extraAttachments = data.extraAttachments;
+    if (data.extraAttachments !== undefined)
+      updateData.extraAttachments = data.extraAttachments;
 
-    // 💡 حماية الأرقام في التعديل
     if (data.year !== undefined) {
       const parsedYear = parseInt(data.year);
       if (!isNaN(parsedYear)) updateData.year = parsedYear;
@@ -404,13 +405,11 @@ const updatePermit = async (req, res) => {
       updateData.landArea = isNaN(parsedArea) ? null : parsedArea;
     }
 
-    // دعم تحديث المكونات والحدود
     if (data.componentsData !== undefined)
       updateData.componentsData = data.componentsData;
     if (data.boundariesData !== undefined)
       updateData.boundariesData = data.boundariesData;
 
-    // إضافة الملف الجديد فقط في حال وجوده
     if (req.file) {
       updateData.attachmentUrl = `/uploads/permits/${req.file.filename}`;
     }
@@ -423,11 +422,7 @@ const updatePermit = async (req, res) => {
     res.json({ success: true, data: updatedPermit });
   } catch (error) {
     console.error("Update Permit Error:", error);
-    if (error.code === "P2002") {
-      return res
-        .status(400)
-        .json({ success: false, message: "رقم الرخصة مسجل مسبقاً!" });
-    }
+    // 👈 تم مسح كود الاعتراض على التكرار من هنا
     res.status(500).json({ success: false, message: error.message });
   }
 };

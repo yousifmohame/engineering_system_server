@@ -2040,7 +2040,7 @@ model IntermediaryLink {
 // ===============================================
 model Permit {
   id           String  @id @default(cuid())
-  permitNumber String  @unique
+  permitNumber String
   year         Int
   type         String
   form         String
