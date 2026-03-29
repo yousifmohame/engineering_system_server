@@ -140,7 +140,7 @@ const deleteItems = async (req, res) => {
   }
 };
 
-// 💡 6. جلب تصنيفات المجلدات
+// 💡 6. جلب تصنيفات المجلدات (متوافق مع الحقول الجديدة)
 const getCategories = async (req, res) => {
   try {
     const categories = await prisma.folderCategory.findMany({
@@ -155,7 +155,7 @@ const getCategories = async (req, res) => {
   }
 };
 
-// 💡 7. حفظ وتحديث تصنيفات المجلدات (استبدال كامل)
+// 💡 7. حفظ وتحديث تصنيفات المجلدات (استبدال كامل يدعم الحقول الجديدة)
 const saveCategories = async (req, res) => {
   try {
     const { categories } = req.body;
@@ -171,11 +171,13 @@ const saveCategories = async (req, res) => {
       prisma.folderCategory.deleteMany({}), // مسح كل التصنيفات القديمة
       prisma.folderCategory.createMany({
         data: categories.map((cat, index) => ({
-          id: cat.id, // نحتفظ بالـ ID القادم من الفرونت إند
+          id: cat.id,
           name: cat.name,
+          code: cat.code || null, // 🚀 الحقل الجديد (Code)
           icon: cat.icon,
           color: cat.color,
           order: cat.order || index + 1,
+          subFolders: cat.subFolders || [], // 🚀 الحقل الجديد (Sub Folders Array)
         })),
       }),
     ]);
@@ -187,12 +189,11 @@ const saveCategories = async (req, res) => {
   }
 };
 
-// لا تنس إضافة الدوال الجديدة للاكسبورت:
 module.exports = {
   getFolderContents,
   createFolder,
   uploadFiles,
   deleteItems,
-  getCategories, // 👈 إضافة
-  saveCategories, // 👈 إضافة
+  getCategories,
+  saveCategories,
 };

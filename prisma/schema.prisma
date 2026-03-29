@@ -2125,11 +2125,13 @@ model TransactionFile {
 // 💡 إعدادات تصنيفات المجلدات
 // ==========================================
 model FolderCategory {
-  id    String @id @default(cuid())
-  name  String // اسم التصنيف (مثل: مرفقات، صكوك)
-  icon  String // الرمز (Emoji)
-  color String // كود اللون (Hex)
-  order Int    @default(0) // ترتيب العرض
+  id         String   @id @default(cuid())
+  name       String // اسم التصنيف (مثل: مرفقات، صكوك)
+  code       String? // كود مكون من 3 أرقام (اختياري)
+  icon       String // الرمز (Emoji)
+  color      String // كود اللون (Hex)
+  order      Int      @default(0) // ترتيب العرض
+  subFolders String[] // قائمة بأسماء المجلدات الفرعية التلقائية
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
