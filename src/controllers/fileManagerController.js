@@ -7,7 +7,7 @@ const fs = require("fs");
 // 1. إعداد Multer
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    const dest = path.join(__dirname, "../uploads/transactions");
+    const dest = path.join(__dirname, "../../uploads/transactions");
     if (!fs.existsSync(dest)) fs.mkdirSync(dest, { recursive: true });
     cb(null, dest);
   },
