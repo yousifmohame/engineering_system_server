@@ -18,12 +18,11 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage: storage }).array("files");
 
-// 2. جلب محتويات المجلد (محمي من القيم الفارغة)
+// 2. جلب محتويات المجلد
 const getFolderContents = async (req, res) => {
   try {
     const { transactionId, folderId } = req.query;
 
-    // 💡 حماية: تحويل النص الفارغ أو كلمة null إلى القيمة البرمجية null
     const validFolderId =
       !folderId ||
       folderId === "" ||
@@ -49,12 +48,11 @@ const getFolderContents = async (req, res) => {
   }
 };
 
-// 3. إنشاء مجلد (محمي من القيم الفارغة)
+// 3. إنشاء مجلد (مع تسجيل من قام بالتعديل)
 const createFolder = async (req, res) => {
   try {
-    const { name, transactionId, parentId } = req.body;
+    const { name, transactionId, parentId, createdBy } = req.body;
 
-    // 💡 حماية: نفس المعالجة للـ parentId
     const validParentId =
       !parentId ||
       parentId === "" ||
@@ -63,9 +61,18 @@ const createFolder = async (req, res) => {
         ? null
         : parentId;
 
-    const folder = await prisma.transactionFolder.create({
-      data: { name, transactionId, parentId: validParentId },
-    });
+    // استخدام Transaction لضمان إنشاء المجلد وتحديث المعاملة معاً
+    const [folder] = await prisma.$transaction([
+      prisma.transactionFolder.create({
+        data: { name, transactionId, parentId: validParentId },
+      }),
+      // 💡 تحديث بيانات المعاملة (آخر من عدل)
+      prisma.privateTransaction.update({
+        where: { id: transactionId },
+        data: { modifiedBy: createdBy || "النظام" },
+      }),
+    ]);
+
     res.json({ success: true, folder });
   } catch (error) {
     console.error("Error in createFolder:", error);
@@ -73,7 +80,7 @@ const createFolder = async (req, res) => {
   }
 };
 
-// 4. رفع الملفات
+// 4. رفع الملفات (مع تسجيل من قام بالرفع)
 const uploadFiles = async (req, res) => {
   upload(req, res, async (err) => {
     if (err)
@@ -104,12 +111,18 @@ const uploadFiles = async (req, res) => {
             size: file.size,
             url: `/uploads/transactions/${file.filename}`,
             transactionId,
-            folderId: validFolderId, // 💡 استخدام الـ ID المحمي
+            folderId: validFolderId,
             uploadedBy: uploadedBy || "النظام",
           },
         });
         uploadedFiles.push(newFile);
       }
+
+      // 💡 تحديث المعاملة بعد نجاح الرفع لتسجيل اسم الموظف
+      await prisma.privateTransaction.update({
+        where: { id: transactionId },
+        data: { modifiedBy: uploadedBy || "النظام" },
+      });
 
       res.json({ success: true, files: uploadedFiles });
     } catch (error) {
@@ -119,10 +132,11 @@ const uploadFiles = async (req, res) => {
   });
 };
 
-// 5. الحذف
+// 5. الحذف (مع تسجيل من قام بالحذف)
 const deleteItems = async (req, res) => {
   try {
-    const { fileIds, folderIds } = req.body;
+    const { fileIds, folderIds, transactionId, deletedBy } = req.body;
+
     if (fileIds && fileIds.length > 0) {
       await prisma.transactionFile.deleteMany({
         where: { id: { in: fileIds } },
@@ -133,6 +147,15 @@ const deleteItems = async (req, res) => {
         where: { id: { in: folderIds } },
       });
     }
+
+    // 💡 تحديث المعاملة بتسجيل عملية الحذف
+    if (transactionId) {
+      await prisma.privateTransaction.update({
+        where: { id: transactionId },
+        data: { modifiedBy: deletedBy || "النظام" },
+      });
+    }
+
     res.json({ success: true });
   } catch (error) {
     console.error("Error in deleteItems:", error);
@@ -140,51 +163,45 @@ const deleteItems = async (req, res) => {
   }
 };
 
-// 💡 6. جلب تصنيفات المجلدات (متوافق مع الحقول الجديدة)
+// 6. جلب تصنيفات المجلدات
 const getCategories = async (req, res) => {
   try {
     const categories = await prisma.folderCategory.findMany({
       orderBy: { order: "asc" },
     });
-
-    // إذا كانت قاعدة البيانات فارغة، نرد بمصفوفة فارغة وسيقوم الفرونت إند باستخدام الافتراضية
     res.json({ success: true, data: categories });
   } catch (error) {
-    console.error("Error fetching categories:", error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// 💡 7. حفظ وتحديث تصنيفات المجلدات (استبدال كامل يدعم الحقول الجديدة)
+// 7. حفظ التصنيفات
 const saveCategories = async (req, res) => {
   try {
     const { categories } = req.body;
-
     if (!categories || !Array.isArray(categories)) {
       return res
         .status(400)
         .json({ success: false, message: "بيانات غير صالحة" });
     }
 
-    // استخدام Prisma Transaction لمسح القديم وإدخال الجديد لضمان التزامن
     await prisma.$transaction([
-      prisma.folderCategory.deleteMany({}), // مسح كل التصنيفات القديمة
+      prisma.folderCategory.deleteMany({}),
       prisma.folderCategory.createMany({
         data: categories.map((cat, index) => ({
           id: cat.id,
           name: cat.name,
-          code: cat.code || null, // 🚀 الحقل الجديد (Code)
+          code: cat.code || null,
           icon: cat.icon,
           color: cat.color,
           order: cat.order || index + 1,
-          subFolders: cat.subFolders || [], // 🚀 الحقل الجديد (Sub Folders Array)
+          subFolders: cat.subFolders || [],
         })),
       }),
     ]);
 
     res.json({ success: true, message: "تم حفظ إعدادات المجلدات بنجاح" });
   } catch (error) {
-    console.error("Error saving categories:", error);
     res.status(500).json({ success: false, message: error.message });
   }
 };

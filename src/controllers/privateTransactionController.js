@@ -401,10 +401,15 @@ const getPrivateTransactions = async (req, res) => {
         tasks: true,
         payments: true,
         settlements: true,
+        files: { select: { size: true } },
       },
     });
 
     const formattedData = transactions.map((tx) => {
+      // 💡 👈 أضف هذا لحساب الحجم الإجمالي لكل معاملة
+      const totalSize = tx.files && tx.files.length > 0 
+        ? tx.files.reduce((sum, file) => sum + (file.size || 0), 0) 
+        : 0;
       const notes =
         typeof tx.notes === "object" && tx.notes !== null ? tx.notes : {};
 
@@ -491,6 +496,7 @@ const getPrivateTransactions = async (req, res) => {
         remainingAmount:
           tx.remainingAmount || (tx.totalFees || 0) - (tx.paidAmount || 0),
         collectionStatus,
+        totalSize: totalSize,
         status: tx.status || "جارية",
         date: formattedDate,
         created: tx.createdAt,

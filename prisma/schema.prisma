@@ -1401,6 +1401,15 @@ model PrivateTransaction {
   folders TransactionFolder[]
   files   TransactionFile[]
 
+  // 💡 [احترافي] بيانات التتبع لمدير الملفات
+  modifiedBy String? @default("غير محدد") // اسم الموظف الذي قام بآخر تعديل
+  isUrgent   Boolean @default(false) // علامة الاستعجال
+
+  // 💡 [احترافي] المعاملات المرتبطة (Linked Transactions) - علاقة ذاتية
+  linkedParentId String?
+  linkedParent   PrivateTransaction?  @relation("LinkedTransactions", fields: [linkedParentId], references: [id])
+  linkedChildren PrivateTransaction[] @relation("LinkedTransactions")
+
   @@index([clientId])
   @@index([districtId])
 }
