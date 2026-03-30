@@ -296,6 +296,7 @@ model Client {
   documents           Document[]
   // داخل model Client
   privateTransactions PrivateTransaction[] @relation("ClientPrivateTransactions")
+  TransactionFolder   TransactionFolder[]
 }
 
 model ClientClassification {
@@ -2093,46 +2094,147 @@ model Permit {
   updatedAt   DateTime @updatedAt
 }
 
+// ============================================================================
+// 💡 11. نظام إدارة الوثائق والأرشفة المؤسسي (Enterprise DMS)
+// ============================================================================
+
 model TransactionFolder {
-  id             String  @id @default(cuid())
-  name           String
-  color          String? @default("#FDB022")
-  isSystemFolder Boolean @default(false)
+  id    String  @id @default(cuid())
+  name  String
+  color String? @default("#FDB022")
+  icon  String? @default("📁")
 
-  transactionId String
-  transaction   PrivateTransaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  // 💡 [احترافي] إعدادات المجلد
+  isSystemFolder Boolean @default(false) // لا يمكن حذفه أو تغيير اسمه
+  isLocked       Boolean @default(false) // مقفل بكلمة مرور أو صلاحيات
+  isDeleted      Boolean @default(false) // الحذف الآمن (Soft Delete)
 
-  parentId  String?
-  parent    TransactionFolder?  @relation("FolderHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
-  children  TransactionFolder[] @relation("FolderHierarchy")
-  files     TransactionFile[]
-  createdAt DateTime            @default(now())
-  updatedAt DateTime            @updatedAt
+  // 💡 [احترافي] التتبع
+  createdBy String    @default("النظام")
+  updatedBy String?
+  deletedBy String?
+  deletedAt DateTime?
+
+  // العلاقات الهرمية
+  parentId String?
+  parent   TransactionFolder?  @relation("FolderHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
+  children TransactionFolder[] @relation("FolderHierarchy")
+
+  files TransactionFile[]
+
+  // 💡 [احترافي] الربط المرن (يمكن ربط المجلد بأكثر من كيان)
+  transactionId String?
+  transaction   PrivateTransaction? @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+
+  clientId String?
+  client   Client? @relation(fields: [clientId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([transactionId])
+  @@index([parentId])
 }
 
 model TransactionFile {
   id           String @id @default(cuid())
-  name         String
-  originalName String
+  name         String // الاسم المعروض للمستخدم
+  originalName String // الاسم الحقيقي وقت الرفع
   mimeType     String
   extension    String
   size         Int
   url          String
 
+  // 💡 [احترافي] النزاهة والإصدارات
+  fileHash       String? // بصمة الملف (MD5/SHA256) لمنع التكرار
+  version        Int     @default(1) // رقم الإصدار
+  isConfidential Boolean @default(false) // ملف سري (يتطلب صلاحية عليا)
+
+  // 💡 [احترافي] الحذف الآمن
+  isDeleted Boolean @default(false)
+
+  // 💡 [احترافي] التتبع
+  uploadedBy String // الموظف الذي رفع الملف
+  updatedBy  String? // الموظف الذي غير اسمه
+  deletedBy  String? // الموظف الذي حذفه
+  deletedAt  DateTime?
+
+  // 💡 [احترافي] البيانات الوصفية المرنة (Meta-data)
+  tags            String[] // [فواتير, 2026, ضرائب]
+  aiExtractedData Json? // بيانات استخرجها الذكاء الاصطناعي من الملف
+
+  // العلاقات
   folderId String?
   folder   TransactionFolder? @relation(fields: [folderId], references: [id], onDelete: Cascade)
 
-  transactionId String
-  transaction   PrivateTransaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  transactionId String?
+  transaction   PrivateTransaction? @relation(fields: [transactionId], references: [id], onDelete: Cascade)
 
-  uploadedBy String
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  // 💡 سجل الحركات الخاص بهذا الملف تحديداً
+  activityLogs FileActivityLog[]
+  // 💡 الإصدارات القديمة من هذا الملف
+  versions     FileVersion[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([transactionId])
+  @@index([folderId])
 }
 
-// ==========================================
+// ============================================================================
+// 💡 نظام الإصدارات (File Versioning) - للإحتفاظ بتاريخ الملفات المعدلة
+// ============================================================================
+model FileVersion {
+  id     String          @id @default(cuid())
+  fileId String
+  file   TransactionFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
+
+  versionNumber Int
+  url           String
+  size          Int
+  uploadedBy    String
+  changeNotes   String? // سبب التعديل
+
+  createdAt DateTime @default(now())
+
+  @@index([fileId])
+}
+
+// ============================================================================
+// 💡 سجل التدقيق للملفات (Audit Trail & Activity Logs) - تتبع كل همسة!
+// ============================================================================
+model FileActivityLog {
+  id String @id @default(cuid())
+
+  fileId String?
+  file   TransactionFile? @relation(fields: [fileId], references: [id], onDelete: SetNull)
+
+  folderId String? // في حال كان الحدث على مجلد
+
+  // نوع الحدث: UPLOAD, DOWNLOAD, VIEW, RENAME, DELETE, RESTORE, SHARE
+  action String
+
+  // من قام بالحدث؟
+  performedBy String // معرف أو اسم الموظف
+
+  // من أين؟
+  ipAddress String? // رقم الـ IP للموظف (أمان)
+  userAgent String? // المتصفح والجهاز المستخدم
+
+  // ماذا تغير؟ (مثال: { "oldName": "x.pdf", "newName": "y.pdf" })
+  details Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([fileId])
+  @@index([action])
+  @@index([performedBy])
+}
+
+// ============================================================================
 // 💡 إعدادات تصنيفات المجلدات
-// ==========================================
+// ============================================================================
 model FolderCategory {
   id         String   @id @default(cuid())
   name       String // اسم التصنيف (مثل: مرفقات، صكوك)
@@ -2141,6 +2243,9 @@ model FolderCategory {
   color      String // كود اللون (Hex)
   order      Int      @default(0) // ترتيب العرض
   subFolders String[] // قائمة بأسماء المجلدات الفرعية التلقائية
+
+  // صلاحيات افتراضية لمن يمكنه رؤية هذا التصنيف
+  allowedRoles String[] @default(["ALL"])
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

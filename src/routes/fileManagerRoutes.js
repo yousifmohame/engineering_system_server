@@ -1,44 +1,42 @@
-// ==========================================
-// 💡 مسارات نظام إدارة الملفات (File Management Routes)
-// ==========================================
-
 const express = require("express");
 const router = express.Router();
 
-// استيراد الدوال من الكنترولر الذي أنشأناه سابقاً
 const {
   getFolderContents,
   createFolder,
   uploadFiles,
-  deleteItems,
-  getCategories,  // 👈
-  saveCategories  // 👈
-} = require("../controllers/fileManagerController"); // 👈 تأكد من مسار الكنترولر الصحيح
+  renameItem,
+  softDeleteItems,
+  restoreItems,
+  permanentDeleteItems,
+  getCategories,
+  saveCategories,
+  // 💡 استيراد الدوال الجديدة
+  getFileLogs,
+  getFileVersions,
+  uploadNewVersion,
+  getTrashItems
+} = require("../controllers/fileManagerController");
 
-// ==========================================
-// 📌 المسارات (Endpoints)
-// ==========================================
-
-// 1. جلب محتويات مجلد معين لمعاملة محددة
-// URL: GET /api/files/contents?transactionId=123&folderId=456
+// العمليات الأساسية للمحتوى
 router.get("/contents", getFolderContents);
-
-// 2. إنشاء مجلد جديد
-// URL: POST /api/files/folder
 router.post("/folder", createFolder);
-
-// 3. رفع الملفات (المتعددة) 
-// URL: POST /api/files/upload
-// ملاحظة: الـ Multer middleware مدمج داخل الكنترولر نفسه للتعامل مع الرفع وحساب السرعة
 router.post("/upload", uploadFiles);
+router.put("/rename", renameItem);
 
-// 4. حذف الملفات والمجلدات (بشكل جماعي)
-// URL: POST /api/files/delete
-// استخدمنا POST بدلاً من DELETE لأنه يرسل Arrays (مصفوفات) في الـ Body بشكل أسهل وأكثر أماناً
-router.post("/delete", deleteItems);
+// عمليات الحذف والاستعادة
+router.get("/trash", getTrashItems);
+router.post("/delete", softDeleteItems);
+router.post("/restore", restoreItems);
+router.post("/permanent-delete", permanentDeleteItems);
 
-// 💡 المسارات الجديدة للتصنيفات
+// إعدادات المجلدات
 router.get("/categories", getCategories);
 router.post("/categories", saveCategories);
+
+// 💡 المسارات الجديدة للاحترافية (Enterprise Features)
+router.get("/logs/:fileId", getFileLogs);
+router.get("/versions/:fileId", getFileVersions);
+router.post("/upload-version", uploadNewVersion);
 
 module.exports = router;
