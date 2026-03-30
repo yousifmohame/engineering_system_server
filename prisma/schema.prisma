@@ -2250,3 +2250,106 @@ model FolderCategory {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
+
+// ==========================================
+// 1. جدول النماذج الأساسية (القوالب / Templates)
+// ==========================================
+model FormTemplate {
+  id          String  @id @default(uuid())
+  code        String  @unique // الكود المرجعي للنموذج (مثال: FRM-HR-001)
+  name        String // اسم النموذج (مثال: إخلاء طرف)
+  description String? @db.Text
+  version     String  @default("1.0")
+  category    String // hr, financial, operations, general
+
+  // إعدادات المظهر والطباعة
+  colorMode    String  @default("color")
+  numberFormat String  @default("english")
+  timezone     String  @default("Asia/Riyadh")
+  fontFamily   String  @default("Tajawal")
+  fontSize     Int     @default(12)
+  isPublic     Boolean @default(false)
+  isActive     Boolean @default(true)
+
+  // إعدادات الصفحة (Json للحفاظ على المرونة)
+  pageSettings Json // يحتوي على: orientation, size, margins, header_height
+
+  // الصور والخلفيات
+  headerImage String?
+  footerImage String?
+  bgImage     String?
+
+  // العلاقات (Relations)
+  blocks FormBlock[] // الحقول المكونة للنموذج
+  usages FormUsage[] // سجلات استخدام هذا النموذج
+
+  createdBy String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ==========================================
+// 2. جدول حقول النموذج (البلوكات / Blocks)
+// ==========================================
+model FormBlock {
+  id         String       @id @default(uuid())
+  templateId String
+  template   FormTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  type  String // نوع الحقل (text, date, signature, employee_info, table...)
+  label String // التسمية
+
+  position Json // الإحداثيات والأبعاد (x, y, width, height)
+  style    Json // المحاذاة والألوان
+
+  // إعدادات التعبئة
+  isEditable   Boolean @default(true) // هل يسمح للمستخدم بتعديله عند الاستخدام؟
+  isRequired   Boolean @default(false) // هل هو إجباري؟
+  dataSource   String  @default("manual") // مصدر البيانات (manual, auto_system, auto_employee)
+  defaultValue String? @db.Text // النص الافتراضي أو رابط الصورة
+
+  // إعدادات إضافية للجداول أو القوائم المعقدة
+  config Json?
+
+  order Int @default(0) // ترتيب الحقل
+}
+
+// ==========================================
+// 3. جدول سجلات الاستخدام (النماذج المعبأة / Usages)
+// ==========================================
+model FormUsage {
+  id         String       @id @default(uuid())
+  templateId String
+  template   FormTemplate @relation(fields: [templateId], references: [id])
+
+  // السريال القانوني الفريد (سيتم توليده ديناميكياً)
+  trackingSerial String @unique
+
+  userId       String // معرف الموظف الذي قام بإنشاء/تعبئة النموذج
+  targetUserId String? // إذا كان النموذج يخص موظف معين (مثل شهادة راتب لموظف آخر)
+
+  status String @default("draft") // مسودة (draft)، مكتمل (completed)، مؤرشف (archived)
+
+  // رابط ملف الـ PDF النهائي (بعد الاعتماد/الطباعة، يحفظ كملف ثابت لا يتغير)
+  generatedPdfUrl String?
+
+  // العلاقات
+  values FormFieldValue[] // القيم التي تم إدخالها في هذا الاستخدام بالتحديد
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ==========================================
+// 4. جدول قيم الحقول (إجابات المستخدم / Field Values)
+// ==========================================
+model FormFieldValue {
+  id      String    @id @default(uuid())
+  usageId String
+  usage   FormUsage @relation(fields: [usageId], references: [id], onDelete: Cascade)
+
+  blockId String // يشير إلى الحقل في جدول FormBlock
+
+  textValue String? @db.Text // للقيم النصية المباشرة
+  jsonValue Json? // للجداول، أو البصمات، أو التواقيع المحفوظة كـ Base64
+}

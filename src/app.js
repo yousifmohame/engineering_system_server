@@ -197,8 +197,10 @@ app.use("/api/server", serverRoutes);
 
 // استيراد مسار الملفات
 const fileManagerRoutes = require("./routes/fileManagerRoutes");
-// ربط المسار بـ /api/files (كما يطلبها الفرونت إند)
 app.use("/api/files", fileManagerRoutes);
+
+const formTemplateRoutes = require("./routes/formTemplateRoutes");
+app.use("/api/forms", formTemplateRoutes);
 
 // فحص صحة السيرفر
 app.get("/", (req, res) => {
