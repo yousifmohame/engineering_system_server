@@ -385,7 +385,8 @@ const getPrivateTransactions = async (req, res) => {
         taxAmount: true,
         sourceName: true,
 
-        client: { select: { name: true } },
+        updatedAt: true,
+        client: { select: { name: true, mobile: true, contact: true } },
         districtNode: {
           select: { name: true, sector: { select: { name: true } } },
         },
@@ -407,9 +408,10 @@ const getPrivateTransactions = async (req, res) => {
 
     const formattedData = transactions.map((tx) => {
       // 💡 👈 أضف هذا لحساب الحجم الإجمالي لكل معاملة
-      const totalSize = tx.files && tx.files.length > 0 
-        ? tx.files.reduce((sum, file) => sum + (file.size || 0), 0) 
-        : 0;
+      const totalSize =
+        tx.files && tx.files.length > 0
+          ? tx.files.reduce((sum, file) => sum + (file.size || 0), 0)
+          : 0;
       const notes =
         typeof tx.notes === "object" && tx.notes !== null ? tx.notes : {};
 
@@ -449,7 +451,15 @@ const getPrivateTransactions = async (req, res) => {
       const brokerNames =
         brokers.length > 0 ? brokers.map((b) => b.name).join(" و ") : "—";
 
+      const clientPhone =
+        tx.client?.mobile ||
+        tx.client?.contact?.mobile ||
+        notes?.ownerMobile ||
+        "—";
+
       return {
+        phone: clientPhone, // 👈 أضف هذا السطر
+        updated: tx.updatedAt || tx.createdAt, // 👈 أضف هذا السطر
         id: tx.id,
         ref: tx.transactionCode,
         internalName: notes?.internalName || tx.title?.split(" - ")[0] || "",
