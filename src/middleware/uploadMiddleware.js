@@ -14,6 +14,9 @@ const upload = multer({
     fileSize: 10 * 1024 * 1024, // حد أقصى 10 ميجابايت للملف الواحد
   },
   fileFilter: (req, file, cb) => {
+    // 💡 السر هنا: تحويل ترميز الاسم من latin1 إلى utf8 للغة العربية
+    file.originalname = Buffer.from(file.originalname, 'latin1').toString('utf8');
+
     // قبول الصور وملفات PDF فقط كما هو مطلوب في تحليل الصكوك
     if (
       file.mimetype.startsWith("image/") ||

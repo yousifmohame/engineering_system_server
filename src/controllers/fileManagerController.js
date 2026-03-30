@@ -125,6 +125,7 @@ const uploadFiles = async (req, res) => {
       const uploadedFiles = [];
 
       for (const file of req.files) {
+        const utf8OriginalName = Buffer.from(file.originalname, 'latin1').toString('utf8');
         const filePath = path.join(
           __dirname,
           "../../uploads/transactions",
@@ -139,7 +140,7 @@ const uploadFiles = async (req, res) => {
         // 💡 البحث إذا كان هناك ملف بنفس الاسم الأصلي في نفس المجلد
         const existingFile = await prisma.transactionFile.findFirst({
           where: {
-            originalName: file.originalname,
+            originalName: utf8OriginalName,
             folderId: validFolderId,
             transactionId,
             isDeleted: false,
@@ -180,17 +181,17 @@ const uploadFiles = async (req, res) => {
             uploadedBy,
             updatedFile.id,
             validFolderId,
-            { version: updatedFile.version, fileName: file.originalname },
+            { version: updatedFile.version, fileName: utf8OriginalName },
           );
         } else {
           // 💡 ملف جديد تماماً
           const newFile = await prisma.transactionFile.create({
             data: {
               name: file.filename,
-              originalName: file.originalname,
+              originalName: utf8OriginalName,
               mimeType: file.mimetype,
               extension: path
-                .extname(file.originalname)
+                .extname(utf8OriginalName)
                 .replace(".", "")
                 .toLowerCase(),
               size: file.size,
@@ -209,7 +210,7 @@ const uploadFiles = async (req, res) => {
             uploadedBy,
             newFile.id,
             validFolderId,
-            { fileName: file.originalname },
+            { fileName: utf8OriginalName },
           );
         }
       }
