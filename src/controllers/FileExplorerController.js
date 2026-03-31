@@ -142,10 +142,9 @@ exports.createFolder = async (req, res) => {
 };
 
 // ==========================================================
-// 💡 5. رفع الملفات (المصححة للعمل مع Multer كـ Middleware داخلي)
+// 💡 5. رفع الملفات (بنية احترافية تفحص المحذوفات والإصدارات)
 // ==========================================================
 exports.uploadFiles = async (req, res) => {
-  // 💡 استخدام دالة upload هنا لمعالجة الملفات والـ body
   upload(req, res, async (err) => {
     if (err)
       return res
@@ -161,7 +160,6 @@ exports.uploadFiles = async (req, res) => {
         folderId === "null"
           ? null
           : folderId;
-
       const files = req.files;
 
       if (!files || files.length === 0) {
@@ -173,10 +171,18 @@ exports.uploadFiles = async (req, res) => {
       if (validFolderId) await ensureRootFolderExists(validFolderId);
 
       const uploadedRecords = [];
+      const warnings = []; // 💡 مصفوفة ذكية لجمع رسائل التنبيهات للواجهة الأمامية
 
       for (const file of files) {
-        // لا حاجة لـ Buffer.from لأننا فككنا التشفير في إعدادات Multer
-        const originalName = file.originalname;
+        // 1. فك التشفير الآمن للغة العربية
+        let originalName = file.originalname;
+        try {
+          originalName = decodeURIComponent(file.originalname);
+        } catch (e) {
+          originalName = Buffer.from(file.originalname, "latin1").toString(
+            "utf8",
+          );
+        }
 
         const fileBuffer = fs.readFileSync(file.path);
         const fileHash = crypto
@@ -184,6 +190,22 @@ exports.uploadFiles = async (req, res) => {
           .update(fileBuffer)
           .digest("hex");
 
+        // 2. الفحص الذكي: هل الملف موجود في سلة المحذوفات؟
+        const trashedFile = await prisma.systemFile.findFirst({
+          where: {
+            originalName: originalName,
+            folderId: validFolderId,
+            isDeleted: true,
+          },
+        });
+
+        if (trashedFile) {
+          warnings.push(
+            `الملف "${originalName}" موجود مسبقاً في سلة المحذوفات. تم رفعه كملف نشط جديد مع بقاء القديم في السلة.`,
+          );
+        }
+
+        // 3. الفحص الذكي: هل الملف موجود ونشط؟ (نظام الإصدارات)
         const existingFile = await prisma.systemFile.findFirst({
           where: {
             originalName: originalName,
@@ -193,7 +215,7 @@ exports.uploadFiles = async (req, res) => {
         });
 
         if (existingFile) {
-          // نظام الإصدارات التلقائي
+          // أرشفة الإصدار القديم
           await logActivity(
             "VERSION_ARCHIVED",
             uploadedBy,
@@ -211,7 +233,7 @@ exports.uploadFiles = async (req, res) => {
           const updatedFile = await prisma.systemFile.update({
             where: { id: existingFile.id },
             data: {
-              name: file.filename, // حفظ اسم الملف الفعلي
+              name: file.filename,
               url: `/uploads/systemfiles/${file.filename}`,
               size: file.size,
               fileHash: fileHash,
@@ -233,8 +255,8 @@ exports.uploadFiles = async (req, res) => {
           // ملف جديد تماماً
           const newFile = await prisma.systemFile.create({
             data: {
-              name: file.filename, // حفظ اسم الملف الفعلي (بدون حروف عربية في المسار)
-              originalName: originalName, // حفظ الاسم المعروض للمستخدم
+              name: file.filename,
+              originalName: originalName,
               extension: path
                 .extname(originalName)
                 .replace(".", "")
@@ -260,14 +282,17 @@ exports.uploadFiles = async (req, res) => {
         }
       }
 
-      res.status(200).json({ success: true, files: uploadedRecords });
+      // 💡 إرسال الملفات المرفوعة + التنبيهات (إن وجدت)
+      res.status(200).json({ success: true, files: uploadedRecords, warnings });
     } catch (error) {
       console.error("🔥 Upload Files Error:", error);
-      res.status(500).json({
-        success: false,
-        message: "فشل في رفع الملفات",
-        error: error.message,
-      });
+      res
+        .status(500)
+        .json({
+          success: false,
+          message: "فشل في رفع الملفات",
+          error: error.message,
+        });
     }
   });
 };
@@ -313,7 +338,7 @@ exports.uploadVersion = async (req, res) => {
         },
       );
 
-      const originalName = file.originalname;
+      const originalName = decodeURIComponent(file.originalname);
       const fileBuffer = fs.readFileSync(file.path);
       const fileHash = crypto
         .createHash("md5")
