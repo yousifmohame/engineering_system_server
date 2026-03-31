@@ -57,6 +57,9 @@ const {
   updatePrivateTransaction,
   addPrivateExpense,
   deleteCollectionDate,
+  assignTask,
+  submitTask,
+  deleteTask
 } = require("../controllers/privateTransactionController");
 
 router.use(protect);
@@ -79,7 +82,7 @@ router.post("/:id/agents", assignAgentToTransaction);
 router.post(
   "/:id/status",
   uploadStatusNote.any(), // 👈 التعديل هنا مهم جداً لاستقبال مصفوفة الملفات
-  updateTransactionStatus
+  updateTransactionStatus,
 );
 router.put("/:id", updatePrivateTransaction);
 router.delete("/:id", deletePrivateTransaction);
@@ -96,4 +99,14 @@ router.post(
 // 💡 مسار مواعيد التحصيل
 router.post("/:id/collection-dates", addCollectionDate);
 router.delete("/:id/collection-dates/:dateId", deleteCollectionDate); // 👈 المسار الجديد
+
+// مسار الإضافة والتعديل (نفس المسار يعالج الاثنين)
+router.post("/:id/tasks", assignTask);
+
+// مسار التسليم (مع المرفق)
+router.post("/:id/tasks/:taskId/submit", upload.single("file"), submitTask);
+
+// مسار الحذف
+router.delete("/:id/tasks/:taskId", deleteTask);
+
 module.exports = router;

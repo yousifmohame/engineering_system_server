@@ -1796,21 +1796,22 @@ model Person {
 
 // 💡 2. أضف هذا النموذج الجديد (لمهام المعاملات)
 model TransactionTask {
-  id            String  @id @default(cuid())
+  id            String    @id @default(cuid())
   transactionId String
   workerId      String
-  taskName      String
-  cost          Float
-  isFinal       Boolean @default(false)
-  isPaid        Boolean @default(false)
-  paidAmount    Float   @default(0)
+  taskName      String? // لجعله اختياري لو أردت
+  description   String?   @db.Text // وصف المهمة (فري تكست)
+  deadline      DateTime? // العداد التنازلي
+  isUrgent      Boolean   @default(false)
+  cost          Float?    @default(0)
 
-  // 💡 3. حقول التوثيق الجديدة للعمل عن بعد
-  assignedBy      String?   @default("مدير النظام") // من أسند المهمة
-  paymentCurrency String?   @default("SAR") // عملة الدفع المختارة
-  paymentDate     DateTime? @db.Date // تاريخ الدفع إذا تم
+  isCompleted   Boolean   @default(false)
+  submitComment String?   @db.Text // تعليق الموظف عند التسليم
+  submitFileUrl String? // مرفق التسليم
+  submittedAt   DateTime?
 
-  createdAt DateTime @default(now())
+  assignedBy String?  @default("مدير النظام")
+  createdAt  DateTime @default(now())
 
   transaction PrivateTransaction @relation(fields: [transactionId], references: [id])
   worker      Person             @relation("WorkerTasks", fields: [workerId], references: [id])
