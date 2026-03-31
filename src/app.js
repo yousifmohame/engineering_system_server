@@ -202,6 +202,9 @@ app.use("/api/files", fileManagerRoutes);
 const formTemplateRoutes = require("./routes/formTemplateRoutes");
 app.use("/api/forms", formTemplateRoutes);
 
+const systemFilesRoutes = require('./routes/FileExplorerRoutes');
+app.use('/api/system-files', systemFilesRoutes);
+
 // فحص صحة السيرفر
 app.get("/", (req, res) => {
   res.json({ status: "Online", message: "Engineering System API v1" });

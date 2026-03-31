@@ -2353,3 +2353,38 @@ model FormFieldValue {
   textValue String? @db.Text // للقيم النصية المباشرة
   jsonValue Json? // للجداول، أو البصمات، أو التواقيع المحفوظة كـ Base64
 }
+
+model SystemFolder {
+  id       String  @id @default(uuid())
+  name     String
+  parentId String? // إذا كان null، فهو داخل مجلد النظام الثابت (مثل: sys-hr)
+
+  createdBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  isDeleted Boolean  @default(false) // للحذف المنطقي (سلة المحذوفات)
+
+  files SystemFile[]
+}
+
+model SystemFile {
+  id           String @id @default(uuid())
+  name         String
+  originalName String
+  extension    String
+  size         Int
+  url          String
+
+  // 💡 الحقول الجديدة المطلوبة للنزاهة والإصدارات
+  fileHash String? // بصمة الملف (MD5)
+  version  Int     @default(1) // رقم الإصدار
+
+  folderId String?
+  folder   SystemFolder? @relation(fields: [folderId], references: [id])
+
+  uploadedBy String?
+  createdAt  DateTime  @default(now())
+  isDeleted  Boolean   @default(false)
+  deletedAt  DateTime?
+  deletedBy  String?
+}
