@@ -458,15 +458,14 @@ const getPrivateTransactions = async (req, res) => {
         "—";
 
       return {
-        phone: clientPhone, // 👈 أضف هذا السطر
-        updated: tx.updatedAt || tx.createdAt, // 👈 أضف هذا السطر
+        phone: clientPhone,
+        updated: tx.updatedAt || tx.createdAt,
         id: tx.id,
         ref: tx.transactionCode,
         internalName: notes?.internalName || tx.title?.split(" - ")[0] || "",
         type: tx.category || "غير محدد",
         client: ownerName,
 
-        // 💡 4. جلب البيانات من الأعمدة الحديثة، مع خطة بديلة للبيانات القديمة
         district:
           tx.districtName ||
           notes?.refs?.districtName ||
@@ -477,12 +476,19 @@ const getPrivateTransactions = async (req, res) => {
           notes?.refs?.sector ||
           tx.districtNode?.sector?.name ||
           "غير محدد",
-        plot:
-          tx.plots && tx.plots.length > 0
+
+        // 💡 التعديل هنا: توحيد أسماء الحقول ليرسلها للواجهة بشكل ثابت
+        plots:
+          Array.isArray(tx.plots) && tx.plots.length > 0
             ? tx.plots.join(" ، ")
-            : notes?.refs?.plots || "—",
-        plan: tx.planNumber || notes?.refs?.plan || "—",
-        landArea: tx.landArea || notes?.refs?.landArea || 0,
+            : notes?.refs?.plots || "",
+
+        plan: tx.planNumber || notes?.refs?.plan || "",
+
+        landArea:
+          tx.landArea || notes?.refs?.landArea || notes?.refs?.area || 0,
+
+        mapsLink: notes?.refs?.mapsLink || "", // رابط الخريطة ما زال في النوتس
 
         office: tx.source || "مكتب ديتيلز",
         sourceName: tx.sourceName || notes?.sourceName || "مباشر",
@@ -492,7 +498,6 @@ const getPrivateTransactions = async (req, res) => {
         agentCost: notes?.agentFees || 0,
         totalFees: tx.totalFees || 0,
 
-        // 💡 5. دمج وتجميع بيانات الضريبة لإرسالها للواجهة
         taxData: tx.taxType
           ? {
               taxType: tx.taxType,
