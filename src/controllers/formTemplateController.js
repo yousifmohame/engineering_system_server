@@ -30,6 +30,7 @@ const generateDocumentSerial = async (docType) => {
 };
 
 // ── 1. إنشاء نموذج جديد ──
+// ── 1. إنشاء نموذج جديد ──
 exports.createTemplate = async (req, res) => {
   try {
     const {
@@ -45,6 +46,8 @@ exports.createTemplate = async (req, res) => {
       fontSize,
       isPublic,
       pageSettings,
+      borderSettings, // 👈 استخراج البوردر
+      watermark, // 👈 استخراج العلامة المائية
       headerImage,
       footerImage,
       bgImage,
@@ -83,6 +86,8 @@ exports.createTemplate = async (req, res) => {
         fontSize: fontSize || 12,
         isPublic: isPublic || false,
         pageSettings: defaultPageSettings,
+        borderSettings: borderSettings || null, // 👈 الحفظ في قاعدة البيانات
+        watermark: watermark || null, // 👈 الحفظ في قاعدة البيانات
         headerImage: headerImage || null,
         footerImage: footerImage || null,
         bgImage: bgImage || null,
@@ -114,22 +119,18 @@ exports.createTemplate = async (req, res) => {
       include: { blocks: true },
     });
 
-    res
-      .status(201)
-      .json({
-        success: true,
-        message: "تم حفظ النموذج بنجاح",
-        data: newTemplate,
-      });
+    res.status(201).json({
+      success: true,
+      message: "تم حفظ النموذج بنجاح",
+      data: newTemplate,
+    });
   } catch (error) {
     console.error("Error creating template:", error);
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "حدث خطأ أثناء حفظ النموذج",
-        error: error.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "حدث خطأ أثناء حفظ النموذج",
+      error: error.message,
+    });
   }
 };
 
@@ -179,7 +180,7 @@ exports.getTemplateById = async (req, res) => {
   }
 };
 
-// ── 4. تحديث النموذج (💡 الدالة المفقودة لزر التعديل) ──
+// ── 4. تحديث النموذج ──
 exports.updateTemplate = async (req, res) => {
   try {
     const { id } = req.params;
@@ -196,13 +197,14 @@ exports.updateTemplate = async (req, res) => {
       fontSize,
       isPublic,
       pageSettings,
+      borderSettings, // 👈 استخراج البوردر
+      watermark, // 👈 استخراج العلامة المائية
       headerImage,
       footerImage,
       bgImage,
       blocks,
     } = req.body;
 
-    // في حالة التعديل الديناميكي للبلوكات، أفضل طريقة هي مسح البلوكات القديمة واستبدالها بالجديدة
     const updatedTemplate = await prisma.formTemplate.update({
       where: { id },
       data: {
@@ -218,11 +220,14 @@ exports.updateTemplate = async (req, res) => {
         fontSize: fontSize || 12,
         isPublic: isPublic || false,
         pageSettings: pageSettings || undefined,
+        borderSettings:
+          borderSettings !== undefined ? borderSettings : undefined, // 👈 تحديث البوردر
+        watermark: watermark !== undefined ? watermark : undefined, // 👈 تحديث العلامة المائية
         headerImage,
         footerImage,
         bgImage,
         blocks: {
-          deleteMany: {}, // 💡 حذف كل البلوكات السابقة لهذا النموذج
+          deleteMany: {},
           create:
             blocks && blocks.length > 0
               ? blocks.map((block, index) => ({
@@ -294,13 +299,11 @@ exports.useTemplate = async (req, res) => {
       },
     });
 
-    res
-      .status(200)
-      .json({
-        success: true,
-        message: "تم تهيئة النموذج للاستخدام",
-        data: { usage: newUsage, template },
-      });
+    res.status(200).json({
+      success: true,
+      message: "تم تهيئة النموذج للاستخدام",
+      data: { usage: newUsage, template },
+    });
   } catch (error) {
     console.error("Error using template:", error);
     res
@@ -343,7 +346,6 @@ exports.saveUsageData = async (req, res) => {
   }
 };
 
-
 // ── 7. حذف النموذج ──
 exports.deleteTemplate = async (req, res) => {
   try {
@@ -352,30 +354,39 @@ exports.deleteTemplate = async (req, res) => {
     // التحقق من وجود النموذج
     const template = await prisma.formTemplate.findUnique({
       where: { id },
-      include: { _count: { select: { usages: true } } }
+      include: { _count: { select: { usages: true } } },
     });
 
     if (!template) {
-      return res.status(404).json({ success: false, message: "النموذج غير موجود" });
+      return res
+        .status(404)
+        .json({ success: false, message: "النموذج غير موجود" });
     }
 
     // التحقق مما إذا كان النموذج مستخدماً بالفعل (منع الحذف لحماية البيانات)
     if (template._count.usages > 0) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "لا يمكن حذف هذا النموذج لأنه مستخدم بالفعل في سجلات النظام. يمكنك إيقاف تفعيله بدلاً من ذلك." 
+      return res.status(400).json({
+        success: false,
+        message:
+          "لا يمكن حذف هذا النموذج لأنه مستخدم بالفعل في سجلات النظام. يمكنك إيقاف تفعيله بدلاً من ذلك.",
       });
     }
 
     // 💡 Prisma ستقوم بحذف البلوكات المرتبطة تلقائياً بفضل onDelete: Cascade
     await prisma.formTemplate.delete({
-      where: { id }
+      where: { id },
     });
 
-    res.status(200).json({ success: true, message: "تم حذف النموذج بجميع ملحقاته بنجاح" });
+    res
+      .status(200)
+      .json({ success: true, message: "تم حذف النموذج بجميع ملحقاته بنجاح" });
   } catch (error) {
     console.error("Error deleting template:", error);
-    res.status(500).json({ success: false, message: "حدث خطأ أثناء حذف النموذج", error: error.message });
+    res.status(500).json({
+      success: false,
+      message: "حدث خطأ أثناء حذف النموذج",
+      error: error.message,
+    });
   }
 };
 
@@ -385,13 +396,15 @@ exports.generateCodeWithAI = async (req, res) => {
     const { formName, category } = req.body;
 
     if (!formName) {
-      return res.status(400).json({ success: false, message: "اسم النموذج مطلوب لتوليد الكود" });
+      return res
+        .status(400)
+        .json({ success: false, message: "اسم النموذج مطلوب لتوليد الكود" });
     }
 
     const prompt = `
       I am building a Document Management System. 
       Generate a professional, short, uppercase document code (maximum 10 characters) for a form named: "${formName}".
-      The category is: "${category || 'general'}".
+      The category is: "${category || "general"}".
       Use common standard abbreviations (e.g., HR for Human Resources, FIN for Financial, IT, LEV for Leave, SAL for Salary).
       Format example: HR-LEV-01 or FIN-EXP-02.
       Return ONLY the code string without any extra words, quotes, or explanation.
@@ -400,29 +413,33 @@ exports.generateCodeWithAI = async (req, res) => {
     const response = await openai.chat.completions.create({
       model: "gpt-3.5-turbo", // أو gpt-4o حسب المتاح لديك
       messages: [
-        { role: "system", content: "You are an expert enterprise systems architect." },
-        { role: "user", content: prompt }
+        {
+          role: "system",
+          content: "You are an expert enterprise systems architect.",
+        },
+        { role: "user", content: prompt },
       ],
       temperature: 0.3, // للحصول على نتائج دقيقة ومباشرة
       max_tokens: 15,
     });
 
     let generatedCode = response.choices[0].message.content.trim();
-    
+
     // إزالة أي علامات تنصيص قد يرجعها الموديل بالخطأ
-    generatedCode = generatedCode.replace(/['"]/g, '');
+    generatedCode = generatedCode.replace(/['"]/g, "");
 
     res.status(200).json({ success: true, data: { code: generatedCode } });
   } catch (error) {
     console.error("Error generating code with AI:", error);
     // في حالة فشل الـ API الخاص بـ OpenAI، نقوم بإرجاع كود احتياطي
-    const prefix = category === 'hr' ? 'HR' : category === 'financial' ? 'FIN' : 'FRM';
+    const prefix =
+      category === "hr" ? "HR" : category === "financial" ? "FIN" : "FRM";
     const fallbackCode = `${prefix}-${Math.random().toString(36).substring(2, 5).toUpperCase()}`;
-    
-    res.status(200).json({ 
-      success: true, 
-      message: "تم توليد كود احتياطي (خدمة AI غير متاحة حالياً)", 
-      data: { code: fallbackCode } 
+
+    res.status(200).json({
+      success: true,
+      message: "تم توليد كود احتياطي (خدمة AI غير متاحة حالياً)",
+      data: { code: fallbackCode },
     });
   }
 };
