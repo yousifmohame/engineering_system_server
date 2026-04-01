@@ -4,10 +4,12 @@ const router = express.Router();
 const {
   createTemplate,
   getAllTemplates,
-  getTemplateById,   // 💡 الدالة الجديدة
-  updateTemplate,    // 💡 الدالة الجديدة
+  getTemplateById, // 💡 الدالة الجديدة
+  updateTemplate, // 💡 الدالة الجديدة
   useTemplate,
   saveUsageData,
+  deleteTemplate,
+  generateCodeWithAI,
 } = require("../controllers/formTemplateController.js");
 
 router.get("/templates", getAllTemplates);
@@ -19,5 +21,8 @@ router.put("/templates/:id", updateTemplate);
 
 router.post("/use", useTemplate);
 router.put("/usage/:usageId", saveUsageData);
+
+router.delete("/templates/:id", deleteTemplate);
+router.post("/generate-code", generateCodeWithAI);
 
 module.exports = router;
