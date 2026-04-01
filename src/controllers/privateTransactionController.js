@@ -372,6 +372,10 @@ const getPrivateTransactions = async (req, res) => {
         remainingAmount: true,
         createdAt: true,
         notes: true,
+        serviceNo: true,
+        requestNo: true,
+        licenseNo: true,
+        oldDeed: true,
 
         // 👈 الأعمدة الجديدة الصريحة
         ownerNames: true,
@@ -494,6 +498,10 @@ const getPrivateTransactions = async (req, res) => {
         sourceName: tx.sourceName || notes?.sourceName || "مباشر",
         mediator: brokerNames,
         mediatorFees: totalBrokerFees,
+        serviceNo: tx.serviceNo,
+        requestNo: tx.requestNo,
+        licenseNo: tx.licenseNo,
+        oldDeed: tx.oldDeed,
         brokers,
         agentCost: notes?.agentFees || 0,
         totalFees: tx.totalFees || 0,
@@ -1281,15 +1289,31 @@ const assignTask = async (req, res) => {
   try {
     const { id } = req.params; // Transaction ID
     // 💡 نستقبل taskId لمعرفة هل هو تعديل أم إنشاء جديد
-    const { taskId, assigneeId, description, deadline, isUrgent, taskName, cost, addedBy } = req.body;
+    const {
+      taskId,
+      assigneeId,
+      description,
+      deadline,
+      isUrgent,
+      taskName,
+      cost,
+      addedBy,
+    } = req.body;
 
     if (!assigneeId || !description || !deadline) {
-      return res.status(400).json({ success: false, message: "يرجى إكمال بيانات المهمة الأساسية" });
+      return res
+        .status(400)
+        .json({ success: false, message: "يرجى إكمال بيانات المهمة الأساسية" });
     }
 
     // جلب اسم الموظف لتوثيقه في السجل
-    const worker = await prisma.person.findUnique({ where: { id: assigneeId } });
-    if (!worker) return res.status(404).json({ success: false, message: "الموظف غير موجود" });
+    const worker = await prisma.person.findUnique({
+      where: { id: assigneeId },
+    });
+    if (!worker)
+      return res
+        .status(404)
+        .json({ success: false, message: "الموظف غير موجود" });
 
     let savedTask;
 
@@ -1302,7 +1326,7 @@ const assignTask = async (req, res) => {
           description: description,
           deadline: new Date(deadline),
           isUrgent: isUrgent || false,
-        }
+        },
       });
 
       await logTransactionEvent(
@@ -1311,9 +1335,8 @@ const assignTask = async (req, res) => {
         "إدارة المهام",
         "تعديل مهمة",
         `تم تعديل بيانات المهمة المسندة للموظف ${worker.name}`,
-        addedBy || "مدير النظام"
+        addedBy || "مدير النظام",
       );
-
     } else {
       // 💡 2. وضع الإنشاء (Create)
       savedTask = await prisma.transactionTask.create({
@@ -1326,8 +1349,8 @@ const assignTask = async (req, res) => {
           isUrgent: isUrgent || false,
           cost: parseFloat(cost) || 0,
           assignedBy: addedBy || "مدير النظام",
-          isCompleted: false
-        }
+          isCompleted: false,
+        },
       });
 
       await logTransactionEvent(
@@ -1336,17 +1359,23 @@ const assignTask = async (req, res) => {
         "إدارة المهام",
         "إسناد مهمة",
         `تم إسناد مهمة للموظف ${worker.name} بتفاصيل: ${description.substring(0, 50)}...`,
-        addedBy || "مدير النظام"
+        addedBy || "مدير النظام",
       );
     }
 
-    res.status(200).json({ 
-      success: true, 
-      message: taskId ? "تم تعديل المهمة بنجاح" : "تم إسناد المهمة بنجاح", 
-      data: savedTask 
+    res.status(200).json({
+      success: true,
+      message: taskId ? "تم تعديل المهمة بنجاح" : "تم إسناد المهمة بنجاح",
+      data: savedTask,
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: "حدث خطأ أثناء حفظ المهمة", error: error.message });
+    res
+      .status(500)
+      .json({
+        success: false,
+        message: "حدث خطأ أثناء حفظ المهمة",
+        error: error.message,
+      });
   }
 };
 
@@ -1358,8 +1387,16 @@ const deleteTask = async (req, res) => {
     const { id, taskId } = req.params; // Transaction ID & Task ID
     const { deletedBy } = req.body;
 
-    const task = await prisma.transactionTask.findUnique({ where: { id: taskId } });
-    if (!task) return res.status(404).json({ success: false, message: "المهمة غير موجودة أو تم حذفها مسبقاً" });
+    const task = await prisma.transactionTask.findUnique({
+      where: { id: taskId },
+    });
+    if (!task)
+      return res
+        .status(404)
+        .json({
+          success: false,
+          message: "المهمة غير موجودة أو تم حذفها مسبقاً",
+        });
 
     // حذف المهمة من الجدول
     await prisma.transactionTask.delete({ where: { id: taskId } });
@@ -1371,12 +1408,18 @@ const deleteTask = async (req, res) => {
       "إدارة المهام",
       "حذف مهمة",
       `تم إلغاء وحذف المهمة التي كانت بوصف: ${task.description.substring(0, 30)}...`,
-      deletedBy || "مدير النظام"
+      deletedBy || "مدير النظام",
     );
 
     res.status(200).json({ success: true, message: "تم حذف المهمة بنجاح" });
   } catch (error) {
-    res.status(500).json({ success: false, message: "حدث خطأ أثناء حذف المهمة", error: error.message });
+    res
+      .status(500)
+      .json({
+        success: false,
+        message: "حدث خطأ أثناء حذف المهمة",
+        error: error.message,
+      });
   }
 };
 // ==================================================
@@ -1400,8 +1443,8 @@ const submitTask = async (req, res) => {
         isCompleted: true,
         submitComment: comment || "",
         submitFileUrl: fileUrl,
-        submittedAt: new Date()
-      }
+        submittedAt: new Date(),
+      },
     });
 
     // 💡 توثيق التسليم في السجل
@@ -1410,13 +1453,25 @@ const submitTask = async (req, res) => {
       id,
       "إدارة المهام",
       "تسليم مهمة",
-      `تم تسليم المهمة الموكلة بتعليق: ${comment ? comment.substring(0, 30) + '...' : 'بدون تعليق'}`,
-      submittedBy || "الموظف"
+      `تم تسليم المهمة الموكلة بتعليق: ${comment ? comment.substring(0, 30) + "..." : "بدون تعليق"}`,
+      submittedBy || "الموظف",
     );
 
-    res.status(200).json({ success: true, message: "تم تسليم المهمة بنجاح", data: updatedTask });
+    res
+      .status(200)
+      .json({
+        success: true,
+        message: "تم تسليم المهمة بنجاح",
+        data: updatedTask,
+      });
   } catch (error) {
-    res.status(500).json({ success: false, message: "حدث خطأ أثناء تسليم المهمة", error: error.message });
+    res
+      .status(500)
+      .json({
+        success: false,
+        message: "حدث خطأ أثناء تسليم المهمة",
+        error: error.message,
+      });
   }
 };
 
@@ -1439,5 +1494,5 @@ module.exports = {
   deleteCollectionDate,
   assignTask,
   submitTask,
-  deleteTask
+  deleteTask,
 };
