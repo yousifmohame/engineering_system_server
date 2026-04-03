@@ -24,12 +24,15 @@ exports.addAccount = async (req, res) => {
     // 1. محاولة الاتصال بخادم SMTP للتحقق من صحة البريد وكلمة المرور
     const transporter = nodemailer.createTransport({
       host: "smtp.hostinger.com",
-      port: 465,
-      secure: true, // يتطلب SSL
+      port: 587, // 👈 تغيير المنفذ
+      secure: false, // 👈 تغيير هذه إلى false مع منفذ 587
       auth: {
         user: email,
         pass: password,
       },
+      tls: {
+          rejectUnauthorized: false // 👈 أضف هذا السطر لتجنب مشاكل الشهادات
+      }
     });
 
     try {
