@@ -31,8 +31,8 @@ exports.addAccount = async (req, res) => {
         pass: password,
       },
       tls: {
-          rejectUnauthorized: false // 👈 أضف هذا السطر لتجنب مشاكل الشهادات
-      }
+        rejectUnauthorized: false, // 👈 أضف هذا السطر لتجنب مشاكل الشهادات
+      },
     });
 
     try {
@@ -68,28 +68,51 @@ exports.addAccount = async (req, res) => {
 };
 
 // تحديث حساب بريد إلكتروني موجود
+// تحديث حساب بريد إلكتروني موجود
 exports.updateAccount = async (req, res) => {
   try {
     const { id } = req.params;
-    const { accountName, email, password, imapServer, imapPort, smtpServer, smtpPort, useSSL } = req.body;
+    const {
+      accountName,
+      email,
+      password,
+      imapServer,
+      imapPort,
+      smtpServer,
+      smtpPort,
+      useSSL,
+    } = req.body;
 
-    // 1. التحقق من أن الحساب موجود أصلاً في قاعدة البيانات
-    const existingAccount = await prisma.emailAccount.findUnique({ where: { id } });
+    const existingAccount = await prisma.emailAccount.findUnique({
+      where: { id },
+    });
     if (!existingAccount) {
-      return res.status(404).json({ success: false, message: "الحساب غير موجود" });
+      return res
+        .status(404)
+        .json({ success: false, message: "الحساب غير موجود" });
     }
 
-    // 2. التحقق من صحة الاتصال بالخادم باستخدام البيانات الجديدة (إذا تم إرسال كلمة مرور)
     const passToVerify = password || existingAccount.password;
     const emailToVerify = email || existingAccount.email;
 
+    // 👇 التعديل هنا: التأكد من استخدام 587 و STARTTLS
+    const finalSmtpPort = smtpPort
+      ? parseInt(smtpPort)
+      : existingAccount.smtpPort === 465
+        ? 587
+        : existingAccount.smtpPort;
+    const isSecure = finalSmtpPort === 465; // إذا كان 465 اجعله true، غير ذلك (مثل 587) اجعله false
+
     const transporter = nodemailer.createTransport({
       host: smtpServer || existingAccount.smtpServer,
-      port: smtpPort || existingAccount.smtpPort,
-      secure: useSSL !== undefined ? useSSL : existingAccount.useSSL,
+      port: finalSmtpPort,
+      secure: isSecure,
       auth: {
         user: emailToVerify,
         pass: passToVerify,
+      },
+      tls: {
+        rejectUnauthorized: false,
       },
     });
 
@@ -99,27 +122,31 @@ exports.updateAccount = async (req, res) => {
       console.error("Verification Error on Update:", verifyError);
       return res.status(401).json({
         success: false,
-        message: "فشل التحقق: تأكد من صحة البريد أو كلمة المرور الجديدة أو إعدادات الخادم.",
+        message:
+          "فشل التحقق: تأكد من صحة البريد أو كلمة المرور الجديدة أو إعدادات الخادم.",
       });
     }
 
-    // 3. تحديث البيانات في قاعدة البيانات
     const updatedAccount = await prisma.emailAccount.update({
       where: { id },
       data: {
         accountName,
         email,
         username: email,
-        ...(password && { password }), // تحديث كلمة المرور فقط إذا قام المستخدم بكتابة واحدة جديدة
+        ...(password && { password }),
         imapServer: imapServer || existingAccount.imapServer,
         imapPort: imapPort ? parseInt(imapPort) : existingAccount.imapPort,
         smtpServer: smtpServer || existingAccount.smtpServer,
-        smtpPort: smtpPort ? parseInt(smtpPort) : existingAccount.smtpPort,
-        useSSL: useSSL !== undefined ? useSSL : existingAccount.useSSL
+        smtpPort: finalSmtpPort, // حفظ المنفذ الصحيح
+        useSSL: isSecure,
       },
     });
 
-    res.json({ success: true, data: updatedAccount, message: "تم تحديث الحساب بنجاح" });
+    res.json({
+      success: true,
+      data: updatedAccount,
+      message: "تم تحديث الحساب بنجاح",
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -162,6 +189,7 @@ exports.getMessages = async (req, res) => {
 };
 
 // إرسال رسالة بريد إلكتروني وحفظها في الصادر
+// إرسال رسالة بريد إلكتروني وحفظها في الصادر
 exports.sendMessage = async (req, res) => {
   try {
     const { accountId, to, subject, body } = req.body;
@@ -169,31 +197,37 @@ exports.sendMessage = async (req, res) => {
     const account = await prisma.emailAccount.findUnique({
       where: { id: accountId },
     });
-    if (!account)
+
+    if (!account) {
       return res
         .status(404)
         .json({ success: false, message: "الحساب غير موجود" });
+    }
 
-    // إعداد Nodemailer لـ Hostinger
+    // 👇 التعديل هنا: التأكد من الإعدادات للاتصال بالسيرفر
+    // نعتمد على المنفذ المحفوظ (الذي أصبح 587 الآن) ونحدد secure بناءً عليه
+    const isSecure = account.smtpPort === 465;
+
     const transporter = nodemailer.createTransport({
       host: account.smtpServer,
       port: account.smtpPort,
-      secure: account.useSSL,
+      secure: isSecure, // false للمنفذ 587
       auth: {
         user: account.username,
         pass: account.password,
       },
+      tls: {
+        rejectUnauthorized: false,
+      },
     });
 
-    // إرسال الرسالة
     const info = await transporter.sendMail({
       from: `"${account.accountName}" <${account.email}>`,
       to,
       subject,
-      text: body, // يمكنك إرسال html: body إذا كان المحتوى منسقاً
+      text: body,
     });
 
-    // حفظها في الصادر بقاعدة البيانات
     const sentMessage = await prisma.emailMessage.create({
       data: {
         messageId: info.messageId || Date.now().toString(),
@@ -210,7 +244,10 @@ exports.sendMessage = async (req, res) => {
 
     res.json({ success: true, data: sentMessage });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    console.error("Send Email Error:", error);
+    res
+      .status(500)
+      .json({ success: false, message: "فشل الإرسال: " + error.message });
   }
 };
 
@@ -241,7 +278,9 @@ exports.syncHostingerEmails = async (req, res) => {
     });
 
     if (!account) {
-      return res.status(404).json({ success: false, message: "لا يوجد حساب بريد مربوط" });
+      return res
+        .status(404)
+        .json({ success: false, message: "لا يوجد حساب بريد مربوط" });
     }
 
     const client = new ImapFlow({
@@ -262,14 +301,18 @@ exports.syncHostingerEmails = async (req, res) => {
     try {
       const totalMessages = client.mailbox.exists;
       if (totalMessages === 0) {
-        return res.json({ success: true, data: [], message: "صندوق الوارد فارغ." });
+        return res.json({
+          success: true,
+          data: [],
+          message: "صندوق الوارد فارغ.",
+        });
       }
 
       // 💡 معادلات حساب النطاق (Range) بناءً على رقم الصفحة
       // مثال: صفحة 1 تجلب من 1357 إلى 1406
       // صفحة 2 تجلب من 1307 إلى 1356 وهكذا...
-      const fetchEnd = totalMessages - ((page - 1) * limit);
-      const fetchStart = Math.max(1, totalMessages - (page * limit) + 1);
+      const fetchEnd = totalMessages - (page - 1) * limit;
+      const fetchStart = Math.max(1, totalMessages - page * limit + 1);
 
       // إذا تجاوزنا عدد الرسائل المتاحة
       if (fetchEnd < 1) {
@@ -282,22 +325,28 @@ exports.syncHostingerEmails = async (req, res) => {
       for await (let msg of client.fetch(
         fetchRange,
         { source: true, envelope: true, flags: true, uid: true },
-        { reverse: true }
+        { reverse: true },
       )) {
         const parsed = await simpleParser(msg.source);
 
         let category = "عام";
         let severity = "low";
         if (parsed.subject?.includes("عاجل")) {
-          category = "عاجل"; severity = "high";
-        } else if (parsed.subject?.includes("فاتورة") || parsed.subject?.includes("دفع")) {
-          category = "مالي"; severity = "high";
+          category = "عاجل";
+          severity = "high";
+        } else if (
+          parsed.subject?.includes("فاتورة") ||
+          parsed.subject?.includes("دفع")
+        ) {
+          category = "مالي";
+          severity = "high";
         }
 
         messages.push({
           id: msg.uid.toString(),
           subject: parsed.subject || "(بدون عنوان)",
-          from: parsed.from?.value[0]?.address || parsed.from?.text || "غير معروف",
+          from:
+            parsed.from?.value[0]?.address || parsed.from?.text || "غير معروف",
           body: parsed.text || "لا يوجد نص",
           date: parsed.date,
           isRead: msg.flags?.has("\\Seen") || false,
@@ -311,17 +360,23 @@ exports.syncHostingerEmails = async (req, res) => {
 
     await client.logout();
     res.json({ success: true, data: messages });
-    
   } catch (error) {
     console.error("IMAP Error:", error);
-    res.status(500).json({ success: false, message: "فشل الاتصال: " + error.message });
+    res
+      .status(500)
+      .json({ success: false, message: "فشل الاتصال: " + error.message });
   }
 };
 
 exports.analyzeInboxWithAI = async (req, res) => {
   try {
-    const account = await prisma.emailAccount.findFirst({ where: { isActive: true } });
-    if (!account) return res.status(404).json({ success: false, message: "لا يوجد حساب بريد مربوط" });
+    const account = await prisma.emailAccount.findFirst({
+      where: { isActive: true },
+    });
+    if (!account)
+      return res
+        .status(404)
+        .json({ success: false, message: "لا يوجد حساب بريد مربوط" });
 
     const client = new ImapFlow({
       host: account.imapServer || "imap.hostinger.com",
@@ -339,9 +394,13 @@ exports.analyzeInboxWithAI = async (req, res) => {
       // 1. جلب أحدث 10 إيميلات للتحليل (تقليل العدد لتوفير تكلفة OpenAI)
       const totalMessages = client.mailbox.exists;
       if (totalMessages === 0) return res.json({ success: true, data: [] });
-      
+
       const fetchStart = Math.max(1, totalMessages - 9);
-      for await (let msg of client.fetch(`${fetchStart}:*`, { source: true, flags: true, uid: true }, { reverse: true })) {
+      for await (let msg of client.fetch(
+        `${fetchStart}:*`,
+        { source: true, flags: true, uid: true },
+        { reverse: true },
+      )) {
         const parsed = await simpleParser(msg.source);
         rawMessages.push({
           id: msg.uid.toString(),
@@ -382,22 +441,29 @@ exports.analyzeInboxWithAI = async (req, res) => {
       model: "gpt-3.5-turbo-1106", // الأرخص والأسرع لمهام الـ JSON
       response_format: { type: "json_object" }, // إجبار الموديل على إرجاع JSON نظيف
       messages: [
-        { role: "system", content: "You are a highly capable AI that analyzes emails and returns strict JSON arrays." },
-        { role: "user", content: prompt }
+        {
+          role: "system",
+          content:
+            "You are a highly capable AI that analyzes emails and returns strict JSON arrays.",
+        },
+        { role: "user", content: prompt },
       ],
     });
 
     // 3. استقبال المخرجات من AI وتنسيقها للواجهة الأمامية
     const analyzedDataStr = aiResponse.choices[0].message.content;
     const parsedData = JSON.parse(analyzedDataStr);
-    
+
     // بعض الـ AI يرجع البيانات داخل مفتاح، نتحقق من ذلك
-    const finalArray = Array.isArray(parsedData) ? parsedData : (parsedData.emails || parsedData.notifications || parsedData.data || []);
+    const finalArray = Array.isArray(parsedData)
+      ? parsedData
+      : parsedData.emails || parsedData.notifications || parsedData.data || [];
 
     res.json({ success: true, data: finalArray });
-
   } catch (error) {
     console.error("AI Analysis Error:", error);
-    res.status(500).json({ success: false, message: "فشل التحليل الذكي: " + error.message });
+    res
+      .status(500)
+      .json({ success: false, message: "فشل التحليل الذكي: " + error.message });
   }
 };
