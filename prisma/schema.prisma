@@ -2400,3 +2400,62 @@ model SystemFile {
   deletedAt  DateTime?
   deletedBy  String?
 }
+
+model EmailAccount {
+  id          String         @id @default(uuid())
+  accountName String
+  email       String         @unique
+  imapServer  String         @default("imap.hostinger.com") // خادم هوستنقر للاستقبال
+  imapPort    Int            @default(993)
+  smtpServer  String         @default("smtp.hostinger.com") // خادم هوستنقر للإرسال
+  smtpPort    Int            @default(465)
+  username    String
+  password    String // يُفضل تشفيرها في المشاريع الحقيقية
+  useSSL      Boolean        @default(true)
+  isActive    Boolean        @default(true)
+  messages    EmailMessage[]
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+}
+
+model EmailMessage {
+  id              String       @id @default(uuid())
+  messageId       String       @unique // المعرف الآتي من مزود البريد
+  accountId       String
+  account         EmailAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  from            String
+  to              String
+  subject         String
+  body            String       @db.Text
+  date            DateTime
+  isRead          Boolean      @default(false)
+  isStarred       Boolean      @default(false)
+  isArchived      Boolean      @default(false)
+  isDeleted       Boolean      @default(false)
+  isSent          Boolean      @default(false)
+  hasAttachments  Boolean      @default(false)
+  messageCategory String? // لتخزين تصنيف الذكاء الاصطناعي
+  createdAt       DateTime     @default(now())
+}
+
+model Notification {
+  id                String   @id @default(uuid())
+  code              String   @unique
+  category          String   // عاجل، مالي، توثيق، نظام، معاملات
+  subCategory       String?  // فواتير متأخرة، تسويات جاهزة، إلخ
+  relatedEntityCode String?  // المرجع مثل INV-5678
+  title             String
+  description       String   @db.Text
+  severity          String   @default("low") // high, medium, low
+  timestamp         DateTime @default(now())
+  createdByRule     String?
+  isRead            Boolean  @default(false)
+  assignedTo        String?
+  amount            Float?
+  daysOverdue       Int?
+  attachmentMissing Boolean  @default(false)
+  linkedScreen      Json?    // لتخزين مسار الشاشة { screenCode, iconId, tabId }
+  
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}

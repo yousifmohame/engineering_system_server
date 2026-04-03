@@ -205,6 +205,9 @@ app.use("/api/forms", formTemplateRoutes);
 const systemFilesRoutes = require('./routes/FileExplorerRoutes');
 app.use('/api/system-files', systemFilesRoutes);
 
+// 1. استدعاء ملف المسارات
+const emailRoutes = require('./routes/emailRoutes');
+app.use('/api/email', emailRoutes); // تأكد أن الـ Prefix يطابق ما طلبناه في الـ Frontend
 // فحص صحة السيرفر
 app.get("/", (req, res) => {
   res.json({ status: "Online", message: "Engineering System API v1" });
