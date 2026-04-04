@@ -255,14 +255,47 @@ exports.sendMessage = async (req, res) => {
 exports.updateMessageStatus = async (req, res) => {
   try {
     const { id } = req.params;
-    const updateData = req.body; // { isRead: true, isStarred: false, etc }
+    const updateData = req.body; // { isDeleted: true, isStarred: true, etc }
 
-    const message = await prisma.emailMessage.update({
-      where: { id },
-      data: updateData,
-    });
-    res.json({ success: true, data: message });
+    // 1. محاولة تحديث الرسالة إذا كانت موجودة مسبقاً في الداتابيز (رسائل الصادر أو رسائل تم التفاعل معها سابقاً)
+    try {
+      const message = await prisma.emailMessage.update({
+        where: { messageId: id }, // نستخدم messageId لأنه الـ UID القادم من Hostinger
+        data: updateData,
+      });
+      return res.json({ success: true, data: message });
+    } catch (dbError) {
+      // إذا لم تكن الرسالة موجودة (Record to update not found)، ننتقل للخطوة الثانية
+      if (dbError.code === 'P2025') {
+        
+        // 2. إذا لم تكن موجودة، نقوم بإنشائها في الداتابيز مع حالتها الجديدة
+        // نحتاج أولاً للحصول على accountId المربوط
+        const account = await prisma.emailAccount.findFirst({ where: { isActive: true } });
+        if (!account) throw new Error("لا يوجد حساب بريد نشط");
+
+        // بما أن الواجهة الأمامية ترسل الـ ID فقط ولا ترسل محتوى الرسالة،
+        // سنقوم بإنشاء "سجل ظل" (Shadow Record) في الداتابيز ليحفظ حالة هذه الرسالة (مثلاً: محذوفة)
+        const shadowMessage = await prisma.emailMessage.create({
+          data: {
+            messageId: id, // الـ UID من Hostinger
+            accountId: account.id,
+            from: req.body.from || "مجهول", // من الأفضل إرسال هذه البيانات من الفرونت إند
+            to: account.email,
+            subject: req.body.subject || "رسالة واردة",
+            body: "تم إنشاء هذا السجل لحفظ حالة الرسالة",
+            date: new Date(),
+            ...updateData // نطبق الحالة الجديدة هنا (isDeleted: true مثلاً)
+          }
+        });
+        
+        return res.json({ success: true, data: shadowMessage, message: "تم حفظ الحالة الجديدة للرسالة الواردة" });
+      }
+      
+      // إذا كان الخطأ شيئاً آخر غير "عدم الوجود"، نرمي الخطأ
+      throw dbError;
+    }
   } catch (error) {
+    console.error("Update Message Status Error:", error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -370,13 +403,8 @@ exports.syncHostingerEmails = async (req, res) => {
 
 exports.analyzeInboxWithAI = async (req, res) => {
   try {
-    const account = await prisma.emailAccount.findFirst({
-      where: { isActive: true },
-    });
-    if (!account)
-      return res
-        .status(404)
-        .json({ success: false, message: "لا يوجد حساب بريد مربوط" });
+    const account = await prisma.emailAccount.findFirst({ where: { isActive: true } });
+    if (!account) return res.status(404).json({ success: false, message: "لا يوجد حساب بريد مربوط" });
 
     const client = new ImapFlow({
       host: account.imapServer || "imap.hostinger.com",
@@ -390,24 +418,54 @@ exports.analyzeInboxWithAI = async (req, res) => {
     let lock = await client.getMailboxLock("INBOX");
     const rawMessages = [];
 
+    // 💡 1. قائمة الكلمات المفتاحية لرسائل شركات الاتصالات (السبام)
+    const telecomSpamKeywords = [
+      "باقة", "باقات", "رصيد", "اشحن", "ميجابايت", "جيجابايت", "نت", "سلفني", 
+      "عرض", "عروض", "خصم", "حصريا", "استمتع", "موبايلي", "stc", "زين", "فودافون", 
+      "اتصالات", "وي", "نغمات", "كول تون", "اشترك", "ارسل رقم"
+    ];
+
     try {
-      // 1. جلب أحدث 10 إيميلات للتحليل (تقليل العدد لتوفير تكلفة OpenAI)
       const totalMessages = client.mailbox.exists;
       if (totalMessages === 0) return res.json({ success: true, data: [] });
-
-      const fetchStart = Math.max(1, totalMessages - 9);
-      for await (let msg of client.fetch(
-        `${fetchStart}:*`,
-        { source: true, flags: true, uid: true },
-        { reverse: true },
-      )) {
+      
+      const fetchStart = Math.max(1, totalMessages - 19); // جلب آخر 20 رسالة مثلاً
+      for await (let msg of client.fetch(`${fetchStart}:*`, { source: true, flags: true, uid: true }, { reverse: true })) {
         const parsed = await simpleParser(msg.source);
+        
+        const subject = parsed.subject || "";
+        const bodyText = parsed.text || "";
+        const fullTextForCheck = (subject + " " + bodyText).toLowerCase();
+
+        // 💡 2. الفلترة المبدئية: هل تحتوي الرسالة على كلمات سبام صريحة؟
+        const isObviousSpam = telecomSpamKeywords.some(keyword => fullTextForCheck.includes(keyword));
+
+        // إذا كانت سبام واضح، لا نرسلها للذكاء الاصطناعي (توفيراً للتكلفة) ونصنفها فوراً
+        if (isObviousSpam) {
+            rawMessages.push({
+                id: msg.uid.toString(),
+                category: "سبام",
+                subCategory: null,
+                severity: "low",
+                title: "رسالة دعائية - شركة الاتصالات",
+                description: bodyText.substring(0, 200),
+                amount: null,
+                relatedEntityCode: "TELECOM-AD",
+                timestamp: parsed.date,
+                isRead: true, // نعتبرها مقروءة حتى لا تزعجنا
+                from: parsed.from?.text || "شركة الاتصالات"
+            });
+            continue; // تخطي إرسالها للـ AI
+        }
+
+        // إذا كانت رسالة عادية، نجهزها للـ AI
         rawMessages.push({
           id: msg.uid.toString(),
-          subject: parsed.subject || "بدون عنوان",
-          text: parsed.text ? parsed.text.substring(0, 800) : "لا يوجد محتوى", // أخذ أول 800 حرف لتوفير التكلفة
+          subject: subject,
+          text: bodyText.substring(0, 800),
           date: parsed.date,
           isRead: msg.flags?.has("\\Seen") || false,
+          from: parsed.from?.text || "مجهول"
         });
       }
     } finally {
@@ -415,55 +473,61 @@ exports.analyzeInboxWithAI = async (req, res) => {
     }
     await client.logout();
 
-    // 2. إعداد الـ Prompt وإرسال البيانات للذكاء الاصطناعي كـ Batch
-    // سنطلب من AI إرجاع مصفوفة JSON جاهزة للواجهة الأمامية
-    const prompt = `
-      أنت مساعد ذكي لنظام إدارة مكتب هندسي. تم استلام مجموعة من رسائل البريد الإلكتروني.
-      قم بتحليل كل رسالة واستخرج البيانات التالية بصيغة JSON Array فقط دون أي نص إضافي:
-      
-       لكل رسالة، قم بتحديد:
-      - id: نفس الـ id المُرسل
-      - category: إما ("عاجل" أو "مالي" أو "توثيق" أو "نظام" أو "معاملات" أو "عام")
-      - subCategory: إذا كان مالي (اختر: "فواتير متأخرة"، "فواتير قريبة الاستحقاق"، "دفعات غير مربوطة"، "تسويات جاهزة"، "تسويات بدون مرفق"، "معاملات معتمدة بمتأخرات"). إذا لم يكن مالياً اجعله null.
-      - severity: (high, medium, low) بناءً على محتوى الرسالة.
-      - title: ضع عنواناً مختصراً وواضحاً يعبر عن فحوى المشكلة (أفضل من عنوان الإيميل الأصلي).
-      - description: ملخص للمحتوى والخطوة المطلوبة من المستخدم.
-      - amount: إذا كانت الرسالة مالية وتحتوي على مبلغ، استخرجه كرقم (مثال: 15500). إذا لم يوجد، اجعله null.
-      - relatedEntityCode: إذا كان هناك رقم فاتورة (مثل INV-123) أو معاملة، استخرجه. إذا لا، قم بتوليد كود وهمي.
-      - timestamp: أعد نفس التاريخ المُرسل إليك.
-      - isRead: أعد نفس القيمة المُرسلة إليك.
-      
-      الرسائل:
-      ${JSON.stringify(rawMessages)}
-    `;
+    // فصل الرسائل التي تحتاج ذكاء اصطناعي عن رسائل السبام الجاهزة
+    const messagesForAI = rawMessages.filter(m => m.category !== "سبام");
+    const preFilteredSpam = rawMessages.filter(m => m.category === "سبام");
 
-    const aiResponse = await openai.chat.completions.create({
-      model: "gpt-3.5-turbo-1106", // الأرخص والأسرع لمهام الـ JSON
-      response_format: { type: "json_object" }, // إجبار الموديل على إرجاع JSON نظيف
-      messages: [
-        {
-          role: "system",
-          content:
-            "You are a highly capable AI that analyzes emails and returns strict JSON arrays.",
-        },
-        { role: "user", content: prompt },
-      ],
-    });
+    let finalArray = [...preFilteredSpam]; // نبدأ بإضافة السبام المفلتر للنتيجة النهائية
 
-    // 3. استقبال المخرجات من AI وتنسيقها للواجهة الأمامية
-    const analyzedDataStr = aiResponse.choices[0].message.content;
-    const parsedData = JSON.parse(analyzedDataStr);
+    // 💡 3. إرسال الرسائل المتبقية للذكاء الاصطناعي مع تعليمات صارمة
+    if (messagesForAI.length > 0) {
+        const prompt = `
+          أنت مساعد ذكي لنظام إدارة مكتب هندسي. تم استلام رسائل محولة من شريحة جوال (SMS) أو إيميلات.
+          
+          تعليمات هامة جداً: 
+          إذا كانت الرسالة تبدو كإعلان من شركة اتصالات، ترويج، عرض، أو لا تحتوي على معلومات تهم عمل المكتب الهندسي أو معاملاته المالية، صنفها فوراً كـ "سبام".
+          
+          قم بتحليل كل رسالة واستخرج البيانات بصيغة JSON Array:
+          - id: نفس الـ id المُرسل
+          - category: اختر من ("عاجل", "مالي", "توثيق", "نظام", "معاملات", "سبام", "عام")
+          - subCategory: إذا كان مالي (فواتير، دفعات، تحويل بنكي.. الخ).
+          - severity: (high, medium, low).
+          - title: عنوان مختصر يعبر عن المشكلة.
+          - description: ملخص للمحتوى.
+          - amount: استخرج المبلغ المالي كرقم إن وجد، وإلا null.
+          - relatedEntityCode: كود مرجعي أو رقم فاتورة.
+          - timestamp: نفس التاريخ المُرسل.
+          - isRead: نفس القيمة المُرسلة.
+          - from: نفس المُرسل.
+          
+          الرسائل:
+          ${JSON.stringify(messagesForAI)}
+        `;
 
-    // بعض الـ AI يرجع البيانات داخل مفتاح، نتحقق من ذلك
-    const finalArray = Array.isArray(parsedData)
-      ? parsedData
-      : parsedData.emails || parsedData.notifications || parsedData.data || [];
+        const aiResponse = await openai.chat.completions.create({
+          model: "gpt-3.5-turbo-1106",
+          response_format: { type: "json_object" },
+          messages: [
+            { role: "system", content: "You strictly output valid JSON arrays containing the analyzed emails." },
+            { role: "user", content: prompt }
+          ],
+        });
+
+        const analyzedDataStr = aiResponse.choices[0].message.content;
+        const parsedData = JSON.parse(analyzedDataStr);
+        const aiAnalyzedMessages = Array.isArray(parsedData) ? parsedData : (parsedData.emails || parsedData.notifications || parsedData.data || []);
+        
+        // دمج نتائج الـ AI مع نتائج الفلترة السريعة
+        finalArray = [...finalArray, ...aiAnalyzedMessages];
+    }
+
+    // ترتيب الرسائل من الأحدث للأقدم
+    finalArray.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
     res.json({ success: true, data: finalArray });
+
   } catch (error) {
     console.error("AI Analysis Error:", error);
-    res
-      .status(500)
-      .json({ success: false, message: "فشل التحليل الذكي: " + error.message });
+    res.status(500).json({ success: false, message: "فشل التحليل الذكي: " + error.message });
   }
 };
