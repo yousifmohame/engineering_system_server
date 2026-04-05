@@ -2,7 +2,7 @@
 const express = require("express");
 const router = express.Router();
 // استدعِ الميدل وير الخاص بالتحقق من تسجيل الدخول وصلاحيات الإدمن (عدل المسار حسب مشروعك)
-const { protect } = require("../middleware/authMiddleware");
+
 
 const {
   getConfig,
@@ -12,9 +12,9 @@ const {
 } = require("../controllers/tailscaleController");
 
 // حماية مسارات الإعدادات بحيث لا يدخلها إلا الأدمن
-router.get("/", protect, getConfig);
-router.post("/", protect, saveConfig);
-router.get("/test", protect, testConnection);
+router.get("/", getConfig);
+router.post("/", saveConfig);
+router.get("/test", testConnection);
 
 // مسار الـ provision سنحميه بطريقة مختلفة (انظر الخطوة 2)
 router.get("/provision", getProvisioningCommand);
