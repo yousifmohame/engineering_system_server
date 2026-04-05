@@ -99,30 +99,21 @@ exports.testConnection = async (req, res) => {
 // في ملف tailscaleController.js
 exports.getProvisioningCommand = async (req, res) => {
   try {
-    // 🛡️ حماية 1: التحقق من الـ Token السري في الرابط
-    // مثال: يجب أن يكون الرابط /api/tailscale/provision?token=my_super_secret_123
     const PROVISION_TOKEN = process.env.PROVISION_TOKEN || "my_super_secret_01003625969"; 
+    
     if (req.query.token !== PROVISION_TOKEN) {
-      return res.status(403).send("echo 'Access Denied: Invalid Token'; exit 1;");
+      return res.send("echo 'Access Denied: Invalid Token'; exit 1;");
     }
 
     const config = await prisma.tailscaleConfig.findFirst();
     if (!config || !config.authKey) {
-      return res.status(404).send("echo 'No Auth Key found in database'; exit 1;");
+      return res.send("echo 'Error: No Auth Key found in database'; exit 1;");
     }
 
-    // 🛡️ حماية 2: تنظيف الـ Auth Key (Sanitization)
-    // مفاتيح Tailscale تحتوي فقط على حروف وأرقام وعلامة الناقص (tskey-auth-...)
-    // نمنع أي رموز أخرى (مثل الفواصل المنقوطة ;) لمنع ثغرة Command Injection
     const safeAuthKey = config.authKey.trim();
-    if (!/^[a-zA-Z0-9-]+$/.test(safeAuthKey)) {
-        return res.status(400).send("echo 'Security Alert: Invalid Key Format'; exit 1;");
-    }
-
-    // نرسل الأمر كاملاً جاهزاً للتنفيذ
     const command = `sudo tailscale up --authkey=${safeAuthKey} --accept-routes`;
     res.send(command);
   } catch (error) {
-    res.status(500).send(`echo 'Server Error: ${error.message}'; exit 1;`);
+    res.send(`echo 'Server Error: ${error.message}'; exit 1;`);
   }
 };
