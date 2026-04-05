@@ -2441,9 +2441,9 @@ model EmailMessage {
 model Notification {
   id                String   @id @default(uuid())
   code              String   @unique
-  category          String   // عاجل، مالي، توثيق، نظام، معاملات
-  subCategory       String?  // فواتير متأخرة، تسويات جاهزة، إلخ
-  relatedEntityCode String?  // المرجع مثل INV-5678
+  category          String // عاجل، مالي، توثيق، نظام، معاملات
+  subCategory       String? // فواتير متأخرة، تسويات جاهزة، إلخ
+  relatedEntityCode String? // المرجع مثل INV-5678
   title             String
   description       String   @db.Text
   severity          String   @default("low") // high, medium, low
@@ -2454,8 +2454,18 @@ model Notification {
   amount            Float?
   daysOverdue       Int?
   attachmentMissing Boolean  @default(false)
-  linkedScreen      Json?    // لتخزين مسار الشاشة { screenCode, iconId, tabId }
-  
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  linkedScreen      Json? // لتخزين مسار الشاشة { screenCode, iconId, tabId }
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model TailscaleConfig {
+  id        String   @id @default(uuid())
+  tailnet   String? // اسم الشبكة (مثال: mydomain.github.beta.tailscale.net)
+  apiKey    String? // مفتاح Tailscale (API Key)
+  authKey   String?  // مفتاح الـ Auth (لربط الأجهزة الجديدة تلقائياً) 👈 الحقل الجديد
+  isActive  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }

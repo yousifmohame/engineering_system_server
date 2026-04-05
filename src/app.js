@@ -208,6 +208,10 @@ app.use('/api/system-files', systemFilesRoutes);
 // 1. استدعاء ملف المسارات
 const emailRoutes = require('./routes/emailRoutes');
 app.use('/api/email', emailRoutes); // تأكد أن الـ Prefix يطابق ما طلبناه في الـ Frontend
+
+const tailscaleRoutes = require('./routes/tailscaleRoutes');
+app.use('/api/tailscale', tailscaleRoutes);
+
 // فحص صحة السيرفر
 app.get("/", (req, res) => {
   res.json({ status: "Online", message: "Engineering System API v1" });
