@@ -2,8 +2,10 @@
 const { PrismaClient } = require("@prisma/client");
 const axios = require("axios"); // تأكد من تثبيت axios في الباك إند
 const prisma = new PrismaClient();
+const { exec } = require("child_process");
+const util = require("util");
+const execPromise = util.promisify(exec);
 
-// 1. جلب إعدادات Tailscale
 // 1. جلب إعدادات Tailscale
 exports.getConfig = async (req, res) => {
   try {
@@ -127,5 +129,63 @@ exports.getProvisioningCommand = async (req, res) => {
     res.send(command);
   } catch (error) {
     res.send(`echo 'Server Error: ${error.message}'; exit 1;`);
+  }
+};
+
+// 4. جلب قائمة الأجهزة (Exit Nodes) من حسابك
+exports.getDevices = async (req, res) => {
+  try {
+    const config = await prisma.tailscaleConfig.findFirst();
+    if (!config || !config.apiKey) {
+      return res.status(400).json({ success: false, message: "مفتاح API غير متوفر." });
+    }
+
+    const authHeader = Buffer.from(`${config.apiKey}:`).toString('base64');
+    
+    // استخدام علامة - تجعل Tailscale يتعرف على شبكتك تلقائياً
+    const response = await axios.get(
+      `https://api.tailscale.com/api/v2/tailnet/-/devices`,
+      { headers: { Authorization: `Basic ${authHeader}` } }
+    );
+
+    // تنسيق البيانات لتصبح سهلة للفرونت إند
+    const devices = response.data.devices.map(dev => ({
+      id: dev.id,
+      name: dev.hostname,
+      ip: dev.addresses[0], // الـ IP الخاص بالجهاز داخل شبكة Tailscale
+      os: dev.os,
+      status: dev.clientStatus || "offline"
+    }));
+
+    res.json({ success: true, devices });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// 5. تعيين وإلغاء الـ Exit Node على السيرفر
+exports.setExitNode = async (req, res) => {
+  try {
+    const { exitNodeIp } = req.body; // نستلم الـ IP من الفرونت إند
+
+    let command;
+    if (exitNodeIp) {
+      // أمر تفعيل الـ Exit Node باستخدام الـ IP المختار
+      command = `sudo tailscale set --exit-node=${exitNodeIp} --exit-node-allow-lan-access=true`;
+    } else {
+      // إذا أرسل قيمة فارغة، نلغي الـ Exit Node ليعود السيرفر للإنترنت العادي
+      command = `sudo tailscale set --exit-node=`; 
+    }
+
+    // تنفيذ الأمر على نظام التشغيل Ubuntu
+    await execPromise(command);
+
+    res.json({ 
+      success: true, 
+      message: exitNodeIp ? `تم توجيه الإنترنت عبر الجهاز المختار بنجاح!` : "تم إلغاء توجيه الإنترنت (الوضع الطبيعي)." 
+    });
+  } catch (error) {
+    console.error("Set Exit Node Error:", error);
+    res.status(500).json({ success: false, message: "فشل في تغيير مسار الإنترنت. تأكد أن السيرفر يمتلك صلاحيات." });
   }
 };
