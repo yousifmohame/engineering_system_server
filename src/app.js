@@ -210,7 +210,7 @@ const emailRoutes = require('./routes/emailRoutes');
 app.use('/api/email', emailRoutes); // تأكد أن الـ Prefix يطابق ما طلبناه في الـ Frontend
 
 const tailscaleRoutes = require('./routes/tailscaleRoutes');
-app.use('/api/tailscale', tailscaleRoutes);
+app.use('/api/settings/tailscale', tailscaleRoutes);
 
 // فحص صحة السيرفر
 app.get("/", (req, res) => {
