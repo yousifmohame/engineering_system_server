@@ -326,6 +326,23 @@ const createPrivateTransaction = async (req, res) => {
   }
 };
 
+// دالة مساعدة لاستخراج اسم العميل بشكل آمن وموحد
+const getFullName = (name) => {
+  if (!name) return "غير محدد";
+  if (typeof name === "string") return name;
+  if (name.ar) return name.ar;
+
+  const parts = [
+    name.firstName,
+    name.fatherName,
+    name.grandFatherName,
+    name.familyName,
+  ];
+  const fullName = parts.filter(Boolean).join(" ").trim();
+
+  return fullName || name.en || "غير محدد";
+};
+
 // ==================================================
 // 2. جلب قائمة المعاملات (مع دعم الربط التلقائي للرخص)
 // GET /api/private-transactions
@@ -420,19 +437,20 @@ const getPrivateTransactions = async (req, res) => {
         typeof tx.notes === "object" && tx.notes !== null ? tx.notes : {};
 
       // 💡 3. قراءة أسماء الملاك من العمود الصريح أولاً (سرعة ودقة)
-      let ownerName = tx.ownerNames || notes.fullOwnerNames || "غير محدد";
-      if (ownerName === "غير محدد") {
-        try {
-          if (tx.client?.name) {
-            const parsed =
-              typeof tx.client.name === "string"
-                ? JSON.parse(tx.client.name)
-                : tx.client.name;
-            ownerName = parsed?.ar || parsed || "غير محدد";
-          }
-        } catch {
-          ownerName = tx.client?.name || "غير محدد";
-        }
+      // 💡 3. استخراج الاسم الاحترافي (نضمن دائماً قراءة أحدث اسم من جدول العملاء)
+      const freshClientName = getFullName(tx.client?.name);
+
+      // نستخدم ownerNames المحفوظة فقط إذا كانت تحتوي على أسماء شركاء متعددين يدوياً (مثلاً تحتوي على " و " أو ",")
+      let ownerName = freshClientName;
+
+      if (
+        tx.ownerNames &&
+        tx.ownerNames !== freshClientName &&
+        (tx.ownerNames.includes(" و ") || tx.ownerNames.includes("،"))
+      ) {
+        ownerName = tx.ownerNames;
+      } else if (freshClientName === "غير محدد" && notes?.fullOwnerNames) {
+        ownerName = notes.fullOwnerNames;
       }
 
       let collectionStatus = "غير محصل";
@@ -1369,13 +1387,11 @@ const assignTask = async (req, res) => {
       data: savedTask,
     });
   } catch (error) {
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "حدث خطأ أثناء حفظ المهمة",
-        error: error.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "حدث خطأ أثناء حفظ المهمة",
+      error: error.message,
+    });
   }
 };
 
@@ -1391,12 +1407,10 @@ const deleteTask = async (req, res) => {
       where: { id: taskId },
     });
     if (!task)
-      return res
-        .status(404)
-        .json({
-          success: false,
-          message: "المهمة غير موجودة أو تم حذفها مسبقاً",
-        });
+      return res.status(404).json({
+        success: false,
+        message: "المهمة غير موجودة أو تم حذفها مسبقاً",
+      });
 
     // حذف المهمة من الجدول
     await prisma.transactionTask.delete({ where: { id: taskId } });
@@ -1413,13 +1427,11 @@ const deleteTask = async (req, res) => {
 
     res.status(200).json({ success: true, message: "تم حذف المهمة بنجاح" });
   } catch (error) {
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "حدث خطأ أثناء حذف المهمة",
-        error: error.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "حدث خطأ أثناء حذف المهمة",
+      error: error.message,
+    });
   }
 };
 // ==================================================
@@ -1457,21 +1469,17 @@ const submitTask = async (req, res) => {
       submittedBy || "الموظف",
     );
 
-    res
-      .status(200)
-      .json({
-        success: true,
-        message: "تم تسليم المهمة بنجاح",
-        data: updatedTask,
-      });
+    res.status(200).json({
+      success: true,
+      message: "تم تسليم المهمة بنجاح",
+      data: updatedTask,
+    });
   } catch (error) {
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "حدث خطأ أثناء تسليم المهمة",
-        error: error.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "حدث خطأ أثناء تسليم المهمة",
+      error: error.message,
+    });
   }
 };
 

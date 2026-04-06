@@ -88,6 +88,18 @@ const generateNextTransactionTypeCode = async () => {
   return `${prefix}${String(nextNumber).padStart(3, "0")}`;
 };
 
+// دالة مساعدة لاستخراج اسم العميل بشكل آمن وموحد
+const getFullName = (name) => {
+  if (!name) return "غير محدد";
+  if (typeof name === "string") return name;
+  if (name.ar) return name.ar;
+  
+  const parts = [name.firstName, name.fatherName, name.grandFatherName, name.familyName];
+  const fullName = parts.filter(Boolean).join(" ").trim();
+  
+  return fullName || name.en || "غير محدد";
+};
+
 // ===============================================
 // 2. جلب جميع المعاملات (شاشة 284)
 // GET /api/transactions
@@ -211,7 +223,7 @@ const getAllTransactions = async (req, res) => {
         id: t.id,
         code: t.transactionCode,
         title: t.title,
-        clientName: t.client?.name?.ar || t.client?.name || "غير محدد", // تحسين لدعم JSON أو String
+        clientName: getFullName(t.client?.name), // تحسين لدعم JSON أو String
         clientMobile: t.client?.mobile,
         type: t.transactionType?.name || "عام",
         status: t.status,
