@@ -2464,8 +2464,16 @@ model TailscaleConfig {
   id        String   @id @default(uuid())
   tailnet   String? // اسم الشبكة (مثال: mydomain.github.beta.tailscale.net)
   apiKey    String? // مفتاح Tailscale (API Key)
-  authKey   String?  // مفتاح الـ Auth (لربط الأجهزة الجديدة تلقائياً) 👈 الحقل الجديد
+  authKey   String? // مفتاح الـ Auth (لربط الأجهزة الجديدة تلقائياً) 👈 الحقل الجديد
   isActive  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model TransactionSource {
+  id        String   @id @default(uuid())
+  name      String   @unique // الاسم يجب أن يكون غير مكرر
+  isActive  Boolean  @default(true) // لإمكانية إخفاء المصدر دون حذفه نهائياً
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }

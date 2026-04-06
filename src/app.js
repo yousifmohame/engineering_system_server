@@ -212,6 +212,9 @@ app.use('/api/email', emailRoutes); // تأكد أن الـ Prefix يطابق م
 const tailscaleRoutes = require('./routes/tailscaleRoutes');
 app.use('/api/settings/tailscale', tailscaleRoutes);
 
+const transactionSourceRoutes = require("./routes/transactionSourceRoutes");
+app.use("/api/transaction-sources", transactionSourceRoutes);
+
 // فحص صحة السيرفر
 app.get("/", (req, res) => {
   res.json({ status: "Online", message: "Engineering System API v1" });
