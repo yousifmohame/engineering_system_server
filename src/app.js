@@ -215,6 +215,10 @@ app.use('/api/settings/tailscale', tailscaleRoutes);
 const transactionSourceRoutes = require("./routes/transactionSourceRoutes");
 app.use("/api/transaction-sources", transactionSourceRoutes);
 
+const quickLinksRoutes = require("./routes/quickLinksRoutes");
+app.use("/api/quick-links", quickLinksRoutes);
+
+
 // فحص صحة السيرفر
 app.get("/", (req, res) => {
   res.json({ status: "Online", message: "Engineering System API v1" });

@@ -2478,3 +2478,45 @@ model TransactionSource {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
+
+// نموذج تصنيفات الروابط
+model LinkCategory {
+  id        String      @id @default(uuid())
+  name      String      @unique
+  links     QuickLink[]
+  createdAt DateTime    @default(now())
+}
+
+// نموذج الروابط السريعة
+model QuickLink {
+  id          String  @id @default(uuid())
+  title       String
+  url         String
+  description String?
+
+  // العلاقات
+  categoryId String
+  category   LinkCategory @relation(fields: [categoryId], references: [id])
+
+  // الوصول والأمان
+  accessLevel       String  @default("الكل") // الإدارة العليا، الموظفين، أخرى
+  requiresLogin     Boolean @default(false)
+  loginData         String? // يمكن حفظه كنص مشفر لاحقاً
+  assignedEmployees String? // نص يحمل أسماء الموظفين مفصولين بفاصلة
+
+  // الصلاحيات (التواريخ)
+  validUntil  DateTime?
+  loginExpiry DateTime?
+
+  // بيانات إضافية
+  customFields Json? // مصفوفة من {key, value}
+  notes        String?
+  usageCount   Int     @default(0)
+  isPinned     Boolean @default(false)
+
+  // التتبع
+  createdBy String   @default("مدير النظام")
+  updatedBy String   @default("مدير النظام")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
