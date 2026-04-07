@@ -276,6 +276,7 @@ const createPrivateTransaction = async (req, res) => {
           ownerMobile: ownerMobile || null,
           mediatorFees: mediatorFees ? parseFloat(mediatorFees) : 0,
           agentFees: agentFees ? parseFloat(agentFees) : 0,
+          transactionComments: extraNotes?.transactionComments || [],
 
           // 💡 [السر هنا]: إنشاء كارت المعقب في المصفوفة تلقائياً
           agents: followUpAgentId
@@ -344,7 +345,7 @@ const getFullName = (name) => {
 };
 
 // ==================================================
-// 2. جلب قائمة المعاملات (مع دعم الربط التلقائي للرخص)
+// 2. جلب قائمة المعاملات (مع دعم الربط التلقائي للرخص والبيانات الشاملة)
 // GET /api/private-transactions
 // ==================================================
 const getPrivateTransactions = async (req, res) => {
@@ -355,7 +356,6 @@ const getPrivateTransactions = async (req, res) => {
 
     const where = {};
 
-    // 💡 1. فلترة احترافية وسريعة: نستخدم الأعمدة المستقلة مباشرة، مع إبقاء البحث في notes للبيانات القديمة
     if (permitNumber) {
       where.OR = [
         { licenseNo: permitNumber },
@@ -376,7 +376,6 @@ const getPrivateTransactions = async (req, res) => {
       cursor: cursor ? { id: cursor } : undefined,
       where,
       orderBy: { createdAt: "desc" },
-      // 💡 2. استدعاء الأعمدة الجديدة بشكل صريح لتقليل استهلاك الرام
       select: {
         id: true,
         transactionCode: true,
@@ -388,13 +387,14 @@ const getPrivateTransactions = async (req, res) => {
         paidAmount: true,
         remainingAmount: true,
         createdAt: true,
-        notes: true,
+        updatedAt: true,
+        createdBy: true,
+        notes: true, // 💡 ستأتي التعليقات تلقائياً لأنها محفوظة داخل كائن Notes
         serviceNo: true,
         requestNo: true,
         licenseNo: true,
         oldDeed: true,
 
-        // 👈 الأعمدة الجديدة الصريحة
         ownerNames: true,
         districtName: true,
         sector: true,
@@ -406,8 +406,19 @@ const getPrivateTransactions = async (req, res) => {
         taxAmount: true,
         sourceName: true,
 
-        updatedAt: true,
-        client: { select: { name: true, mobile: true, contact: true } },
+        client: {
+          select: {
+            id: true,
+            name: true,
+            mobile: true,
+            contact: true,
+            idNumber: true,
+            type: true,
+            grade: true,
+            identification: true,
+            _count: { select: { transactions: true } },
+          },
+        },
         districtNode: {
           select: { name: true, sector: { select: { name: true } } },
         },
@@ -428,7 +439,6 @@ const getPrivateTransactions = async (req, res) => {
     });
 
     const formattedData = transactions.map((tx) => {
-      // 💡 👈 أضف هذا لحساب الحجم الإجمالي لكل معاملة
       const totalSize =
         tx.files && tx.files.length > 0
           ? tx.files.reduce((sum, file) => sum + (file.size || 0), 0)
@@ -436,11 +446,7 @@ const getPrivateTransactions = async (req, res) => {
       const notes =
         typeof tx.notes === "object" && tx.notes !== null ? tx.notes : {};
 
-      // 💡 3. قراءة أسماء الملاك من العمود الصريح أولاً (سرعة ودقة)
-      // 💡 3. استخراج الاسم الاحترافي (نضمن دائماً قراءة أحدث اسم من جدول العملاء)
       const freshClientName = getFullName(tx.client?.name);
-
-      // نستخدم ownerNames المحفوظة فقط إذا كانت تحتوي على أسماء شركاء متعددين يدوياً (مثلاً تحتوي على " و " أو ",")
       let ownerName = freshClientName;
 
       if (
@@ -481,12 +487,16 @@ const getPrivateTransactions = async (req, res) => {
 
       return {
         phone: clientPhone,
-        updated: tx.updatedAt || tx.createdAt,
+        updatedAt: tx.updatedAt,
+        createdAt: tx.createdAt,
+        createdBy: tx.createdBy,
         id: tx.id,
         ref: tx.transactionCode,
         internalName: notes?.internalName || tx.title?.split(" - ")[0] || "",
         type: tx.category || "غير محدد",
+
         client: ownerName,
+        clientObj: tx.client,
 
         district:
           tx.districtName ||
@@ -499,7 +509,6 @@ const getPrivateTransactions = async (req, res) => {
           tx.districtNode?.sector?.name ||
           "غير محدد",
 
-        // 💡 التعديل هنا: توحيد أسماء الحقول ليرسلها للواجهة بشكل ثابت
         plots:
           Array.isArray(tx.plots) && tx.plots.length > 0
             ? tx.plots.join(" ، ")
@@ -510,7 +519,7 @@ const getPrivateTransactions = async (req, res) => {
         landArea:
           tx.landArea || notes?.refs?.landArea || notes?.refs?.area || 0,
 
-        mapsLink: notes?.refs?.mapsLink || "", // رابط الخريطة ما زال في النوتس
+        mapsLink: notes?.refs?.mapsLink || "",
 
         office: tx.source || "مكتب ديتيلز",
         sourceName: tx.sourceName || notes?.sourceName || "مباشر",
@@ -541,7 +550,7 @@ const getPrivateTransactions = async (req, res) => {
         status: tx.status || "جارية",
         date: formattedDate,
         created: tx.createdAt,
-        notes: notes,
+        notes: notes, // 💡 ستكون التعليقات المبدئية والجديدة موجودة هنا
         remoteTasks: tx.tasks,
         paymentsList: tx.payments,
         settlements: tx.settlements,
@@ -1033,7 +1042,7 @@ const updateTransactionStatus = async (req, res) => {
 };
 
 // ==================================================
-// 10. التحديث الجذري للبيانات الأساسية والمالية
+// 10. التحديث الجذري للبيانات الأساسية والمالية (مُحدث لدعم الحقول، المرفقات والتعليقات)
 // ==================================================
 const updatePrivateTransaction = async (req, res) => {
   try {
@@ -1058,6 +1067,13 @@ const updatePrivateTransaction = async (req, res) => {
       area,
       mapsLink,
       updatedBy,
+      // الحقول الجديدة المُضافة من الواجهة
+      isOnAxis,
+      streetName,
+      officialMapLink,
+      supervisingOfficeId,
+      designingOfficeId,
+      generalNotes,
     } = req.body;
 
     const tx = await prisma.privateTransaction.findUnique({ where: { id } });
@@ -1101,6 +1117,10 @@ const updatePrivateTransaction = async (req, res) => {
     let currentNotes =
       typeof tx.notes === "object" && tx.notes !== null ? tx.notes : {};
 
+    // 💡 دعم وحفظ التعليقات (Comments) بشكل صريح
+    if (notes && notes.transactionComments !== undefined)
+      currentNotes.transactionComments = notes.transactionComments;
+
     if (notes && notes.attachments !== undefined)
       currentNotes.attachments = notes.attachments;
     if (notes && notes.authorityNotesHistory !== undefined)
@@ -1110,11 +1130,51 @@ const updatePrivateTransaction = async (req, res) => {
       currentNotes.agentFees = notes.agentFees;
 
     if (!currentNotes.refs) currentNotes.refs = {};
+
+    // حفظ الحقول العادية في الـ refs
     if (sector !== undefined) currentNotes.refs.sector = sector;
-    if (plots !== undefined) currentNotes.refs.plots = plots;
     if (plan !== undefined) currentNotes.refs.plan = plan;
     if (area !== undefined) currentNotes.refs.area = area;
     if (mapsLink !== undefined) currentNotes.refs.mapsLink = mapsLink;
+    if (isOnAxis !== undefined) currentNotes.refs.isOnAxis = isOnAxis;
+    if (streetName !== undefined) currentNotes.refs.streetName = streetName;
+    if (officialMapLink !== undefined)
+      currentNotes.refs.officialMapLink = officialMapLink;
+    if (supervisingOfficeId !== undefined)
+      currentNotes.refs.supervisingOfficeId = supervisingOfficeId;
+    if (designingOfficeId !== undefined)
+      currentNotes.refs.designingOfficeId = designingOfficeId;
+
+    // معالجة وحفظ الملاحظات العامة
+    if (generalNotes !== undefined) {
+      currentNotes.generalNotes = generalNotes;
+      currentNotes.generalNotesUpdatedBy = updatedBy || "موظف النظام";
+      currentNotes.generalNotesUpdatedAt = new Date().toISOString();
+    }
+
+    // معالجة المرفقات (الصورة الجوية + مستند الملاحظات) إذا تم رفعها
+    if (req.files) {
+      if (req.files.newSiteImage && req.files.newSiteImage[0]) {
+        currentNotes.refs.siteImage = `/uploads/transactions/${req.files.newSiteImage[0].filename}`;
+      }
+      if (req.files.generalNotesFile && req.files.generalNotesFile[0]) {
+        currentNotes.generalNotesFileUrl = `/uploads/transactions/${req.files.generalNotesFile[0].filename}`;
+      }
+    }
+
+    // معالجة حقل القطع (Plots) لضمان حفظه كمصفوفة بشكل صحيح
+    let parsedPlots = tx.plots;
+    if (plots !== undefined) {
+      if (typeof plots === "string") {
+        parsedPlots = plots
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
+      } else if (Array.isArray(plots)) {
+        parsedPlots = parsedPlots;
+      }
+      currentNotes.refs.plots = parsedPlots;
+    }
 
     if (agentCost !== undefined && agentCost !== null)
       currentNotes.agentFees = parseFloat(agentCost) || 0;
@@ -1125,9 +1185,10 @@ const updatePrivateTransaction = async (req, res) => {
     let newTitle = tx.title;
     if (internalName !== undefined) {
       currentNotes.internalName = internalName;
-      currentNotes.isInternalNameHidden = isInternalNameHidden || false;
+      currentNotes.isInternalNameHidden =
+        isInternalNameHidden === "true" || isInternalNameHidden === true;
       newTitle =
-        !isInternalNameHidden && internalName
+        !currentNotes.isInternalNameHidden && internalName
           ? `${internalName} - ${newTransactionCode}`
           : `${type || tx.category || "معاملة"} - ${newTransactionCode}`;
     }
@@ -1142,13 +1203,17 @@ const updatePrivateTransaction = async (req, res) => {
         transactionCode: newTransactionCode,
         title: newTitle,
         createdAt: newCreatedAt,
+        updatedAt: new Date(), // تحديث تاريخ آخر تعديل
         category: type || tx.category,
         source: office || tx.source,
         totalFees: parsedTotalFees,
         remainingAmount: remainingAmount < 0 ? 0 : remainingAmount,
         districtId: districtId || tx.districtId,
+        landArea: area ? parseFloat(area) : tx.landArea,
+        planNumber: plan || tx.planNumber,
+        plots: parsedPlots,
         notes: currentNotes,
-        status: req.body.status || tx.status, // 👈 للسماح بإغلاق المعاملة (مكتملة) عند التسوية
+        status: req.body.status || tx.status,
       },
     });
 
@@ -1157,16 +1222,16 @@ const updatePrivateTransaction = async (req, res) => {
       id,
       "بيانات أساسية/مالية",
       "تحديث شامل",
-      "تم تعديل بعض البيانات الأساسية أو الحسابات المالية للمعاملة",
+      "تم تعديل البيانات الأساسية، التعليقات، أو الموقع للمعاملة",
       updatedBy,
     );
 
     res.json({ success: true, message: "تم التحديث بنجاح", data: updatedTx });
   } catch (error) {
+    console.error("Update Transaction Error:", error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
-
 // ==================================================
 // 11. إضافة مصروف تشغيلي
 // ==================================================

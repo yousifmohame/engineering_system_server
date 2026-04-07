@@ -63,7 +63,7 @@ router.post("/monthly-settlement/execute", executeMonthlySettlement);
 router.get("/outsource-salaries", getOutsourceSalaries);
 router.post("/outsource-salaries", createOutsourceSalary);
 router.get("/outsource-payments", getOutsourcePayments);
-router.post("/outsource-payments", createOutsourcePayment);
+router.post("/outsource-payments", upload.single("file"), createOutsourcePayment);
 
 // 2. تسليم تسوية (دفع فعلي مع إمكانية إرفاق صورة)
 router.post("/settlements/deliver", upload.single("file"), deliverSettlement);

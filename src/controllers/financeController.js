@@ -384,8 +384,12 @@ const getOutsourcePayments = async (req, res) => {
 };
 
 // 4. تسديد دفعة من الراتب (جزئي أو كلي)
+// 4. تسديد دفعة من الراتب (جزئي أو كلي) مع دعم المرفقات
 const createOutsourcePayment = async (req, res) => {
   try {
+    // حماية في حال عدم وصول بيانات
+    if (!req.body) throw new Error("لم يتم استلام أي بيانات.");
+
     const {
       salaryRecordId,
       amount,
@@ -397,6 +401,18 @@ const createOutsourcePayment = async (req, res) => {
       isPartial,
     } = req.body;
 
+    if (!salaryRecordId) throw new Error("معرف الراتب مفقود");
+
+    // 💡 تحويل القيم القادمة من FormData (لأنها تأتي كنصوص String)
+    const parsedAmount = parseFloat(amount);
+    const parsedIsPartial = isPartial === "true" || isPartial === true;
+
+    // 💡 معالجة الملف المرفق (صورة الحوالة) إن وجد
+    let attachmentPath = null;
+    if (req.file) {
+      attachmentPath = `/../../uploads/payments/${req.file.filename}`; // تأكد أن مجلد الرفع مناسب لك
+    }
+
     // استخدام Transaction لضمان تحديث الراتب وإنشاء الدفعة معاً
     const result = await prisma.$transaction(async (prismaDelegate) => {
       // 1. جلب سجل الراتب
@@ -405,11 +421,11 @@ const createOutsourcePayment = async (req, res) => {
       });
 
       if (!salary) throw new Error("سجل الراتب غير موجود");
-      if (amount > salary.remainingAmount)
+      if (parsedAmount > salary.remainingAmount)
         throw new Error("المبلغ أكبر من المتبقي");
 
       // 2. تحديث المبالغ والحالة في الراتب
-      const newPaidAmount = salary.paidAmount + amount;
+      const newPaidAmount = salary.paidAmount + parsedAmount;
       const newRemainingAmount = salary.roundedAmount - newPaidAmount;
       let newStatus = "partial";
       if (newRemainingAmount <= 0) newStatus = "paid";
@@ -427,13 +443,14 @@ const createOutsourcePayment = async (req, res) => {
       const newPayment = await prismaDelegate.outsourcePayment.create({
         data: {
           salaryRecordId,
-          amount,
+          amount: parsedAmount,
           paymentMethod,
           paymentDate,
           paymentTime,
           currency,
           notes,
-          isPartial,
+          isPartial: parsedIsPartial,
+          receiptUrl: attachmentPath, // 💡 حفظ مسار المرفق في الداتابيز
         },
       });
 

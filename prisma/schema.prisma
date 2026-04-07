@@ -1916,6 +1916,7 @@ model OutsourcePayment {
   paymentTime    String
   currency       String
   notes          String?
+  receiptUrl     String?
   isPartial      Boolean
   createdAt      DateTime        @default(now())
 }
