@@ -287,16 +287,17 @@ model Client {
   updatedAt DateTime @updatedAt
 
   // --- العلاقات ---
-  ownerships          OwnershipFile[]
-  transactions        Transaction[]
-  contracts           Contract[]
-  quotations          Quotation[]
-  attachments         Attachment[]
-  activityLogs        ActivityLog[]
-  documents           Document[]
+  ownerships            OwnershipFile[]
+  transactions          Transaction[]
+  contracts             Contract[]
+  quotations            Quotation[]
+  attachments           Attachment[]
+  activityLogs          ActivityLog[]
+  documents             Document[]
   // داخل model Client
-  privateTransactions PrivateTransaction[] @relation("ClientPrivateTransactions")
-  TransactionFolder   TransactionFolder[]
+  privateTransactions   PrivateTransaction[] @relation("ClientPrivateTransactions")
+  TransactionFolder     TransactionFolder[]
+  transactionOwnerships TransactionOwner[]
 }
 
 model ClientClassification {
@@ -1411,8 +1412,30 @@ model PrivateTransaction {
   linkedParent   PrivateTransaction?  @relation("LinkedTransactions", fields: [linkedParentId], references: [id])
   linkedChildren PrivateTransaction[] @relation("LinkedTransactions")
 
+  ownersList TransactionOwner[]
+
   @@index([clientId])
   @@index([districtId])
+}
+
+// 💡 👈 الجدول الوسيط الجديد لربط المعاملة بأكثر من عميل (مالك)
+model TransactionOwner {
+  id String @id @default(cuid())
+
+  transactionId String
+  transaction   PrivateTransaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+
+  clientId String // إجباري: كل مالك يجب أن يكون عميلاً في النظام
+  client   Client @relation(fields: [clientId], references: [id])
+
+  idNumber        String?
+  sharePercentage Float?  @default(100) // نسبة التملك (اختياري)
+  isPrimary       Boolean @default(false) // هل هو العميل الرئيسي للمعاملة؟
+
+  createdAt DateTime @default(now())
+
+  @@unique([transactionId, clientId]) // منع تكرار نفس العميل في نفس المعاملة
+  @@index([clientId])
 }
 
 // ===============================================
@@ -2512,7 +2535,10 @@ model QuickLink {
   customFields Json? // مصفوفة من {key, value}
   notes        String?
   usageCount   Int     @default(0)
-  isPinned     Boolean @default(false)
+
+  isPinned   Boolean @default(false)
+  pinOrder   Int     @default(0) // 👈 حقل ترتيب التثبيت
+  importance String  @default("عادي")
 
   // التتبع
   createdBy String   @default("مدير النظام")

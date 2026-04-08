@@ -142,6 +142,7 @@ const createPrivateTransaction = async (req, res) => {
 
     let finalClientId = clientId;
 
+    // 💡 التحقق من العميل الرئيسي وإنشاؤه إن لم يكن موجوداً
     if (!finalClientId) {
       if (!ownerName) {
         return res.status(400).json({
@@ -194,7 +195,6 @@ const createPrivateTransaction = async (req, res) => {
 
     const taxData = extraNotes?.taxData || {};
 
-    // 💡 جلب اسم المعقب (إن وجد) لتسجيله في بطاقة المعقبين تلقائياً
     let fetchedAgentName = "معقب (أساسي)";
     if (followUpAgentId) {
       const agentPerson = await prisma.person.findUnique({
@@ -203,7 +203,19 @@ const createPrivateTransaction = async (req, res) => {
       if (agentPerson) fetchedAgentName = agentPerson.name;
     }
 
-    // 💡 الإنشاء المترابط (Nested Write)
+    // 💡 👈 تجهيز قائمة الملاك التفصيلية لإنشائها في الجدول المستقل
+    const detailedOwnersList = extraNotes?.detailedOwnersList || [];
+
+    // إذا لم تكن هناك قائمة ملاك مفصلة، نعتمد المالك الرئيسي كمالك وحيد في القائمة
+    if (detailedOwnersList.length === 0) {
+      detailedOwnersList.push({
+        clientId: finalClientId,
+        ownerName: ownerName,
+        idNumber: ownerIdNumber || null,
+        isPrimary: true,
+      });
+    }
+
     const newTransaction = await prisma.privateTransaction.create({
       data: {
         transactionCode,
@@ -218,6 +230,16 @@ const createPrivateTransaction = async (req, res) => {
         clientType: clientType || null,
         ownerNames: ownerName || null,
         ownerIds: ownerIdNumber || null,
+
+        // 💡 👈 إنشاء الروابط في الجدول الوسيط للملاك
+        ownersList: {
+          create: detailedOwnersList.map((owner) => ({
+            clientId: owner.clientId || finalClientId, // تأكيد وجود ID
+            // ownerName: owner.ownerName,
+            idNumber: owner.idNumber || null,
+            isPrimary: owner.isPrimary || false,
+          })),
+        },
 
         districtId: districtId || null,
         districtName: district || null,
@@ -258,7 +280,6 @@ const createPrivateTransaction = async (req, res) => {
         receiverId: receiverId || null,
         engOfficeBrokerId: engOfficeBrokerId || null,
 
-        // 💡 [السر هنا]: إنشاء كارت الوسيط في جدول TransactionBroker تلقائياً
         brokersList: brokerId
           ? {
               create: [
@@ -278,7 +299,6 @@ const createPrivateTransaction = async (req, res) => {
           agentFees: agentFees ? parseFloat(agentFees) : 0,
           transactionComments: extraNotes?.transactionComments || [],
 
-          // 💡 [السر هنا]: إنشاء كارت المعقب في المصفوفة تلقائياً
           agents: followUpAgentId
             ? [
                 {
@@ -319,6 +339,7 @@ const createPrivateTransaction = async (req, res) => {
       data: newTransaction,
     });
   } catch (error) {
+    console.error("Create Tx Error:", error);
     res.status(500).json({
       success: false,
       message: "خطأ في السيرفر أثناء حفظ المعاملة",
@@ -345,7 +366,7 @@ const getFullName = (name) => {
 };
 
 // ==================================================
-// 2. جلب قائمة المعاملات (مع دعم الربط التلقائي للرخص والبيانات الشاملة)
+// 3. جلب قائمة المعاملات (مع دعم الربط التلقائي للرخص والبيانات الشاملة)
 // GET /api/private-transactions
 // ==================================================
 const getPrivateTransactions = async (req, res) => {
@@ -389,7 +410,7 @@ const getPrivateTransactions = async (req, res) => {
         createdAt: true,
         updatedAt: true,
         createdBy: true,
-        notes: true, // 💡 ستأتي التعليقات تلقائياً لأنها محفوظة داخل كائن Notes
+        notes: true,
         serviceNo: true,
         requestNo: true,
         licenseNo: true,
@@ -405,6 +426,20 @@ const getPrivateTransactions = async (req, res) => {
         netAmount: true,
         taxAmount: true,
         sourceName: true,
+
+        // 💡 👈 جلب قائمة الملاك مع بياناتهم الحقيقية من جدول العملاء
+        ownersList: {
+          select: {
+            isPrimary: true,
+            client: {
+              select: {
+                id: true,
+                name: true,
+                idNumber: true,
+              },
+            },
+          },
+        },
 
         client: {
           select: {
@@ -446,17 +481,42 @@ const getPrivateTransactions = async (req, res) => {
       const notes =
         typeof tx.notes === "object" && tx.notes !== null ? tx.notes : {};
 
-      const freshClientName = getFullName(tx.client?.name);
-      let ownerName = freshClientName;
+      // 💡 👈 استخراج وبناء الملاك من الجدول الوسيط (بأسمائهم الحقيقية المحدثة)
+      const sortedOwners =
+        tx.ownersList?.sort(
+          (a, b) => (b.isPrimary ? 1 : -1) - (a.isPrimary ? 1 : -1),
+        ) || [];
 
-      if (
-        tx.ownerNames &&
-        tx.ownerNames !== freshClientName &&
-        (tx.ownerNames.includes(" و ") || tx.ownerNames.includes("،"))
-      ) {
-        ownerName = tx.ownerNames;
-      } else if (freshClientName === "غير محدد" && notes?.fullOwnerNames) {
-        ownerName = notes.fullOwnerNames;
+      let finalDetailedOwners = [];
+      let displayNames = [];
+
+      if (sortedOwners.length > 0) {
+        finalDetailedOwners = sortedOwners.map((o) => {
+          let cName = "غير محدد";
+          if (o.client?.name) {
+            cName =
+              typeof o.client.name === "string"
+                ? o.client.name
+                : o.client.name.ar || "غير محدد";
+          }
+          displayNames.push(cName);
+          return {
+            clientId: o.client.id,
+            ownerName: cName,
+            idNumber: o.client.idNumber,
+            isPrimary: o.isPrimary,
+          };
+        });
+      } else {
+        // Fallback للبيانات القديمة إذا لم تكن مسجلة في ownersList
+        let cName =
+          typeof tx.client?.name === "string"
+            ? tx.client?.name
+            : tx.client?.name?.ar || tx.ownerNames || "غير محدد";
+        displayNames.push(cName);
+        finalDetailedOwners = [
+          { clientId: tx.client?.id, ownerName: cName, isPrimary: true },
+        ];
       }
 
       let collectionStatus = "غير محصل";
@@ -495,8 +555,10 @@ const getPrivateTransactions = async (req, res) => {
         internalName: notes?.internalName || tx.title?.split(" - ")[0] || "",
         type: tx.category || "غير محدد",
 
-        client: ownerName,
+        // 💡 إرسال البيانات المجهزة للفرونت
+        client: displayNames.join(" و ") || "غير محدد",
         clientObj: tx.client,
+        detailedOwnersList: finalDetailedOwners, // 👈 هذه التي سيعتمد عليها التعديل في BasicTab
 
         district:
           tx.districtName ||
@@ -550,7 +612,7 @@ const getPrivateTransactions = async (req, res) => {
         status: tx.status || "جارية",
         date: formattedDate,
         created: tx.createdAt,
-        notes: notes, // 💡 ستكون التعليقات المبدئية والجديدة موجودة هنا
+        notes: notes,
         remoteTasks: tx.tasks,
         paymentsList: tx.payments,
         settlements: tx.settlements,
@@ -1042,7 +1104,7 @@ const updateTransactionStatus = async (req, res) => {
 };
 
 // ==================================================
-// 10. التحديث الجذري للبيانات الأساسية والمالية (مُحدث لدعم الحقول، المرفقات والتعليقات)
+// 2. التحديث الجذري للبيانات الأساسية والمالية (مُحدث لدعم كافة الحقول والمرفقات وتعدد الملاك)
 // ==================================================
 const updatePrivateTransaction = async (req, res) => {
   try {
@@ -1067,13 +1129,13 @@ const updatePrivateTransaction = async (req, res) => {
       area,
       mapsLink,
       updatedBy,
-      // الحقول الجديدة المُضافة من الواجهة
       isOnAxis,
       streetName,
       officialMapLink,
       supervisingOfficeId,
       designingOfficeId,
       generalNotes,
+      ownerNames,
     } = req.body;
 
     const tx = await prisma.privateTransaction.findUnique({ where: { id } });
@@ -1117,10 +1179,8 @@ const updatePrivateTransaction = async (req, res) => {
     let currentNotes =
       typeof tx.notes === "object" && tx.notes !== null ? tx.notes : {};
 
-    // 💡 دعم وحفظ التعليقات (Comments) بشكل صريح
     if (notes && notes.transactionComments !== undefined)
       currentNotes.transactionComments = notes.transactionComments;
-
     if (notes && notes.attachments !== undefined)
       currentNotes.attachments = notes.attachments;
     if (notes && notes.authorityNotesHistory !== undefined)
@@ -1130,91 +1190,103 @@ const updatePrivateTransaction = async (req, res) => {
       currentNotes.agentFees = notes.agentFees;
 
     if (!currentNotes.refs) currentNotes.refs = {};
-
-    // حفظ الحقول العادية في الـ refs
-    if (sector !== undefined) currentNotes.refs.sector = sector;
-    if (plan !== undefined) currentNotes.refs.plan = plan;
-    if (area !== undefined) currentNotes.refs.area = area;
     if (mapsLink !== undefined) currentNotes.refs.mapsLink = mapsLink;
-    if (isOnAxis !== undefined) currentNotes.refs.isOnAxis = isOnAxis;
-    if (streetName !== undefined) currentNotes.refs.streetName = streetName;
-    if (officialMapLink !== undefined)
-      currentNotes.refs.officialMapLink = officialMapLink;
-    if (supervisingOfficeId !== undefined)
-      currentNotes.refs.supervisingOfficeId = supervisingOfficeId;
-    if (designingOfficeId !== undefined)
-      currentNotes.refs.designingOfficeId = designingOfficeId;
 
-    // معالجة وحفظ الملاحظات العامة
+    const dataToUpdate = {
+      updatedAt: new Date(),
+      category: type || tx.category,
+      source: office || tx.source,
+      districtId: districtId || tx.districtId,
+      status: req.body.status || tx.status,
+    };
+
+    if (ownerNames !== undefined) dataToUpdate.ownerNames = ownerNames;
+    if (area !== undefined) dataToUpdate.landArea = parseFloat(area);
+    if (plan !== undefined) dataToUpdate.planNumber = plan;
+    if (sector !== undefined) dataToUpdate.sector = sector;
+    if (sourceName !== undefined) dataToUpdate.sourceName = sourceName;
+    if (isOnAxis !== undefined) dataToUpdate.isOnAxis = isOnAxis;
+    if (streetName !== undefined) dataToUpdate.streetName = streetName;
+    if (officialMapLink !== undefined)
+      dataToUpdate.officialMapLink = officialMapLink;
+    if (supervisingOfficeId !== undefined)
+      dataToUpdate.supervisingOfficeId = supervisingOfficeId;
+    if (designingOfficeId !== undefined)
+      dataToUpdate.designingOfficeId = designingOfficeId;
+
     if (generalNotes !== undefined) {
-      currentNotes.generalNotes = generalNotes;
-      currentNotes.generalNotesUpdatedBy = updatedBy || "موظف النظام";
-      currentNotes.generalNotesUpdatedAt = new Date().toISOString();
+      dataToUpdate.generalNotes = generalNotes;
+      dataToUpdate.generalNotesUpdatedBy = updatedBy || "موظف النظام";
+      dataToUpdate.generalNotesUpdatedAt = new Date();
     }
 
-    // معالجة المرفقات (الصورة الجوية + مستند الملاحظات) إذا تم رفعها
     if (req.files) {
       if (req.files.newSiteImage && req.files.newSiteImage[0]) {
-        currentNotes.refs.siteImage = `/uploads/transactions/${req.files.newSiteImage[0].filename}`;
+        dataToUpdate.siteImage = `/uploads/transactions/${req.files.newSiteImage[0].filename}`;
       }
       if (req.files.generalNotesFile && req.files.generalNotesFile[0]) {
-        currentNotes.generalNotesFileUrl = `/uploads/transactions/${req.files.generalNotesFile[0].filename}`;
+        dataToUpdate.generalNotesFileUrl = `/uploads/transactions/${req.files.generalNotesFile[0].filename}`;
       }
     }
 
-    // معالجة حقل القطع (Plots) لضمان حفظه كمصفوفة بشكل صحيح
-    let parsedPlots = tx.plots;
     if (plots !== undefined) {
       if (typeof plots === "string") {
-        parsedPlots = plots
+        dataToUpdate.plots = plots
           .split(",")
           .map((s) => s.trim())
           .filter(Boolean);
       } else if (Array.isArray(plots)) {
-        parsedPlots = parsedPlots;
+        dataToUpdate.plots = plots;
       }
-      currentNotes.refs.plots = parsedPlots;
     }
 
-    if (agentCost !== undefined && agentCost !== null)
-      currentNotes.agentFees = parseFloat(agentCost) || 0;
-    if (mediatorFees !== undefined && mediatorFees !== null)
-      currentNotes.mediatorFees = parseFloat(mediatorFees) || 0;
-    if (sourceName !== undefined) currentNotes.sourceName = sourceName;
+    const parsedTotalFees =
+      totalFees !== undefined ? parseFloat(totalFees) : tx.totalFees;
+    dataToUpdate.totalFees = parsedTotalFees;
+    dataToUpdate.remainingAmount = Math.max(
+      0,
+      parsedTotalFees - (tx.paidAmount || 0),
+    );
 
-    let newTitle = tx.title;
     if (internalName !== undefined) {
       currentNotes.internalName = internalName;
       currentNotes.isInternalNameHidden =
         isInternalNameHidden === "true" || isInternalNameHidden === true;
-      newTitle =
+      dataToUpdate.title =
         !currentNotes.isInternalNameHidden && internalName
           ? `${internalName} - ${newTransactionCode}`
           : `${type || tx.category || "معاملة"} - ${newTransactionCode}`;
     }
 
-    const parsedTotalFees =
-      totalFees !== undefined ? parseFloat(totalFees) : tx.totalFees;
-    const remainingAmount = parsedTotalFees - (tx.paidAmount || 0);
+    dataToUpdate.notes = currentNotes;
+
+    // 💡 👈 تحديث قائمة الملاك في الجدول الوسيط إذا توفرت في الـ notes
+    const detailedOwnersList = notes?.detailedOwnersList;
+    if (detailedOwnersList !== undefined && Array.isArray(detailedOwnersList)) {
+      dataToUpdate.ownersList = {
+        deleteMany: {}, // 1. حذف الروابط القديمة
+        create: detailedOwnersList
+          .filter((o) => o.clientId)
+          .map((owner) => ({
+            // 2. إنشاء الروابط الجديدة بالعملاء
+            clientId: owner.clientId,
+            // ownerName: owner.ownerName,
+            idNumber: owner.idNumber || null,
+            isPrimary: owner.isPrimary || false,
+          })),
+      };
+
+      // تحديث העمّل الرئيسي للتوافق القديم
+      const primaryOwner =
+        detailedOwnersList.find((o) => o.isPrimary) || detailedOwnersList[0];
+      if (primaryOwner && primaryOwner.clientId) {
+        dataToUpdate.clientId = primaryOwner.clientId;
+      }
+    }
 
     const updatedTx = await prisma.privateTransaction.update({
       where: { id },
-      data: {
-        transactionCode: newTransactionCode,
-        title: newTitle,
-        createdAt: newCreatedAt,
-        updatedAt: new Date(), // تحديث تاريخ آخر تعديل
-        category: type || tx.category,
-        source: office || tx.source,
-        totalFees: parsedTotalFees,
-        remainingAmount: remainingAmount < 0 ? 0 : remainingAmount,
-        districtId: districtId || tx.districtId,
-        landArea: area ? parseFloat(area) : tx.landArea,
-        planNumber: plan || tx.planNumber,
-        plots: parsedPlots,
-        notes: currentNotes,
-        status: req.body.status || tx.status,
-      },
+      data: dataToUpdate,
     });
 
     await logTransactionEvent(
