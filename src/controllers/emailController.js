@@ -266,11 +266,12 @@ exports.updateMessageStatus = async (req, res) => {
       return res.json({ success: true, data: message });
     } catch (dbError) {
       // إذا لم تكن الرسالة موجودة (Record to update not found)، ننتقل للخطوة الثانية
-      if (dbError.code === 'P2025') {
-        
+      if (dbError.code === "P2025") {
         // 2. إذا لم تكن موجودة، نقوم بإنشائها في الداتابيز مع حالتها الجديدة
         // نحتاج أولاً للحصول على accountId المربوط
-        const account = await prisma.emailAccount.findFirst({ where: { isActive: true } });
+        const account = await prisma.emailAccount.findFirst({
+          where: { isActive: true },
+        });
         if (!account) throw new Error("لا يوجد حساب بريد نشط");
 
         // بما أن الواجهة الأمامية ترسل الـ ID فقط ولا ترسل محتوى الرسالة،
@@ -284,13 +285,17 @@ exports.updateMessageStatus = async (req, res) => {
             subject: req.body.subject || "رسالة واردة",
             body: "تم إنشاء هذا السجل لحفظ حالة الرسالة",
             date: new Date(),
-            ...updateData // نطبق الحالة الجديدة هنا (isDeleted: true مثلاً)
-          }
+            ...updateData, // نطبق الحالة الجديدة هنا (isDeleted: true مثلاً)
+          },
         });
-        
-        return res.json({ success: true, data: shadowMessage, message: "تم حفظ الحالة الجديدة للرسالة الواردة" });
+
+        return res.json({
+          success: true,
+          data: shadowMessage,
+          message: "تم حفظ الحالة الجديدة للرسالة الواردة",
+        });
       }
-      
+
       // إذا كان الخطأ شيئاً آخر غير "عدم الوجود"، نرمي الخطأ
       throw dbError;
     }
@@ -334,6 +339,9 @@ exports.syncHostingerEmails = async (req, res) => {
     try {
       const totalMessages = client.mailbox.exists;
       if (totalMessages === 0) {
+        // 💡 تم إصلاح إغلاق الاتصال هنا لتجنب تسرب الذاكرة
+        lock.release();
+        await client.logout();
         return res.json({
           success: true,
           data: [],
@@ -342,13 +350,14 @@ exports.syncHostingerEmails = async (req, res) => {
       }
 
       // 💡 معادلات حساب النطاق (Range) بناءً على رقم الصفحة
-      // مثال: صفحة 1 تجلب من 1357 إلى 1406
-      // صفحة 2 تجلب من 1307 إلى 1356 وهكذا...
       const fetchEnd = totalMessages - (page - 1) * limit;
       const fetchStart = Math.max(1, totalMessages - page * limit + 1);
 
       // إذا تجاوزنا عدد الرسائل المتاحة
       if (fetchEnd < 1) {
+        // 💡 تم إصلاح إغلاق الاتصال هنا أيضاً
+        lock.release();
+        await client.logout();
         return res.json({ success: true, data: [] });
       }
 
@@ -380,7 +389,11 @@ exports.syncHostingerEmails = async (req, res) => {
           subject: parsed.subject || "(بدون عنوان)",
           from:
             parsed.from?.value[0]?.address || parsed.from?.text || "غير معروف",
-          body: parsed.text || "لا يوجد نص",
+
+          // 🚀 التعديل الجوهري هنا: استخراج الـ Text والـ HTML معاً
+          body: parsed.text || "",
+          html: parsed.html || parsed.textAsHtml || "",
+
           date: parsed.date,
           isRead: msg.flags?.has("\\Seen") || false,
           category: category,
@@ -388,7 +401,8 @@ exports.syncHostingerEmails = async (req, res) => {
         });
       }
     } finally {
-      lock.release();
+      // سيتم تحرير القفل هنا دائماً بفضل الـ finally
+      if (lock) lock.release();
     }
 
     await client.logout();
@@ -403,8 +417,13 @@ exports.syncHostingerEmails = async (req, res) => {
 
 exports.analyzeInboxWithAI = async (req, res) => {
   try {
-    const account = await prisma.emailAccount.findFirst({ where: { isActive: true } });
-    if (!account) return res.status(404).json({ success: false, message: "لا يوجد حساب بريد مربوط" });
+    const account = await prisma.emailAccount.findFirst({
+      where: { isActive: true },
+    });
+    if (!account)
+      return res
+        .status(404)
+        .json({ success: false, message: "لا يوجد حساب بريد مربوط" });
 
     const client = new ImapFlow({
       host: account.imapServer || "imap.hostinger.com",
@@ -420,42 +439,68 @@ exports.analyzeInboxWithAI = async (req, res) => {
 
     // 💡 1. قائمة الكلمات المفتاحية لرسائل شركات الاتصالات (السبام)
     const telecomSpamKeywords = [
-      "باقة", "باقات", "رصيد", "اشحن", "ميجابايت", "جيجابايت", "نت", "سلفني", 
-      "عرض", "عروض", "خصم", "حصريا", "استمتع", "موبايلي", "stc", "زين", "فودافون", 
-      "اتصالات", "وي", "نغمات", "كول تون", "اشترك", "ارسل رقم"
+      "باقة",
+      "باقات",
+      "رصيد",
+      "اشحن",
+      "ميجابايت",
+      "جيجابايت",
+      "نت",
+      "سلفني",
+      "عرض",
+      "عروض",
+      "خصم",
+      "حصريا",
+      "استمتع",
+      "موبايلي",
+      "stc",
+      "زين",
+      "فودافون",
+      "اتصالات",
+      "وي",
+      "نغمات",
+      "كول تون",
+      "اشترك",
+      "ارسل رقم",
     ];
 
     try {
       const totalMessages = client.mailbox.exists;
       if (totalMessages === 0) return res.json({ success: true, data: [] });
-      
+
       const fetchStart = Math.max(1, totalMessages - 19); // جلب آخر 20 رسالة مثلاً
-      for await (let msg of client.fetch(`${fetchStart}:*`, { source: true, flags: true, uid: true }, { reverse: true })) {
+      for await (let msg of client.fetch(
+        `${fetchStart}:*`,
+        { source: true, flags: true, uid: true },
+        { reverse: true },
+      )) {
         const parsed = await simpleParser(msg.source);
-        
+
         const subject = parsed.subject || "";
         const bodyText = parsed.text || "";
         const fullTextForCheck = (subject + " " + bodyText).toLowerCase();
 
         // 💡 2. الفلترة المبدئية: هل تحتوي الرسالة على كلمات سبام صريحة؟
-        const isObviousSpam = telecomSpamKeywords.some(keyword => fullTextForCheck.includes(keyword));
+        const isObviousSpam = telecomSpamKeywords.some((keyword) =>
+          fullTextForCheck.includes(keyword),
+        );
 
         // إذا كانت سبام واضح، لا نرسلها للذكاء الاصطناعي (توفيراً للتكلفة) ونصنفها فوراً
         if (isObviousSpam) {
-            rawMessages.push({
-                id: msg.uid.toString(),
-                category: "سبام",
-                subCategory: null,
-                severity: "low",
-                title: "رسالة دعائية - شركة الاتصالات",
-                description: bodyText.substring(0, 200),
-                amount: null,
-                relatedEntityCode: "TELECOM-AD",
-                timestamp: parsed.date,
-                isRead: true, // نعتبرها مقروءة حتى لا تزعجنا
-                from: parsed.from?.text || "شركة الاتصالات"
-            });
-            continue; // تخطي إرسالها للـ AI
+          rawMessages.push({
+            id: msg.uid.toString(),
+            category: "سبام",
+            subCategory: null,
+            severity: "low",
+            title: "رسالة دعائية - شركة الاتصالات",
+            description: bodyText.substring(0, 200),
+            amount: null,
+            relatedEntityCode: "TELECOM-AD",
+            timestamp: parsed.date,
+            isRead: true, // نعتبرها مقروءة حتى لا تزعجنا
+            from: parsed.from?.text || "شركة الاتصالات",
+          });
+          continue; // تخطي إرسالها للـ AI
         }
 
         // إذا كانت رسالة عادية، نجهزها للـ AI
@@ -465,7 +510,7 @@ exports.analyzeInboxWithAI = async (req, res) => {
           text: bodyText.substring(0, 800),
           date: parsed.date,
           isRead: msg.flags?.has("\\Seen") || false,
-          from: parsed.from?.text || "مجهول"
+          from: parsed.from?.text || "مجهول",
         });
       }
     } finally {
@@ -474,14 +519,14 @@ exports.analyzeInboxWithAI = async (req, res) => {
     await client.logout();
 
     // فصل الرسائل التي تحتاج ذكاء اصطناعي عن رسائل السبام الجاهزة
-    const messagesForAI = rawMessages.filter(m => m.category !== "سبام");
-    const preFilteredSpam = rawMessages.filter(m => m.category === "سبام");
+    const messagesForAI = rawMessages.filter((m) => m.category !== "سبام");
+    const preFilteredSpam = rawMessages.filter((m) => m.category === "سبام");
 
     let finalArray = [...preFilteredSpam]; // نبدأ بإضافة السبام المفلتر للنتيجة النهائية
 
     // 💡 3. إرسال الرسائل المتبقية للذكاء الاصطناعي مع تعليمات صارمة
     if (messagesForAI.length > 0) {
-        const prompt = `
+      const prompt = `
           أنت مساعد ذكي لنظام إدارة مكتب هندسي. تم استلام رسائل محولة من شريحة جوال (SMS) أو إيميلات.
           
           تعليمات هامة جداً: 
@@ -504,30 +549,40 @@ exports.analyzeInboxWithAI = async (req, res) => {
           ${JSON.stringify(messagesForAI)}
         `;
 
-        const aiResponse = await openai.chat.completions.create({
-          model: "gpt-3.5-turbo-1106",
-          response_format: { type: "json_object" },
-          messages: [
-            { role: "system", content: "You strictly output valid JSON arrays containing the analyzed emails." },
-            { role: "user", content: prompt }
-          ],
-        });
+      const aiResponse = await openai.chat.completions.create({
+        model: "gpt-3.5-turbo-1106",
+        response_format: { type: "json_object" },
+        messages: [
+          {
+            role: "system",
+            content:
+              "You strictly output valid JSON arrays containing the analyzed emails.",
+          },
+          { role: "user", content: prompt },
+        ],
+      });
 
-        const analyzedDataStr = aiResponse.choices[0].message.content;
-        const parsedData = JSON.parse(analyzedDataStr);
-        const aiAnalyzedMessages = Array.isArray(parsedData) ? parsedData : (parsedData.emails || parsedData.notifications || parsedData.data || []);
-        
-        // دمج نتائج الـ AI مع نتائج الفلترة السريعة
-        finalArray = [...finalArray, ...aiAnalyzedMessages];
+      const analyzedDataStr = aiResponse.choices[0].message.content;
+      const parsedData = JSON.parse(analyzedDataStr);
+      const aiAnalyzedMessages = Array.isArray(parsedData)
+        ? parsedData
+        : parsedData.emails ||
+          parsedData.notifications ||
+          parsedData.data ||
+          [];
+
+      // دمج نتائج الـ AI مع نتائج الفلترة السريعة
+      finalArray = [...finalArray, ...aiAnalyzedMessages];
     }
 
     // ترتيب الرسائل من الأحدث للأقدم
     finalArray.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
     res.json({ success: true, data: finalArray });
-
   } catch (error) {
     console.error("AI Analysis Error:", error);
-    res.status(500).json({ success: false, message: "فشل التحليل الذكي: " + error.message });
+    res
+      .status(500)
+      .json({ success: false, message: "فشل التحليل الذكي: " + error.message });
   }
 };
