@@ -4,36 +4,41 @@ const fs = require("fs");
 const path = require("path");
 const { z } = require("zod");
 
-// 💡 استيراد الـ SDK الجديد لـ Gemini
 const { GoogleGenAI } = require("@google/genai");
-
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
-// ==========================================
-// 💡 Zod Schema لتنظيف مخرجات AI للمراجع
-// ==========================================
+// 💡 Zod Schema (شملنا جميع الحقول الجديدة)
 const ReferenceAISchema = z.object({
   summary: z.string().catch("لم يتم توليد ملخص."),
   keyRules: z.array(z.string()).catch([]),
   targetAudience: z.string().catch("غير محدد"),
+
+  txType: z.string().nullable().catch(null),
+  txMainCategory: z.string().nullable().catch(null),
+  txSubCategory: z.string().nullable().catch(null),
+
+  buildingTypes: z.array(z.string()).catch([]),
+  landAreaFrom: z.number().nullable().catch(null),
+  landAreaTo: z.number().nullable().catch(null),
+
+  city: z.string().nullable().catch(null),
+  sector: z.string().nullable().catch(null),
+  districts: z.array(z.string()).catch([]),
+
+  floorsFrom: z.number().nullable().catch(null),
+  floorsTo: z.number().nullable().catch(null),
+  streetWidthFrom: z.number().nullable().catch(null),
+  streetWidthTo: z.number().nullable().catch(null),
 });
 
-// ==================================================
-// 💡 (1) دالة مساعدة لتسجيل الأحداث (Logs) بذكاء
-// ==================================================
 const addLog = async (referenceId, action, req) => {
-  // سحب البيانات إما من التوكن (إن وجد) أو من البودي المرسل من الـ Frontend
   const userName = req.body?.userName || req.user?.name || "مستخدم غير معروف";
   const userEmail = req.body?.userEmail || req.user?.email || "";
-
   await prisma.referenceLog.create({
     data: { referenceId, action, userName, userEmail },
   });
 };
 
-// ==================================================
-// 💡 (2) دالة تعمل في الخلفية لتحليل المستند (Background Job)
-// ==================================================
 const analyzeReferenceBackground = async (
   documentId,
   filePath,
@@ -41,16 +46,10 @@ const analyzeReferenceBackground = async (
   analysisType = "full",
 ) => {
   try {
-    console.log(
-      `🚀 بدء تحليل المرجع [${documentId}] بواسطة Gemini... (النوع: ${analysisType})`,
-    );
+    console.log(`🚀 بدء تحليل المرجع [${documentId}] بواسطة Gemini...`);
 
-    if (!fs.existsSync(filePath)) {
-      throw new Error("الملف الفيزيائي غير موجود على السيرفر");
-    }
-
+    if (!fs.existsSync(filePath)) throw new Error("الملف الفيزيائي غير موجود");
     const fileBuffer = fs.readFileSync(filePath);
-
     const documentPart = {
       inlineData: {
         data: fileBuffer.toString("base64"),
@@ -58,88 +57,93 @@ const analyzeReferenceBackground = async (
       },
     };
 
-    // برومبت مخصص للتعاميم والأدلة الهندسية بناءً على نوع الطلب
-    let promptInstruction = "";
-    if (analysisType === "quick") {
-      promptInstruction = `
-      المطلوب منك عمل تلخيص "سريع ومختصر جداً" للمستند.
-      {
-        "summary": "ملخص من سطرين فقط",
-        "keyRules": ["أهم قاعدة أو اثنتين فقط"],
-        "targetAudience": "المستهدفون باختصار"
-      }`;
-    } else {
-      promptInstruction = `
-      المطلوب منك "تحليل شامل ودقيق" لهذا المستند المرجعي.
-      {
-        "summary": "ملخص واضح ومبسط من 3-4 أسطر يشرح الغرض من هذا المستند والتحديثات التي طرأت عليه",
-        "keyRules": ["استخرج أهم 3 إلى 6 قواعد أو اشتراطات إلزامية، واذكر المعايير الرقمية كالارتدادات أو المساحات إن وجدت"],
-        "targetAudience": "من المستهدف بهذا المستند؟ (مثال: المكاتب الهندسية، المقاولون، الملاك، الجهات الحكومية)"
-      }`;
-    }
+    let promptInstruction =
+      analysisType === "quick"
+        ? `قم بعمل تلخيص "سريع ومختصر جداً" للمستند واستخراج محددات الانطباق الممكنة.`
+        : `قم بـ "تحليل شامل ودقيق" للمستند واستخراج كافة محددات الانطباق بدقة.`;
 
     const prompt = `
-    أنت مستشار ومهندس خبير في الأنظمة البلدية وكود البناء السعودي.
-    أمامك مستند مرجعي. استخرج البيانات حصرياً بصيغة JSON المطابقة للتركيبة التالية:
+    أنت خبير في الأنظمة البلدية وكود البناء السعودي.
+    استخرج البيانات بصيغة JSON حصرياً المطابقة للتركيبة التالية:
     ${promptInstruction}
-    لا تقم بإضافة أي نصوص خارج الـ JSON.
-    `;
+    {
+      "summary": "ملخص واضح ومبسط يشرح الغرض من هذا المستند",
+      "keyRules": ["أهم الاشتراطات"],
+      "targetAudience": "المستهدفون بهذا المستند",
+      "txType": "إصدار رخصة بناء، تعديل رخصة بناء، أو null",
+      "txMainCategory": "مستندات معاملات، مخططات، أو null",
+      "txSubCategory": "مخططات معمارية، تقارير هندسية، أو null",
+      "buildingTypes": ["سكني", "تجاري", ...],
+      "landAreaFrom": الحد الأدنى لمساحة الأرض أو null,
+      "landAreaTo": الحد الأقصى لمساحة الأرض أو null,
+      "city": "المدينة المذكورة أو null",
+      "sector": "شمال، جنوب، وسط... أو null",
+      "districts": ["الصحافة", "الملقا"...],
+      "floorsFrom": الحد الأدنى لعدد الأدوار أو null,
+      "floorsTo": الحد الأقصى لعدد الأدوار أو null,
+      "streetWidthFrom": الحد الأدنى لعرض الشارع أو null,
+      "streetWidthTo": الحد الأقصى لعرض الشارع أو null
+    }`;
 
     const fallbackModels = [
       "gemini-3-flash-preview",
       "gemini-2.5-flash",
       "gemini-1.5-flash",
-      "gemini-1.5-pro",
     ];
-
     let response = null;
 
     for (const modelName of fallbackModels) {
       try {
-        console.log(`🔄 جاري محاولة التحليل باستخدام: ${modelName}...`);
         response = await ai.models.generateContent({
           model: modelName,
           contents: [prompt, documentPart],
-          config: {
-            temperature: 0.0,
-            responseMimeType: "application/json",
-          },
+          config: { temperature: 0.0, responseMimeType: "application/json" },
         });
-        console.log(`✅ نجح التحليل باستخدام: ${modelName}`);
         break;
       } catch (error) {
-        console.warn(`⚠️ الموديل ${modelName} غير متاح. جاري التحويل...`);
         await new Promise((resolve) => setTimeout(resolve, 1000));
       }
     }
 
-    if (!response) {
-      throw new Error("جميع نماذج الذكاء الاصطناعي مشغولة حالياً.");
-    }
+    if (!response) throw new Error("جميع نماذج الذكاء الاصطناعي مشغولة.");
 
-    const responseText = response.text;
-    const parsedData = JSON.parse(responseText);
+    const parsedData = JSON.parse(response.text);
     const validatedData = ReferenceAISchema.parse(parsedData);
-
-    // دمج القواعد في نص واحد لتخزينه كملخص ذكي
     const finalSummaryText = `📌 الملخص:\n${validatedData.summary}\n\n⚠️ أهم الاشتراطات:\n- ${validatedData.keyRules.join("\n- ")}\n\n🎯 المستهدفون: ${validatedData.targetAudience}`;
 
-    // تحديث السجل في الداتابيز ليصبح "محلل" ونحفظ الملخص
+    // تحديث البيانات التي تم استخراجها فقط لعدم حذف بيانات أدخلها المستخدم يدوياً
+    const updateData = { analysisStatus: "محلل", aiSummary: finalSummaryText };
+    if (validatedData.txType) updateData.txType = validatedData.txType;
+    if (validatedData.txMainCategory)
+      updateData.txMainCategory = validatedData.txMainCategory;
+    if (validatedData.txSubCategory)
+      updateData.txSubCategory = validatedData.txSubCategory;
+    if (validatedData.buildingTypes.length)
+      updateData.buildingTypes = validatedData.buildingTypes;
+    if (validatedData.landAreaFrom !== null)
+      updateData.landAreaFrom = validatedData.landAreaFrom;
+    if (validatedData.landAreaTo !== null)
+      updateData.landAreaTo = validatedData.landAreaTo;
+    if (validatedData.city) updateData.city = validatedData.city;
+    if (validatedData.sector) updateData.sector = validatedData.sector;
+    if (validatedData.districts.length)
+      updateData.districts = validatedData.districts;
+    if (validatedData.floorsFrom !== null)
+      updateData.floorsFrom = validatedData.floorsFrom;
+    if (validatedData.floorsTo !== null)
+      updateData.floorsTo = validatedData.floorsTo;
+    if (validatedData.streetWidthFrom !== null)
+      updateData.streetWidthFrom = validatedData.streetWidthFrom;
+    if (validatedData.streetWidthTo !== null)
+      updateData.streetWidthTo = validatedData.streetWidthTo;
+
     await prisma.referenceDocument.update({
       where: { id: documentId },
-      data: {
-        analysisStatus: "محلل",
-        aiSummary: finalSummaryText,
-      },
+      data: updateData,
     });
-
     console.log(`✅ تمت أرشفة تحليل المرجع [${documentId}] بنجاح.`);
   } catch (error) {
-    console.error(
-      `🔥 خطأ في تحليل المرجع بالخلفية [${documentId}]:`,
-      error.message,
-    );
-
+    console.error(`🔥 خطأ في التحليل:`, error.message);
     await prisma.referenceDocument.update({
       where: { id: documentId },
       data: { analysisStatus: "يحتاج مراجعة" },
@@ -147,11 +151,6 @@ const analyzeReferenceBackground = async (
   }
 };
 
-// ==================================================
-// 💡 (3) الكنترولرات الرئيسية (Controllers)
-// ==================================================
-
-// جلب جميع المراجع
 exports.getReferences = async (req, res) => {
   try {
     const references = await prisma.referenceDocument.findMany({
@@ -163,7 +162,6 @@ exports.getReferences = async (req, res) => {
   }
 };
 
-// إنشاء مرجع جديد وإطلاق الـ AI
 exports.createReference = async (req, res) => {
   try {
     const {
@@ -172,17 +170,26 @@ exports.createReference = async (req, res) => {
       category,
       type,
       city,
+      sector,
+      txType,
+      txMainCategory,
+      txSubCategory,
       issueDate,
       expiryDate,
       autoAnalyze,
     } = req.body;
 
-    const transactionTypes = req.body.transactionTypes
-      ? JSON.parse(req.body.transactionTypes)
-      : [];
     const buildingTypes = req.body.buildingTypes
       ? JSON.parse(req.body.buildingTypes)
       : [];
+    const districts = req.body.districts ? JSON.parse(req.body.districts) : [];
+
+    const landAreaFrom = req.body.landAreaFrom
+      ? parseFloat(req.body.landAreaFrom)
+      : null;
+    const landAreaTo = req.body.landAreaTo
+      ? parseFloat(req.body.landAreaTo)
+      : null;
     const floorsFrom = req.body.floorsFrom
       ? parseInt(req.body.floorsFrom)
       : null;
@@ -197,11 +204,8 @@ exports.createReference = async (req, res) => {
     let fileUrl = null;
     let absoluteFilePath = null;
     let mimeType = null;
-
     if (req.file) {
-      // حفظ المسار النسبي لقاعدة البيانات (ليعمل في الواجهة الأمامية)
       fileUrl = `/uploads/references/${req.file.filename}`;
-      // حفظ المسار الحقيقي على السيرفر لتقرأه مكتبة fs للذكاء الاصطناعي
       absoluteFilePath = path.join(
         __dirname,
         "..",
@@ -219,14 +223,20 @@ exports.createReference = async (req, res) => {
         category,
         type,
         city,
-        issueDate: issueDate ? new Date(issueDate) : null,
-        expiryDate: expiryDate ? new Date(expiryDate) : null,
-        transactionTypes,
+        sector,
+        txType,
+        txMainCategory,
+        txSubCategory,
         buildingTypes,
+        districts,
+        landAreaFrom,
+        landAreaTo,
         floorsFrom,
         floorsTo,
         streetWidthFrom,
         streetWidthTo,
+        issueDate: issueDate ? new Date(issueDate) : null,
+        expiryDate: expiryDate ? new Date(expiryDate) : null,
         fileUrl,
         analysisStatus:
           autoAnalyze === "true" && absoluteFilePath
@@ -235,10 +245,12 @@ exports.createReference = async (req, res) => {
       },
     });
 
-    // تشغيل تحليل الذكاء الاصطناعي في الخلفية
     if (autoAnalyze === "true" && absoluteFilePath) {
       analyzeReferenceBackground(newRef.id, absoluteFilePath, mimeType, "full");
     }
+
+    req.body.userName = req.user?.name;
+    await addLog(newRef.id, "إضافة مرجع جديد للمكتبة", req);
 
     res.status(201).json({ success: true, data: newRef });
   } catch (error) {
@@ -247,17 +259,14 @@ exports.createReference = async (req, res) => {
   }
 };
 
-// حفظ التوجيهات الإدارية (يدوي) وتسجيل الإجراء
 exports.updateManualNotes = async (req, res) => {
   try {
     const { id } = req.params;
     const { manualNotes } = req.body;
-
     await prisma.referenceDocument.update({
       where: { id },
       data: { manualNotes },
     });
-
     await addLog(id, "تم تحديث توجيهات وملاحظات الإدارة", req);
     res.json({ success: true, message: "تم الحفظ بنجاح" });
   } catch (error) {
@@ -265,15 +274,12 @@ exports.updateManualNotes = async (req, res) => {
   }
 };
 
-// حذف المستند
 exports.deleteReference = async (req, res) => {
   try {
     const { id } = req.params;
     const ref = await prisma.referenceDocument.findUnique({ where: { id } });
-
     if (ref && ref.fileUrl) {
-      // 💡 إصلاح مسار الحذف: تحويل الرابط النسبي إلى مسار فيزيائي صحيح
-      const filename = ref.fileUrl.split("/").pop(); // استخراج اسم الملف فقط
+      const filename = ref.fileUrl.split("/").pop();
       const filePath = path.join(
         __dirname,
         "..",
@@ -281,12 +287,8 @@ exports.deleteReference = async (req, res) => {
         "references",
         filename,
       );
-
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
-      }
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
     }
-
     await prisma.referenceDocument.delete({ where: { id } });
     res.json({ success: true, message: "تم الحذف بنجاح" });
   } catch (error) {
@@ -294,7 +296,6 @@ exports.deleteReference = async (req, res) => {
   }
 };
 
-// جلب سجل الأحداث (Logs) للمستند
 exports.getReferenceLogs = async (req, res) => {
   try {
     const { id } = req.params;
@@ -308,31 +309,28 @@ exports.getReferenceLogs = async (req, res) => {
   }
 };
 
-// إعادة التحليل الذكي (يتم تشغيله في الخلفية)
 exports.reanalyzeReference = async (req, res) => {
   try {
     const { id } = req.params;
-    const { type } = req.body; // type: "full" أو "quick"
-
+    const { type } = req.body;
     const doc = await prisma.referenceDocument.findUnique({ where: { id } });
-    if (!doc || !doc.fileUrl) {
+    if (!doc || !doc.fileUrl)
       return res
         .status(400)
         .json({ success: false, message: "الملف غير موجود للتحليل" });
-    }
 
-    const actionText =
+    await addLog(
+      id,
       type === "quick"
         ? "طلب تلخيص سريع للمستند"
-        : "طلب إعادة التحليل الذكي الشامل";
-    await addLog(id, actionText, req);
-
+        : "طلب إعادة التحليل الذكي الشامل",
+      req,
+    );
     await prisma.referenceDocument.update({
       where: { id },
       data: { analysisStatus: "قيد التحليل" },
     });
 
-    // 💡 إصلاح مسار القراءة للذكاء الاصطناعي
     const filename = doc.fileUrl.split("/").pop();
     const absoluteFilePath = path.join(
       __dirname,
@@ -342,9 +340,7 @@ exports.reanalyzeReference = async (req, res) => {
       filename,
     );
 
-    // تشغيل التحليل في الخلفية وإرسال المعامل type
     analyzeReferenceBackground(id, absoluteFilePath, "application/pdf", type);
-
     res.json({ success: true, message: "بدأت عملية التحليل في الخلفية" });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

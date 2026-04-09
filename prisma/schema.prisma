@@ -2555,26 +2555,42 @@ model ReferenceDocument {
   type     String
   fileUrl  String?
 
+  // 1. المعاملات المستهدفة
+  txType         String?
+  txMainCategory String?
+  txSubCategory  String?
+
+  // محددات الانطباق
   transactionTypes String[]
+  // 2. العقار والأرض
   buildingTypes    String[]
-  city             String?
-  floorsFrom       Int?
-  floorsTo         Int?
-  streetWidthFrom  Int?
-  streetWidthTo    Int?
+  landAreaFrom     Float?
+  landAreaTo       Float?
+
+  // 3. الموقع الجغرافي
+  city      String?
+  sector    String?
+  districts String[]
+
+  floorsFrom      Int?
+  floorsTo        Int?
+  streetWidthFrom Int?
+  streetWidthTo   Int?
 
   issueDate  DateTime?
   expiryDate DateTime?
 
-  status         String  @default("نشط")
-  analysisStatus String  @default("غير محلل")
-  aiSummary      String? @db.Text
-  manualNotes    String? @db.Text // 👈 حقل التوجيهات اليدوية
+  status         String @default("نشط")
+  analysisStatus String @default("غير محلل")
+
+  // نصوص الإدارة والتحليل
+  aiSummary   String? @db.Text
+  manualNotes String? @db.Text
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  // علاقة مع سجل التحديثات
+  // علاقة مع سجل التحديثات (يحذف السجلات تلقائياً إذا حُذف المستند)
   logs ReferenceLog[]
 }
 
@@ -2583,8 +2599,9 @@ model ReferenceLog {
   referenceId String
   reference   ReferenceDocument @relation(fields: [referenceId], references: [id], onDelete: Cascade)
 
-  action    String // مثال: "تم تعديل التوجيهات", "إعادة تحليل"
-  userName  String // اسم الشخص الذي قام بالفعل
+  action    String
+  userName  String
   userEmail String?
+
   createdAt DateTime @default(now())
 }
