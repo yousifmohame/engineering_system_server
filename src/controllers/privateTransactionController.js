@@ -371,8 +371,6 @@ const getFullName = (name) => {
 // ==================================================
 const getPrivateTransactions = async (req, res) => {
   try {
-    const limit = Math.min(parseInt(req.query.limit) || 50, 200);
-    const cursor = req.query.cursor;
     const { permitNumber, year } = req.query;
 
     const where = {};
@@ -391,10 +389,8 @@ const getPrivateTransactions = async (req, res) => {
       ];
     }
 
+    // 💡 إزالة take و skip و cursor لجلب كل البيانات دفعة واحدة
     const transactions = await prisma.privateTransaction.findMany({
-      take: limit,
-      skip: cursor ? 1 : 0,
-      cursor: cursor ? { id: cursor } : undefined,
       where,
       orderBy: { createdAt: "desc" },
       select: {
@@ -621,14 +617,10 @@ const getPrivateTransactions = async (req, res) => {
       };
     });
 
-    const nextCursor =
-      transactions.length === limit
-        ? transactions[transactions.length - 1].id
-        : null;
+    // 💡 تم إزالة nextCursor من الاستجابة النهائية لعدم الحاجة إليه بعد إلغاء الليمت
     res.json({
       success: true,
       count: formattedData.length,
-      nextCursor,
       data: formattedData,
     });
   } catch (error) {

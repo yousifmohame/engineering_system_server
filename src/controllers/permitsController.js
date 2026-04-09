@@ -112,14 +112,17 @@ const analyzePermitAI = async (req, res) => {
 
     const prompt = `
     أنت نظام استخراج بيانات (Data Extractor) عالي الدقة تعمل لدى أمانة منطقة الرياض.
-    أمامك وثيقة رسمية (رخصة بناء). استخرج البيانات الموجودة فيها حصرياً لملء كائن الـ JSON التالي.
+    أمامك وثيقة رسمية (قد تكون: رخصة بناء، تعديل مخططات، رخصة تسوير، إضافة، أو أي وثيقة بلدية). 
+    استخرج البيانات الموجودة فيها حصرياً لملء كائن الـ JSON التالي.
+
+    ⚠️ أمر حاسم (CRITICAL): يجب أن تحتوي المصفوفة "permits" على عنصر واحد على الأقل طالما أن المستند يحتوي على أي بيانات عقارية (رقم رخصة، مالك، قطعة، الخ). يُمنع منعاً باتاً إرجاع مصفوفة فارغة.
 
     تعليمات صارمة جداً:
     1. اقرأ البيانات من الجداول بدقة، خاصة جدول "الحدود والأبعاد والإرتدادات" وجدول "عرض مكونات البناء".
     2. الأرقام: قم بتحويل أي رقم هندي (١،٢،٣) إلى رقم إنجليزي (1,2,3).
     3. المساحات والأطوال: استخرج الرقم فقط (بدون كتابة حرف 'م' أو 'م2').
     4. لا تخمن أي معلومة. إذا كانت المعلومة غير موجودة في المستند، أرجع null للنصوص أو 0 للأرقام.
-    5. التقرير (detailedReport): اكتب 3 أسطر باللغة العربية تلخص محتوى الرخصة وأهم ما جاء في خانة "الملاحظات" أو "الموقع العام".
+    5. التقرير (detailedReport): اكتب 3 أسطر باللغة العربية تلخص محتوى الرخصة (مثل نوع الطلب المذكور وأهم الشروط).
 
     يجب أن يكون المخرج حصرياً بصيغة JSON المطابقة للتركيبة التالية:
     {
@@ -129,7 +132,7 @@ const analyzePermitAI = async (req, res) => {
           "issueDate": "تاريخ إصدارها",
           "expiryDate": "تاريخ انتهائها",
           "year": "سنة الإصدار",
-          "type": "نوع الطلب أو الرخصة (مثال: رخصة بناء)",
+          "type": "نوع الطلب أو الرخصة المكتوب (مثال: تعديل مخططات، رخصة بناء)",
           "ownerName": "اسم صاحب الرخصة",
           "idNumber": "رقم الهوية أو السجل التجاري",
           "district": "الحي",
@@ -137,10 +140,10 @@ const analyzePermitAI = async (req, res) => {
           "plotNumber": "رقم قطعة الأرض",
           "planNumber": "رقم المخطط",
           "mainUsage": "التصنيف الرئيسي (مثال: تجاري)",
-          "subUsage": "التصنيف الفرعي (مثال: المركز التجارية الصغيرة)",
+          "subUsage": "التصنيف الفرعي",
           "landArea": 0,
           "engineeringOffice": "المكتب الهندسي المصمم أو المشرف",
-          "notes": "الملاحظات والشروط",
+          "notes": "الملاحظات والشروط المكتوبة أسفل الرخصة",
           "form": "أخضر",
           "componentsData": [
             { "name": "اسم المكون", "usage": "الاستخدام", "area": 0, "units": 0 }
@@ -157,9 +160,9 @@ const analyzePermitAI = async (req, res) => {
     // 💡 قائمة النماذج حسب الأولوية (من الأحدث إلى الأكثر استقراراً)
     const fallbackModels = [
       "gemini-3-flash-preview", // المحاولة الأولى (الأحدث)
-      "gemini-2.5-flash",       // المحاولة الثانية (سريع ومستقر جداً)
-      "gemini-1.5-flash",       // المحاولة الثالثة (صخرة لا تنكسر)
-      "gemini-1.5-pro"          // المحاولة الأخيرة
+      "gemini-2.5-flash", // المحاولة الثانية (سريع ومستقر جداً)
+      "gemini-1.5-flash", // المحاولة الثالثة (صخرة لا تنكسر)
+      "gemini-1.5-pro", // المحاولة الأخيرة
     ];
 
     let response = null;
@@ -169,7 +172,7 @@ const analyzePermitAI = async (req, res) => {
     for (const modelName of fallbackModels) {
       try {
         console.log(`🔄 جاري محاولة التحليل باستخدام الموديل: ${modelName}...`);
-        
+
         response = await ai.models.generateContent({
           model: modelName,
           contents: [prompt, documentPart],
@@ -178,21 +181,25 @@ const analyzePermitAI = async (req, res) => {
             responseMimeType: "application/json",
           },
         });
-        
+
         console.log(`✅ نجح التحليل باستخدام: ${modelName}`);
         break; // إذا نجح الطلب، نوقف اللوب فوراً
       } catch (error) {
-        console.warn(`⚠️ الموديل ${modelName} مشغول أو غير متاح (${error.status}). جاري التحويل للبديل...`);
+        console.warn(
+          `⚠️ الموديل ${modelName} مشغول أو غير متاح (${error.status}). جاري التحويل للبديل...`,
+        );
         lastError = error;
-        
+
         // انتظار بسيط (ثانية واحدة) قبل المحاولة بالنموذج التالي لتجنب حظر الـ API
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        await new Promise((resolve) => setTimeout(resolve, 1000));
       }
     }
 
     // إذا فشلت جميع المحاولات
     if (!response) {
-      throw new Error(`جميع نماذج الذكاء الاصطناعي مشغولة حالياً بسبب الضغط العالي. يرجى المحاولة بعد قليل. (الخطأ الأخير: ${lastError.message})`);
+      throw new Error(
+        `جميع نماذج الذكاء الاصطناعي مشغولة حالياً بسبب الضغط العالي. يرجى المحاولة بعد قليل. (الخطأ الأخير: ${lastError.message})`,
+      );
     }
 
     // استخراج النص من الاستجابة الناجحة
@@ -200,7 +207,7 @@ const analyzePermitAI = async (req, res) => {
 
     // الفلتر السحري لتنظيف الأرقام العربية الهندية (احتياطياً)
     let cleanedContent = responseText.replace(/[٠-٩]/g, (d) =>
-      "٠١٢٣٤٥٦٧٨٩".indexOf(d)
+      "٠١٢٣٤٥٦٧٨٩".indexOf(d),
     );
 
     const parsedData = JSON.parse(cleanedContent);
@@ -208,7 +215,7 @@ const analyzePermitAI = async (req, res) => {
 
     // 🛡️ التحقق والتنظيف بواسطة Zod
     const validatedPermits = rawPermits.map((permit) =>
-      PermitSchema.parse(permit)
+      PermitSchema.parse(permit),
     );
 
     console.log("✅ تم تحليل الوثيقة بنجاح بواسطة Gemini 3!");
