@@ -2546,3 +2546,45 @@ model QuickLink {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
+
+model ReferenceDocument {
+  id       String  @id @default(cuid())
+  title    String
+  source   String
+  category String
+  type     String
+  fileUrl  String?
+
+  transactionTypes String[]
+  buildingTypes    String[]
+  city             String?
+  floorsFrom       Int?
+  floorsTo         Int?
+  streetWidthFrom  Int?
+  streetWidthTo    Int?
+
+  issueDate  DateTime?
+  expiryDate DateTime?
+
+  status         String  @default("نشط")
+  analysisStatus String  @default("غير محلل")
+  aiSummary      String? @db.Text
+  manualNotes    String? @db.Text // 👈 حقل التوجيهات اليدوية
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // علاقة مع سجل التحديثات
+  logs ReferenceLog[]
+}
+
+model ReferenceLog {
+  id          String            @id @default(cuid())
+  referenceId String
+  reference   ReferenceDocument @relation(fields: [referenceId], references: [id], onDelete: Cascade)
+
+  action    String // مثال: "تم تعديل التوجيهات", "إعادة تحليل"
+  userName  String // اسم الشخص الذي قام بالفعل
+  userEmail String?
+  createdAt DateTime @default(now())
+}

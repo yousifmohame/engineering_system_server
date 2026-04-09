@@ -218,6 +218,8 @@ app.use("/api/transaction-sources", transactionSourceRoutes);
 const quickLinksRoutes = require("./routes/quickLinksRoutes");
 app.use("/api/quick-links", quickLinksRoutes);
 
+const referenceRoutes = require("./routes/referenceRoutes");
+app.use("/api/references", referenceRoutes);
 
 // فحص صحة السيرفر
 app.get("/", (req, res) => {
