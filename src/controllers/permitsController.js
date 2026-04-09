@@ -1,15 +1,17 @@
 const { PrismaClient } = require("@prisma/client");
 const prisma = new PrismaClient();
-const { fromBuffer } = require("pdf2pic");
-const { PDFDocument } = require("pdf-lib");
 const fs = require("fs");
-const { OpenAI } = require("openai");
 const { z } = require("zod");
-// تأكد من وضع مفتاح OpenAI في ملف .env
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+// 💡 1. استيراد الـ SDK الجديد
+const { GoogleGenAI } = require("@google/genai");
+
+// 💡 2. تهيئة العميل الجديد
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 const { findBestMatchAI } = require("../services/aiMatchingService");
+
 // ==========================================
-// 💡 تحليل رخص البناء بالذكاء الاصطناعي (محدث بدقة فائقة + تقرير مفصل)
+// 💡 Zod Schema (لضمان نوع البيانات)
 // ==========================================
 const PermitSchema = z.object({
   permitNumber: z.string().nullable().catch(""),
@@ -77,8 +79,9 @@ const analyzePermitAI = async (req, res) => {
     let fileBuffer;
     let mimeType;
 
+    // استلام الملف
     if (req.file) {
-      tempFilePath = req.file.path; // حفظ المسار لاستخدامه في الحذف المضمون
+      tempFilePath = req.file.path;
       fileBuffer = fs.readFileSync(tempFilePath);
       mimeType = req.file.mimetype;
     } else if (req.body.imageBase64) {
@@ -95,140 +98,108 @@ const analyzePermitAI = async (req, res) => {
         .json({ success: false, message: "لم يتم إرسال أي وثيقة" });
     }
 
-    let imagesToSend = [];
+    console.log(
+      `🚀 جاري إرسال الملف بصيغة (${mimeType}) إلى Gemini 3 Flash Preview للتحليل...`,
+    );
 
-    // 1. معالجة وتجهيز الملفات بدقة عالية
-    if (mimeType === "application/pdf") {
-      const pdfDoc = await PDFDocument.load(fileBuffer);
-      const totalPages = pdfDoc.getPageCount();
-      const pagesToProcess = Math.min(totalPages, 5);
+    // تجهيز الملف بالطريقة التي يفهمها Gemini
+    const documentPart = {
+      inlineData: {
+        data: fileBuffer.toString("base64"),
+        mimeType: mimeType,
+      },
+    };
 
-      console.log(`🚀 جاري معالجة ${pagesToProcess} صفحة بدقة عالية...`);
-
-      const options = {
-        density: 500, // تنبيه: 500 ممتازة جداً للدقة ولكنها قد تستهلك RAM أعلى وتأخذ وقتاً أطول. إذا واجهت بطء اجعلها 300
-        format: "jpeg",
-        width: 2480,
-        height: 3508,
-      };
-
-      const convert = fromBuffer(fileBuffer, options);
-
-      for (let i = 1; i <= pagesToProcess; i++) {
-        const image = await convert(i, { responseType: "base64" });
-        imagesToSend.push(`data:image/jpeg;base64,${image.base64}`);
-      }
-    } else if (mimeType.startsWith("image/")) {
-      const base64Data = fileBuffer.toString("base64");
-      imagesToSend.push(`data:${mimeType};base64,${base64Data}`);
-    } else {
-      return res
-        .status(400)
-        .json({ success: false, message: "نوع الملف غير مدعوم." });
-    }
-
-    // 2. البرومبت الصارم (تمت إضافة أمر إجبار الأرقام الإنجليزية)
     const prompt = `
-    أنت خبير قانوني وهندسي محلف ومستشار في البلديات بالمملكة العربية السعودية.
-    أمامك صورة لرخصة بناء، فسح، أو مسودة رخصة.
-    تحذير هام 🚨: استخرج النصوص كما هي مكتوبة في الصورة. يُمنع منعاً باتاً تخمين أو تأليف أي بيانات. إذا كانت المعلومة مفقودة تماماً أرجع null للأرقام أو "" للنصوص.
+    أنت نظام استخراج بيانات (Data Extractor) عالي الدقة تعمل لدى أمانة منطقة الرياض.
+    أمامك وثيقة رسمية (رخصة بناء). استخرج البيانات الموجودة فيها حصرياً لملء كائن الـ JSON التالي.
 
-    مطلوب منك الانتباه الشديد لما يلي:
-    1. **الاستخدام:** قسّمه إلى "mainUsage" (التصنيف الرئيسي مثل: سكني، تجاري، تعليمي) و "subUsage" (التصنيف الفرعي مثل: فيلا، مستودع، شقق مفروشة، مكاتب).
-    2. **الجداول:** ابحث في الصورة عن جدول "مكونات البناء" وجدول "الحدود والأبعاد". اقرأ صفوفها بدقة متناهية ولا تفوت أي صف.
-    3. **التقرير المفصل:** اكتب ملخصاً هندسياً احترافياً باللغة العربية (detailedReport) يشرح طبيعة الرخصة، موقعها، مكوناتها الأساسية، وأي ملاحظات هامة أو اشتراطات مذكورة.
-    4. **الأرقام ⚠️:** قم باستخراج وتحويل كافة الأرقام (أرقام الرخص، التواريخ، المساحات، الهويات) إلى الصيغة الإنجليزية (0-9) حصراً. يُمنع استخدام الأرقام العربية الهندية (٠-٩).
+    تعليمات صارمة جداً:
+    1. اقرأ البيانات من الجداول بدقة، خاصة جدول "الحدود والأبعاد والإرتدادات" وجدول "عرض مكونات البناء".
+    2. الأرقام: قم بتحويل أي رقم هندي (١،٢،٣) إلى رقم إنجليزي (1,2,3).
+    3. المساحات والأطوال: استخرج الرقم فقط (بدون كتابة حرف 'م' أو 'م2').
+    4. لا تخمن أي معلومة. إذا كانت المعلومة غير موجودة في المستند، أرجع null للنصوص أو 0 للأرقام.
+    5. التقرير (detailedReport): اكتب 3 أسطر باللغة العربية تلخص محتوى الرخصة وأهم ما جاء في خانة "الملاحظات" أو "الموقع العام".
 
-    قد يحتوي الملف على أكثر من رخصة، استخرجها كلها داخل مصفوفة "permits" وأعد النتيجة بصيغة JSON حصرية.
-    
-    التركيبة المطلوبة لكل رخصة بصيغة JSON:
+    يجب أن يكون المخرج حصرياً بصيغة JSON المطابقة للتركيبة التالية:
     {
       "permits": [
         {
           "permitNumber": "رقم الرخصة",
-          "issueDate": "تاريخ إصدارها (إن وجد)",
-          "expiryDate": "تاريخ انتهائها (إن وجد)",
-          "year": "سنة الرخصة (استنتجها من التاريخ الهجري كأربع أرقام)",
-          "type": "نوع الطلب أو الرخصة (مثال: بناء جديد، تعديل، تجديد...)",
-          "ownerName": "اسم صاحب الرخصة بالكامل",
-          "idNumber": "رقم الهوية أو السجل (أرقام فقط)",
+          "issueDate": "تاريخ إصدارها",
+          "expiryDate": "تاريخ انتهائها",
+          "year": "سنة الإصدار",
+          "type": "نوع الطلب أو الرخصة (مثال: رخصة بناء)",
+          "ownerName": "اسم صاحب الرخصة",
+          "idNumber": "رقم الهوية أو السجل التجاري",
           "district": "الحي",
-          "sector": "البلدية أو القطاع",
+          "sector": "الجهة (مثال: قطاع وسط مدينة الرياض)",
           "plotNumber": "رقم قطعة الأرض",
           "planNumber": "رقم المخطط",
           "mainUsage": "التصنيف الرئيسي (مثال: تجاري)",
-          "subUsage": "التصنيف الفرعي (مثال: مكاتب ومحلات)",
-          "landArea": مساحة الأرض (رقم Number فقط),
+          "subUsage": "التصنيف الفرعي (مثال: المركز التجارية الصغيرة)",
+          "landArea": 0,
           "engineeringOffice": "المكتب الهندسي المصمم أو المشرف",
-          "form": "شكل الرخصة (أخضر، أصفر، أو يدوي)",
-          "notes": "الملاحظات والاشتراطات المكتوبة",
+          "notes": "الملاحظات والشروط",
+          "form": "أخضر",
           "componentsData": [
-            { "name": "اسم المكون", "usage": "الاستخدام المكتوب للمكون", "area": المساحة (Number), "units": عدد الوحدات أو الغرف (Number) }
+            { "name": "اسم المكون", "usage": "الاستخدام", "area": 0, "units": 0 }
           ],
           "boundariesData": [
-            { "direction": "الاتجاه (شمال/جنوب/شرق/غرب)", "length": الطول (Number), "neighbor": "حدودها" }
+            { "direction": "الشمال/الجنوب/الشرق/الغرب", "length": 0, "neighbor": "حدودها" }
           ],
-          "detailedReport": "تقرير هندسي مفصل واحترافي يشرح الرخصة ومحتوياتها بشكل مقالي واضح"
+          "detailedReport": "تقرير هندسي وصفي..."
         }
       ]
     }
     `;
 
-    const contentArray = [{ type: "text", text: prompt }];
-    imagesToSend.forEach((imgUrl) => {
-      contentArray.push({
-        type: "image_url",
-        image_url: { url: imgUrl, detail: "high" },
-      });
+    // 💡 3. استدعاء نموذج Gemini بالطريقة الجديدة (GoogleGenAI SDK)
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash", // 👈 الموديل المطلوب
+      contents: [prompt, documentPart],
+      config: {
+        temperature: 0.0,
+        responseMimeType: "application/json",
+      },
     });
 
-    // 3. الاتصال بنموذج الذكاء الاصطناعي
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o",
-      messages: [{ role: "user", content: contentArray }],
-      response_format: { type: "json_object" },
-      temperature: 0.0,
-    });
+    // في الـ SDK الجديد، الاستجابة تكون موجودة في خاصية text مباشرة
+    const responseText = response.text;
 
-    // 💡 الفلتر السحري: استبدال أي رقم هندي (٠-٩) برقم إنجليزي (0-9) في النص الخام قبل الـ JSON.parse
-    let rawContent = response.choices[0].message.content;
-    rawContent = rawContent.replace(/[٠-٩]/g, (d) => "٠١٢٣٤٥٦٧٨٩".indexOf(d));
+    // الفلتر السحري لتنظيف الأرقام العربية الهندية (احتياطياً)
+    let cleanedContent = responseText.replace(/[٠-٩]/g, (d) =>
+      "٠١٢٣٤٥٦٧٨٩".indexOf(d),
+    );
 
-    const parsedData = JSON.parse(rawContent);
+    const parsedData = JSON.parse(cleanedContent);
     let rawPermits = parsedData.permits || [];
 
-    // 4. 🛡️ تمرير البيانات عبر طبقة الحماية Zod
+    // 🛡️ التحقق والتنظيف بواسطة Zod
     const validatedPermits = rawPermits.map((permit) =>
       PermitSchema.parse(permit),
     );
 
-    // ==========================================
-    // 💡 السحر هنا: المطابقة الذكية في الباك إند (Backend AI Matching)
-    // ==========================================
+    console.log("✅ تم تحليل الوثيقة بنجاح بواسطة Gemini 3!");
+
+    // المطابقة الذكية في الباك إند
     console.log("🔄 جاري المطابقة الذكية مع قاعدة البيانات...");
 
-    // جلب القوائم من قاعدة البيانات مرة واحدة لتسريع العملية (تم تصحيح أسماء الجداول والحقول)
     const dbClients = await prisma.client.findMany({
       select: { id: true, name: true, idNumber: true },
     });
     const dbOffices = await prisma.intermediaryOffice.findMany({
       select: { id: true, nameAr: true, nameEn: true },
     });
-
-    // 💡 التعديل هنا: استخدام riyadhDistrict بدلاً من riyadhNeighborhood
     const dbDistricts = await prisma.riyadhDistrict.findMany({
       select: { id: true, name: true },
     });
-
-    // 💡 التعديل هنا: مسح حقل name لأنه غير موجود في جدول المخططات، والاعتماد على planNumber فقط
     const dbPlans = await prisma.riyadhPlan.findMany({
       select: { id: true, planNumber: true },
     });
 
-    // المرور على كل رخصة مستخرجة ومحاولة ربطها بالذكاء الاصطناعي
     const smartLinkedPermits = await Promise.all(
       validatedPermits.map(async (permit) => {
-        // تشغيل المطابقة بالتوازي (Parallel) لأقصى سرعة
         const [
           matchedClientId,
           matchedOfficeId,
@@ -255,23 +226,19 @@ const analyzePermitAI = async (req, res) => {
       }),
     );
 
-    // إرسال الرخص الذكية المربوطة بالكامل للفرونت إند
     res.json({ success: true, data: smartLinkedPermits });
-
-    // res.json({ success: true, data: validatedPermits });
   } catch (error) {
-    console.error("🔥 AI Analysis Error:", error);
+    console.error("🔥 Gemini Analysis Error:", error);
     res.status(500).json({
       success: false,
-      message: "فشل تحليل الرخصة",
+      message: "فشل تحليل الرخصة بواسطة الذكاء الاصطناعي",
       details: error.message,
     });
   } finally {
-    // 5. 🧹 الحذف المضمون (Guaranteed Cleanup)
+    // الحذف المضمون للملفات المؤقتة
     if (tempFilePath && fs.existsSync(tempFilePath)) {
       try {
         fs.unlinkSync(tempFilePath);
-        console.log(`🗑️ تم تنظيف الملف المؤقت: ${tempFilePath}`);
       } catch (cleanupError) {
         console.error("⚠️ فشل في حذف الملف المؤقت:", cleanupError);
       }
@@ -291,9 +258,7 @@ const getPermits = async (req, res) => {
   }
 };
 
-// ==========================================
-// 💡 إضافة رخصة جديدة (يسمح بالتكرار الآن)
-// ==========================================
+// إضافة رخصة جديدة
 const createPermit = async (req, res) => {
   try {
     const data = req.body;
@@ -344,14 +309,11 @@ const createPermit = async (req, res) => {
     res.status(201).json({ success: true, data: newPermit });
   } catch (error) {
     console.error("Create Permit Error:", error);
-    // 👈 تم مسح كود الاعتراض على التكرار من هنا
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// ==========================================
-// 💡 تعديل بيانات الرخصة (يسمح بالتكرار الآن)
-// ==========================================
+// تعديل بيانات الرخصة
 const updatePermit = async (req, res) => {
   try {
     const { id } = req.params;
@@ -422,7 +384,6 @@ const updatePermit = async (req, res) => {
     res.json({ success: true, data: updatedPermit });
   } catch (error) {
     console.error("Update Permit Error:", error);
-    // 👈 تم مسح كود الاعتراض على التكرار من هنا
     res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -438,7 +399,6 @@ const deletePermit = async (req, res) => {
   }
 };
 
-// 💡 لا تنسَ تصدير دالة الـ updatePermit
 module.exports = {
   getPermits,
   createPermit,
