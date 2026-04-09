@@ -154,22 +154,53 @@ const analyzePermitAI = async (req, res) => {
     }
     `;
 
-    // 💡 3. استدعاء نموذج Gemini بالطريقة الجديدة (GoogleGenAI SDK)
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash", // 👈 الموديل المطلوب
-      contents: [prompt, documentPart],
-      config: {
-        temperature: 0.0,
-        responseMimeType: "application/json",
-      },
-    });
+    // 💡 قائمة النماذج حسب الأولوية (من الأحدث إلى الأكثر استقراراً)
+    const fallbackModels = [
+      "gemini-3-flash-preview", // المحاولة الأولى (الأحدث)
+      "gemini-2.5-flash",       // المحاولة الثانية (سريع ومستقر جداً)
+      "gemini-1.5-flash",       // المحاولة الثالثة (صخرة لا تنكسر)
+      "gemini-1.5-pro"          // المحاولة الأخيرة
+    ];
 
-    // في الـ SDK الجديد، الاستجابة تكون موجودة في خاصية text مباشرة
+    let response = null;
+    let lastError = null;
+
+    // 💡 نظام الطوارئ: المحاولة على عدة نماذج متتالية إذا كان السيرفر مشغولاً
+    for (const modelName of fallbackModels) {
+      try {
+        console.log(`🔄 جاري محاولة التحليل باستخدام الموديل: ${modelName}...`);
+        
+        response = await ai.models.generateContent({
+          model: modelName,
+          contents: [prompt, documentPart],
+          config: {
+            temperature: 0.0,
+            responseMimeType: "application/json",
+          },
+        });
+        
+        console.log(`✅ نجح التحليل باستخدام: ${modelName}`);
+        break; // إذا نجح الطلب، نوقف اللوب فوراً
+      } catch (error) {
+        console.warn(`⚠️ الموديل ${modelName} مشغول أو غير متاح (${error.status}). جاري التحويل للبديل...`);
+        lastError = error;
+        
+        // انتظار بسيط (ثانية واحدة) قبل المحاولة بالنموذج التالي لتجنب حظر الـ API
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+    }
+
+    // إذا فشلت جميع المحاولات
+    if (!response) {
+      throw new Error(`جميع نماذج الذكاء الاصطناعي مشغولة حالياً بسبب الضغط العالي. يرجى المحاولة بعد قليل. (الخطأ الأخير: ${lastError.message})`);
+    }
+
+    // استخراج النص من الاستجابة الناجحة
     const responseText = response.text;
 
     // الفلتر السحري لتنظيف الأرقام العربية الهندية (احتياطياً)
     let cleanedContent = responseText.replace(/[٠-٩]/g, (d) =>
-      "٠١٢٣٤٥٦٧٨٩".indexOf(d),
+      "٠١٢٣٤٥٦٧٨٩".indexOf(d)
     );
 
     const parsedData = JSON.parse(cleanedContent);
@@ -177,7 +208,7 @@ const analyzePermitAI = async (req, res) => {
 
     // 🛡️ التحقق والتنظيف بواسطة Zod
     const validatedPermits = rawPermits.map((permit) =>
-      PermitSchema.parse(permit),
+      PermitSchema.parse(permit)
     );
 
     console.log("✅ تم تحليل الوثيقة بنجاح بواسطة Gemini 3!");
