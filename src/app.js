@@ -221,6 +221,9 @@ app.use("/api/quick-links", quickLinksRoutes);
 const referenceRoutes = require("./routes/referenceRoutes");
 app.use("/api/references", referenceRoutes);
 
+const contractsManagementRoutes = require("./routes/contractsManagementRoutes");
+app.use("/api/contracts-management", contractsManagementRoutes);
+
 // فحص صحة السيرفر
 app.get("/", (req, res) => {
   res.json({ status: "Online", message: "Engineering System API v1" });

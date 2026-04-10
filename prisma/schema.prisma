@@ -2610,3 +2610,59 @@ model ReferenceLog {
 
   createdAt DateTime @default(now())
 }
+
+// أضف هذا الموديل في ملف prisma/schema.prisma
+
+model AdvancedContract {
+  id     String   @id @default(uuid())
+  code   String   @unique // رقم العقد المولد
+  name   String
+  type   String // تصميم، إشراف، إلخ
+  status String   @default("Draft")
+  date   DateTime @default(now())
+
+  // بيانات الأطراف (تخزن كـ Json لتجنب تعقيد الجداول)
+  partyA        String? // 👈 مفقود سابقاً
+  partyB        String? // 👈 مفقود سابقاً
+  partyADetails Json
+  partyBDetails Json
+
+  // تفاصيل المشروع
+  projectDetails Json
+  terms          String? @db.Text // 👈 مفقود سابقاً (نطاق العمل التفصيلي)
+  activePresets  Json? // 👈 مفقود سابقاً (القوالب)
+
+  // التفاصيل المالية
+  financials      Json
+  contractValue   Float
+  paymentTerms    String @db.Text
+  paymentSchedule Json // جدول الدفعات
+
+  // المحتوى القانوني والالتزامات
+  introduction      String  @db.Text
+  obligationsList   Json // قائمة الالتزامات التفصيلية
+  generalConditions String  @db.Text
+  governingLaw      String  @db.Text
+  witnesses         Json? // 👈 مفقود سابقاً (الشهود)
+  aiRiskAssessment  String? @db.Text // تقييم المخاطر المولد بالذكاء الاصطناعي
+
+  // الذكاء الاصطناعي والملخصات
+  coverSummary         String? @db.Text // 👈 مفقود سابقاً
+  aiSummary            String? @db.Text // 👈 مفقود سابقاً
+  isOnePageSummary     Boolean @default(false) // 👈 مفقود سابقاً
+  // إعدادات التصميم (الإطارات، الخطوط، الخلفيات)
+  designSettings       Json?
+  // إعدادات التصميم والتحقق (تم فصلهم ليتطابقوا مع الـ Frontend)
+  frameSettings        Json? // 👈 بدلاً من وضعها داخل designSettings
+  spacingSettings      Json?
+  typographySettings   Json?
+  verificationSettings Json? // 👈 مفقود سابقاً
+  approvalMethod       String? @default("platform") // 👈 مفقود سابقاً
+  coverSettings        Json
+  qrSettings           Json
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("advanced_contracts")
+}
