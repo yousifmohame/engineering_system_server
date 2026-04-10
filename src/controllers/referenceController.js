@@ -98,10 +98,12 @@ const analyzeReferenceBackground = async (
         ? `قم بعمل تلخيص "سريع ومختصر جداً" للمستندات المرفقة واستخراج محددات الانطباق الممكنة.`
         : `قم بـ "تحليل شامل ودقيق" للمستندات المرفقة (والتي تعتبر أجزاء لمرجع واحد) واستخراج كافة البيانات بدقة.`;
 
+    // 💡 طبقة الحماية الأولى: توجيه صارم للذكاء الاصطناعي
     const promptText = `
     أنت خبير في الأنظمة البلدية وكود البناء السعودي.
     استخرج البيانات بصيغة JSON حصرياً للمستندات المرفقة.
     ⚠️ هام جداً: جميع النصوص المستخرجة يجب أن تكون باللغة العربية الفصحى حصراً.
+    ⚠️ هام جداً: يجب إرجاع كائن JSON واحد فقط (Single Object). لا تقم أبداً بإرجاع مصفوفة (Array).
 
     ${promptInstruction}
     {
@@ -156,12 +158,39 @@ const analyzeReferenceBackground = async (
 
     console.log(`✅ تم استخراج البيانات بنجاح بواسطة: ${successfulModel}`);
 
-    const parsedData = JSON.parse(responseText);
+    let parsedData;
+    try {
+      // 💡 طبقة الحماية الثانية: تنظيف النص من علامات Markdown (```json ... ```)
+      const cleanJson = responseText
+        .replace(/```json/gi, "")
+        .replace(/```/g, "")
+        .trim();
+      parsedData = JSON.parse(cleanJson);
+
+      // 💡 طبقة الحماية الثالثة: فك المصفوفات (Array Unwrapping)
+      if (Array.isArray(parsedData)) {
+        console.log(
+          "⚠️ تم استلام مصفوفة من AI بالخطأ، جاري استخراج الكائن الأول...",
+        );
+        parsedData = parsedData[0]; // أخذ الكائن الأول من المصفوفة
+      }
+    } catch (parseError) {
+      console.error(
+        "🔥 فشل في تحويل استجابة AI إلى JSON صالحة:",
+        parseError.message,
+      );
+      console.error("الاستجابة كانت:", responseText);
+      throw new Error(
+        "البيانات المسترجعة من الذكاء الاصطناعي ليست بتنسيق JSON صحيح.",
+      );
+    }
+
+    // التحقق النهائي من صحة المتغيرات
     const validatedData = ReferenceAISchema.parse(parsedData);
 
     const finalSummaryText = `📌 الملخص:\n${validatedData.summary}\n\n🎯 المستهدفون: ${validatedData.targetAudience}`;
 
-    // 5. تحديث قاعدة البيانات بجميع الحقول (بما فيها البروتوكولات)
+    // 5. تحديث قاعدة البيانات بجميع الحقول
     const updateData = {
       analysisStatus: "محلل",
       aiSummary: finalSummaryText,
@@ -200,7 +229,7 @@ const analyzeReferenceBackground = async (
       data: { analysisStatus: "يحتاج مراجعة" },
     });
   } finally {
-    // 6. حذف جميع الملفات المرفوعة من السحابة
+    // 6. حذف جميع الملفات المرفوعة من السحابة لضمان الخصوصية وعدم استهلاك المساحة
     for (const file of uploadedCloudFiles) {
       try {
         await ai.files.delete({ name: file.name });
@@ -458,12 +487,10 @@ exports.reanalyzeReference = async (req, res) => {
     }
 
     if (absoluteFilePaths.length === 0) {
-      return res
-        .status(404)
-        .json({
-          success: false,
-          message: "الملفات الفيزيائية غير موجودة على السيرفر",
-        });
+      return res.status(404).json({
+        success: false,
+        message: "الملفات الفيزيائية غير موجودة على السيرفر",
+      });
     }
 
     // استدعاء دالة التحليل مع تمرير المصفوفات
