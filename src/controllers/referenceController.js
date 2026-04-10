@@ -4,27 +4,26 @@ const fs = require("fs");
 const path = require("path");
 const { z } = require("zod");
 
+// استخدام مكتبة @google/genai
 const { GoogleGenAI } = require("@google/genai");
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
-// 💡 Zod Schema (شملنا جميع الحقول الجديدة)
+// 💡 Zod Schema للتحقق من البيانات المستخرجة (بما فيها البروتوكولات الجديدة)
 const ReferenceAISchema = z.object({
   summary: z.string().catch("لم يتم توليد ملخص."),
   keyRules: z.array(z.string()).catch([]),
   targetAudience: z.string().catch("غير محدد"),
-
+  windProtocol: z.string().nullable().catch(null),
+  monitoringProtocol: z.string().nullable().catch(null),
   txType: z.string().nullable().catch(null),
   txMainCategory: z.string().nullable().catch(null),
   txSubCategory: z.string().nullable().catch(null),
-
   buildingTypes: z.array(z.string()).catch([]),
   landAreaFrom: z.number().nullable().catch(null),
   landAreaTo: z.number().nullable().catch(null),
-
   city: z.string().nullable().catch(null),
   sector: z.string().nullable().catch(null),
   districts: z.array(z.string()).catch([]),
-
   floorsFrom: z.number().nullable().catch(null),
   floorsTo: z.number().nullable().catch(null),
   streetWidthFrom: z.number().nullable().catch(null),
@@ -39,115 +38,177 @@ const addLog = async (referenceId, action, req) => {
   });
 };
 
+/**
+ * 🚀 دالة التحليل في الخلفية (تدعم الملفات المتعددة للمرجع الواحد)
+ */
 const analyzeReferenceBackground = async (
   documentId,
-  filePath,
-  mimeType,
+  filePathsArray,
+  mimeTypesArray,
   analysisType = "full",
 ) => {
+  let uploadedCloudFiles = [];
   try {
-    console.log(`🚀 بدء تحليل المرجع [${documentId}] بواسطة Gemini...`);
+    console.log(
+      `🚀 بدء الرفع السحابي المتعدد للمرجع [${documentId}]... عدد الملفات: ${filePathsArray.length}`,
+    );
 
-    if (!fs.existsSync(filePath)) throw new Error("الملف الفيزيائي غير موجود");
-    const fileBuffer = fs.readFileSync(filePath);
-    const documentPart = {
-      inlineData: {
-        data: fileBuffer.toString("base64"),
-        mimeType: mimeType || "application/pdf",
-      },
-    };
+    // 1. رفع جميع الملفات إلى سحابة Google AI
+    for (let i = 0; i < filePathsArray.length; i++) {
+      const filePath = filePathsArray[i];
+      if (fs.existsSync(filePath)) {
+        const uploadedFile = await ai.files.upload({
+          file: filePath,
+          config: {
+            mimeType: mimeTypesArray[i] || "application/pdf",
+            displayName: `Ref_${documentId}_part${i + 1}`,
+          },
+        });
+        uploadedCloudFiles.push(uploadedFile);
+        console.log(`📤 تم الرفع: ${uploadedFile.name}`);
+      }
+    }
 
-    let promptInstruction =
+    if (uploadedCloudFiles.length === 0)
+      throw new Error("لم يتم العثور على ملفات صالحة للتحليل.");
+
+    // 2. انتظار المعالجة لجميع الملفات (Polling)
+    console.log(`⏳ جاري معالجة الملفات في خوادم Google...`);
+    const activeFiles = [];
+    for (const file of uploadedCloudFiles) {
+      let currentFile = await ai.files.get({ name: file.name });
+      while (currentFile.state === "PROCESSING") {
+        process.stdout.write(".");
+        await new Promise((resolve) => setTimeout(resolve, 4000));
+        currentFile = await ai.files.get({ name: file.name });
+      }
+      if (currentFile.state !== "ACTIVE") {
+        throw new Error(
+          `فشلت معالجة الملف ${file.name}. الحالة: ${currentFile.state}`,
+        );
+      }
+      activeFiles.push(currentFile);
+    }
+
+    console.log(`\n✅ الملفات نشطة الآن. جاري التحليل...`);
+
+    // 3. تجهيز أجزاء الطلب (مجموعة الملفات + النص)
+    const promptInstruction =
       analysisType === "quick"
-        ? `قم بعمل تلخيص "سريع ومختصر جداً" للمستند واستخراج محددات الانطباق الممكنة.`
-        : `قم بـ "تحليل شامل ودقيق" للمستند واستخراج كافة محددات الانطباق بدقة.`;
+        ? `قم بعمل تلخيص "سريع ومختصر جداً" للمستندات المرفقة واستخراج محددات الانطباق الممكنة.`
+        : `قم بـ "تحليل شامل ودقيق" للمستندات المرفقة (والتي تعتبر أجزاء لمرجع واحد) واستخراج كافة البيانات بدقة.`;
 
-    const prompt = `
+    const promptText = `
     أنت خبير في الأنظمة البلدية وكود البناء السعودي.
-    استخرج البيانات بصيغة JSON حصرياً المطابقة للتركيبة التالية:
+    استخرج البيانات بصيغة JSON حصرياً للمستندات المرفقة.
+    ⚠️ هام جداً: جميع النصوص المستخرجة يجب أن تكون باللغة العربية الفصحى حصراً.
+
     ${promptInstruction}
     {
-      "summary": "ملخص واضح ومبسط يشرح الغرض من هذا المستند",
-      "keyRules": ["أهم الاشتراطات"],
-      "targetAudience": "المستهدفون بهذا المستند",
+      "summary": "ملخص شامل وواضح للغرض من المستندات",
+      "keyRules": ["أهم الاشتراطات والقواعد الإلزامية"],
+      "targetAudience": "المستهدفون",
+      "windProtocol": "استخرج بروتوكول التشغيل وسرعة الرياح إن وجد، أو null",
+      "monitoringProtocol": "استخرج بروتوكول الرصد والامتثال البيئي إن وجد، أو null",
       "txType": "إصدار رخصة بناء، تعديل رخصة بناء، أو null",
-      "txMainCategory": "مستندات معاملات، مخططات، أو null",
-      "txSubCategory": "مخططات معمارية، تقارير هندسية، أو null",
-      "buildingTypes": ["سكني", "تجاري", ...],
-      "landAreaFrom": الحد الأدنى لمساحة الأرض أو null,
-      "landAreaTo": الحد الأقصى لمساحة الأرض أو null,
-      "city": "المدينة المذكورة أو null",
-      "sector": "شمال، جنوب، وسط... أو null",
-      "districts": ["الصحافة", "الملقا"...],
-      "floorsFrom": الحد الأدنى لعدد الأدوار أو null,
-      "floorsTo": الحد الأقصى لعدد الأدوار أو null,
-      "streetWidthFrom": الحد الأدنى لعرض الشارع أو null,
-      "streetWidthTo": الحد الأقصى لعرض الشارع أو null
+      "txMainCategory": "التصنيف الرئيسي أو null",
+      "txSubCategory": "التصنيف الفرعي أو null",
+      "buildingTypes": ["سكني", "تجاري"],
+      "landAreaFrom": رقم أو null, "landAreaTo": رقم أو null,
+      "city": "المدينة أو null", "sector": "المنطقة أو null", "districts": [],
+      "floorsFrom": رقم أو null, "floorsTo": رقم أو null,
+      "streetWidthFrom": رقم أو null, "streetWidthTo": رقم أو null
     }`;
 
+    const parts = activeFiles.map((f) => ({
+      fileData: { fileUri: f.uri, mimeType: f.mimeType },
+    }));
+    parts.push({ text: promptText });
+
+    // 4. استدعاء الموديل (Fallback)
     const fallbackModels = [
       "gemini-3-flash-preview",
       "gemini-2.5-flash",
       "gemini-1.5-flash",
     ];
-    let response = null;
+    let responseText = null;
+    let successfulModel = null;
 
     for (const modelName of fallbackModels) {
       try {
-        response = await ai.models.generateContent({
+        console.log(`🔄 محاولة التحليل باستخدام الموديل: ${modelName}...`);
+        const response = await ai.models.generateContent({
           model: modelName,
-          contents: [prompt, documentPart],
+          contents: [{ role: "user", parts: parts }],
           config: { temperature: 0.0, responseMimeType: "application/json" },
         });
+
+        responseText = response.text;
+        successfulModel = modelName;
         break;
-      } catch (error) {
-        await new Promise((resolve) => setTimeout(resolve, 1000));
+      } catch (modelError) {
+        console.warn(`⚠️ فشل الموديل ${modelName}:`, modelError.message);
+        await new Promise((resolve) => setTimeout(resolve, 2000));
       }
     }
 
-    if (!response) throw new Error("جميع نماذج الذكاء الاصطناعي مشغولة.");
+    if (!responseText) throw new Error("جميع النماذج فشلت في معالجة المستند.");
 
-    const parsedData = JSON.parse(response.text);
+    console.log(`✅ تم استخراج البيانات بنجاح بواسطة: ${successfulModel}`);
+
+    const parsedData = JSON.parse(responseText);
     const validatedData = ReferenceAISchema.parse(parsedData);
-    const finalSummaryText = `📌 الملخص:\n${validatedData.summary}\n\n⚠️ أهم الاشتراطات:\n- ${validatedData.keyRules.join("\n- ")}\n\n🎯 المستهدفون: ${validatedData.targetAudience}`;
 
-    // تحديث البيانات التي تم استخراجها فقط لعدم حذف بيانات أدخلها المستخدم يدوياً
-    const updateData = { analysisStatus: "محلل", aiSummary: finalSummaryText };
-    if (validatedData.txType) updateData.txType = validatedData.txType;
-    if (validatedData.txMainCategory)
-      updateData.txMainCategory = validatedData.txMainCategory;
-    if (validatedData.txSubCategory)
-      updateData.txSubCategory = validatedData.txSubCategory;
-    if (validatedData.buildingTypes.length)
-      updateData.buildingTypes = validatedData.buildingTypes;
-    if (validatedData.landAreaFrom !== null)
-      updateData.landAreaFrom = validatedData.landAreaFrom;
-    if (validatedData.landAreaTo !== null)
-      updateData.landAreaTo = validatedData.landAreaTo;
-    if (validatedData.city) updateData.city = validatedData.city;
-    if (validatedData.sector) updateData.sector = validatedData.sector;
-    if (validatedData.districts.length)
-      updateData.districts = validatedData.districts;
-    if (validatedData.floorsFrom !== null)
-      updateData.floorsFrom = validatedData.floorsFrom;
-    if (validatedData.floorsTo !== null)
-      updateData.floorsTo = validatedData.floorsTo;
-    if (validatedData.streetWidthFrom !== null)
-      updateData.streetWidthFrom = validatedData.streetWidthFrom;
-    if (validatedData.streetWidthTo !== null)
-      updateData.streetWidthTo = validatedData.streetWidthTo;
+    const finalSummaryText = `📌 الملخص:\n${validatedData.summary}\n\n🎯 المستهدفون: ${validatedData.targetAudience}`;
+
+    // 5. تحديث قاعدة البيانات بجميع الحقول (بما فيها البروتوكولات)
+    const updateData = {
+      analysisStatus: "محلل",
+      aiSummary: finalSummaryText,
+      keyRules: validatedData.keyRules || [],
+      windProtocol: validatedData.windProtocol || undefined,
+      monitoringProtocol: validatedData.monitoringProtocol || undefined,
+      txType: validatedData.txType || undefined,
+      txMainCategory: validatedData.txMainCategory || undefined,
+      txSubCategory: validatedData.txSubCategory || undefined,
+      buildingTypes: validatedData.buildingTypes.length
+        ? validatedData.buildingTypes
+        : undefined,
+      landAreaFrom: validatedData.landAreaFrom ?? undefined,
+      landAreaTo: validatedData.landAreaTo ?? undefined,
+      city: validatedData.city || undefined,
+      sector: validatedData.sector || undefined,
+      districts: validatedData.districts.length
+        ? validatedData.districts
+        : undefined,
+      floorsFrom: validatedData.floorsFrom ?? undefined,
+      floorsTo: validatedData.floorsTo ?? undefined,
+      streetWidthFrom: validatedData.streetWidthFrom ?? undefined,
+      streetWidthTo: validatedData.streetWidthTo ?? undefined,
+    };
 
     await prisma.referenceDocument.update({
       where: { id: documentId },
       data: updateData,
     });
+
     console.log(`✅ تمت أرشفة تحليل المرجع [${documentId}] بنجاح.`);
   } catch (error) {
-    console.error(`🔥 خطأ في التحليل:`, error.message);
+    console.error(`🔥 خطأ في التحليل الخلفي:`, error.message);
     await prisma.referenceDocument.update({
       where: { id: documentId },
       data: { analysisStatus: "يحتاج مراجعة" },
     });
+  } finally {
+    // 6. حذف جميع الملفات المرفوعة من السحابة
+    for (const file of uploadedCloudFiles) {
+      try {
+        await ai.files.delete({ name: file.name });
+      } catch (err) {
+        console.warn(`⚠️ لم يتم حذف الملف السحابي ${file.name}`);
+      }
+    }
+    console.log(`🗑️ تم تنظيف الملفات السحابية.`);
   }
 };
 
@@ -201,20 +262,35 @@ exports.createReference = async (req, res) => {
       ? parseInt(req.body.streetWidthTo)
       : null;
 
-    let fileUrl = null;
-    let absoluteFilePath = null;
-    let mimeType = null;
-    if (req.file) {
-      fileUrl = `/uploads/references/${req.file.filename}`;
-      absoluteFilePath = path.join(
-        __dirname,
-        "..",
-        "uploads",
-        "references",
-        req.file.filename,
+    // 🚀 دعم الملفات المتعددة
+    let fileUrls = [];
+    let absoluteFilePaths = [];
+    let mimeTypes = [];
+
+    // التعامل مع رفع عدة ملفات عبر req.files أو ملف واحد عبر req.file
+    const uploadedFiles =
+      req.files && req.files.length > 0
+        ? req.files
+        : req.file
+          ? [req.file]
+          : [];
+
+    uploadedFiles.forEach((file) => {
+      fileUrls.push(`/uploads/references/${file.filename}`);
+      absoluteFilePaths.push(
+        path.join(
+          __dirname,
+          "..",
+          "..",
+          "uploads",
+          "references",
+          file.filename,
+        ),
       );
-      mimeType = req.file.mimetype;
-    }
+      mimeTypes.push(file.mimetype);
+    });
+
+    const fileUrlString = fileUrls.length > 0 ? fileUrls.join(",") : null;
 
     const newRef = await prisma.referenceDocument.create({
       data: {
@@ -237,16 +313,22 @@ exports.createReference = async (req, res) => {
         streetWidthTo,
         issueDate: issueDate ? new Date(issueDate) : null,
         expiryDate: expiryDate ? new Date(expiryDate) : null,
-        fileUrl,
+        fileUrl: fileUrlString,
         analysisStatus:
-          autoAnalyze === "true" && absoluteFilePath
+          autoAnalyze === "true" && absoluteFilePaths.length > 0
             ? "قيد التحليل"
             : "غير محلل",
       },
     });
 
-    if (autoAnalyze === "true" && absoluteFilePath) {
-      analyzeReferenceBackground(newRef.id, absoluteFilePath, mimeType, "full");
+    // إطلاق التحليل المباشر للملفات المتعددة
+    if (autoAnalyze === "true" && absoluteFilePaths.length > 0) {
+      analyzeReferenceBackground(
+        newRef.id,
+        absoluteFilePaths,
+        mimeTypes,
+        "full",
+      );
     }
 
     req.body.userName = req.user?.name;
@@ -278,17 +360,24 @@ exports.deleteReference = async (req, res) => {
   try {
     const { id } = req.params;
     const ref = await prisma.referenceDocument.findUnique({ where: { id } });
+
     if (ref && ref.fileUrl) {
-      const filename = ref.fileUrl.split("/").pop();
-      const filePath = path.join(
-        __dirname,
-        "..",
-        "uploads",
-        "references",
-        filename,
-      );
-      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+      // التعامل مع حذف الملفات المتعددة المرتبطة بالمرجع
+      const urls = ref.fileUrl.split(",");
+      urls.forEach((url) => {
+        const filename = url.split("/").pop();
+        const filePath = path.join(
+          __dirname,
+          "..",
+          "..",
+          "uploads",
+          "references",
+          filename,
+        );
+        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+      });
     }
+
     await prisma.referenceDocument.delete({ where: { id } });
     res.json({ success: true, message: "تم الحذف بنجاح" });
   } catch (error) {
@@ -309,6 +398,24 @@ exports.getReferenceLogs = async (req, res) => {
   }
 };
 
+// دالة مساعدة للحصول على المسار الصحيح للملف
+const getAbsoluteFilePath = (fileUrl) => {
+  const filename = fileUrl.split("/").pop();
+  const path1 = path.join(__dirname, "..", "..", "uploads", filename);
+  const path2 = path.join(
+    __dirname,
+    "..",
+    "..",
+    "uploads",
+    "references",
+    filename,
+  );
+
+  if (fs.existsSync(path2)) return path2;
+  if (fs.existsSync(path1)) return path1;
+  return null;
+};
+
 exports.reanalyzeReference = async (req, res) => {
   try {
     const { id } = req.params;
@@ -326,21 +433,42 @@ exports.reanalyzeReference = async (req, res) => {
         : "طلب إعادة التحليل الذكي الشامل",
       req,
     );
+
     await prisma.referenceDocument.update({
       where: { id },
       data: { analysisStatus: "قيد التحليل" },
     });
 
-    const filename = doc.fileUrl.split("/").pop();
-    const absoluteFilePath = path.join(
-      __dirname,
-      "..",
-      "uploads",
-      "references",
-      filename,
-    );
+    // 🚀 تجهيز مصفوفة الملفات للتحليل
+    const fileUrls = doc.fileUrl.split(",");
+    const absoluteFilePaths = [];
+    const mimeTypes = [];
 
-    analyzeReferenceBackground(id, absoluteFilePath, "application/pdf", type);
+    for (const url of fileUrls) {
+      const filepath = getAbsoluteFilePath(url);
+      if (filepath) {
+        absoluteFilePaths.push(filepath);
+        const ext = path.extname(filepath).toLowerCase();
+        let mType = "application/pdf";
+        if (ext === ".png") mType = "image/png";
+        else if (ext === ".jpg" || ext === ".jpeg") mType = "image/jpeg";
+        else if (ext === ".webp") mType = "image/webp";
+        mimeTypes.push(mType);
+      }
+    }
+
+    if (absoluteFilePaths.length === 0) {
+      return res
+        .status(404)
+        .json({
+          success: false,
+          message: "الملفات الفيزيائية غير موجودة على السيرفر",
+        });
+    }
+
+    // استدعاء دالة التحليل مع تمرير المصفوفات
+    analyzeReferenceBackground(id, absoluteFilePaths, mimeTypes, type);
+
     res.json({ success: true, message: "بدأت عملية التحليل في الخلفية" });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

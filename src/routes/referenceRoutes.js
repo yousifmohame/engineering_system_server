@@ -43,7 +43,7 @@ router.use(protect);
 router
   .route("/")
   .get(getReferences)
-  .post(upload.single("file"), createReference);
+  .post(upload.array('files'), createReference);
 
 router.route("/:id").delete(deleteReference);
 

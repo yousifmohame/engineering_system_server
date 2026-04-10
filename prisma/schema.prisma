@@ -2584,8 +2584,13 @@ model ReferenceDocument {
   analysisStatus String @default("غير محلل")
 
   // نصوص الإدارة والتحليل
-  aiSummary   String? @db.Text
-  manualNotes String? @db.Text
+  keyRules    String[]
+  aiSummary   String?  @db.Text
+  manualNotes String?  @db.Text
+
+  // 🚀 الحقول الجديدة المستخرجة بواسطة الذكاء الاصطناعي
+  windProtocol       String? @db.Text
+  monitoringProtocol String? @db.Text
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
