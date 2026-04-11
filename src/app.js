@@ -202,15 +202,15 @@ app.use("/api/files", fileManagerRoutes);
 const formTemplateRoutes = require("./routes/formTemplateRoutes");
 app.use("/api/forms", formTemplateRoutes);
 
-const systemFilesRoutes = require('./routes/FileExplorerRoutes');
-app.use('/api/system-files', systemFilesRoutes);
+const systemFilesRoutes = require("./routes/FileExplorerRoutes");
+app.use("/api/system-files", systemFilesRoutes);
 
 // 1. استدعاء ملف المسارات
-const emailRoutes = require('./routes/emailRoutes');
-app.use('/api/email', emailRoutes); // تأكد أن الـ Prefix يطابق ما طلبناه في الـ Frontend
+const emailRoutes = require("./routes/emailRoutes");
+app.use("/api/email", emailRoutes); // تأكد أن الـ Prefix يطابق ما طلبناه في الـ Frontend
 
-const tailscaleRoutes = require('./routes/tailscaleRoutes');
-app.use('/api/settings/tailscale', tailscaleRoutes);
+const tailscaleRoutes = require("./routes/tailscaleRoutes");
+app.use("/api/settings/tailscale", tailscaleRoutes);
 
 const transactionSourceRoutes = require("./routes/transactionSourceRoutes");
 app.use("/api/transaction-sources", transactionSourceRoutes);
@@ -223,6 +223,9 @@ app.use("/api/references", referenceRoutes);
 
 const contractsManagementRoutes = require("./routes/contractsManagementRoutes");
 app.use("/api/contracts-management", contractsManagementRoutes);
+
+const officeTasksRoutes = require("./routes/officeTasksRoutes");
+app.use("/api/office-tasks", officeTasksRoutes);
 
 // فحص صحة السيرفر
 app.get("/", (req, res) => {

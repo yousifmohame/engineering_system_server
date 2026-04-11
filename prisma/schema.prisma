@@ -2666,3 +2666,57 @@ model AdvancedContract {
 
   @@map("advanced_contracts")
 }
+
+// ==========================================
+// 📌 مفكرة المكتب (Office Notepad / Tasks)
+// ==========================================
+
+model OfficeTask {
+  id              String    @id @default(uuid())
+  description     String    @db.Text
+  priority        String    @default("medium") // high, medium, low
+  status          String    @default("active") // active, completed, frozen, cancelled
+  dueDate         DateTime?
+  filePath        String?
+  additionalNotes String?   @db.Text
+
+  creatorName String @default("النظام") // يمكن ربطها بمعرف المستخدم لاحقاً
+
+  // حفظ الموظفين المعينين كـ JSON (مصفوفة من الكائنات {id, name}) لتسهيل العرض
+  assignedEmployees Json @default("[]")
+
+  subTasks SubTask[]
+  comments TaskComment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("office_tasks")
+}
+
+model SubTask {
+  id          String  @id @default(uuid())
+  title       String
+  isCompleted Boolean @default(false)
+
+  taskId String
+  task   OfficeTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@map("office_sub_tasks")
+}
+
+model TaskComment {
+  id         String  @id @default(uuid())
+  text       String  @db.Text
+  authorName String
+  isSystem   Boolean @default(false) // لتمييز التعليقات التلقائية (مثل تغيير الحالة)
+
+  taskId String
+  task   OfficeTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@map("office_task_comments")
+}
