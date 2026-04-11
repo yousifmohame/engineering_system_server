@@ -14,10 +14,14 @@ router.put("/:id/status", controller.updateTaskStatus);
 
 // المهام الفرعية
 router.post("/:id/subtasks", controller.addSubTask);
+router.put("/subtasks/:subtaskId", controller.updateSubTask);
 router.put("/subtasks/:subtaskId/toggle", controller.toggleSubTask);
 router.delete("/subtasks/:subtaskId", controller.deleteSubTask);
 
 // التعليقات
-router.post("/:id/comments", controller.addComment);
+// التعليقات
+router.post("/:id/comments", controller.addComment); // موجود مسبقاً
+router.put("/comments/:commentId", controller.updateComment); // 👈 السطر الجديد للتعديل
+router.delete("/comments/:commentId", controller.deleteComment); // 👈 السطر الجديد للحذف
 
 module.exports = router;

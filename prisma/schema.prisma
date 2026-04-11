@@ -298,6 +298,7 @@ model Client {
   privateTransactions   PrivateTransaction[] @relation("ClientPrivateTransactions")
   TransactionFolder     TransactionFolder[]
   transactionOwnerships TransactionOwner[]
+  OfficeTask            OfficeTask[]
 }
 
 model ClientClassification {
@@ -357,8 +358,9 @@ model OwnershipFile {
   aiLogs     AIAnalysisLog[] // سجل عمليات التحليل لهذا الصك
   quotations Quotation[]
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+  OfficeTask OfficeTask[]
 
   @@index([deedNumber])
   @@index([district])
@@ -1413,6 +1415,7 @@ model PrivateTransaction {
   linkedChildren PrivateTransaction[] @relation("LinkedTransactions")
 
   ownersList TransactionOwner[]
+  OfficeTask OfficeTask[]
 
   @@index([clientId])
   @@index([districtId])
@@ -2673,14 +2676,24 @@ model AdvancedContract {
 
 model OfficeTask {
   id              String    @id @default(uuid())
+  serialNumber    String    @unique // التنسيق: T-20260411-001
   description     String    @db.Text
   priority        String    @default("medium") // high, medium, low
   status          String    @default("active") // active, completed, frozen, cancelled
   dueDate         DateTime?
   filePath        String?
   additionalNotes String?   @db.Text
+  creatorName     String    @default("النظام") // يمكن ربطها بمعرف المستخدم لاحقاً
 
-  creatorName String @default("النظام") // يمكن ربطها بمعرف المستخدم لاحقاً
+  // 🔗 الروابط الاختيارية الجديدة
+  clientId String?
+  client   Client? @relation(fields: [clientId], references: [id])
+
+  transactionId String?
+  transaction   PrivateTransaction? @relation(fields: [transactionId], references: [id])
+
+  ownershipId String?
+  ownership   OwnershipFile? @relation(fields: [ownershipId], references: [id])
 
   // حفظ الموظفين المعينين كـ JSON (مصفوفة من الكائنات {id, name}) لتسهيل العرض
   assignedEmployees Json @default("[]")
@@ -2695,9 +2708,11 @@ model OfficeTask {
 }
 
 model SubTask {
-  id          String  @id @default(uuid())
-  title       String
-  isCompleted Boolean @default(false)
+  id           String  @id @default(uuid())
+  serialNumber String  @unique // التنسيق: ST-20260411-001
+  title        String
+  isCompleted  Boolean @default(false)
+  authorName   String? @default("موظف") // 👈 أضف هذا السطر
 
   taskId String
   task   OfficeTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
