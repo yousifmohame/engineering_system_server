@@ -1193,18 +1193,70 @@ model RiyadhSector {
 }
 
 model RiyadhPlan {
-  id           String  @id @default(cuid())
-  planNumber   String  @unique // رقم المخطط الرسمي (مثال: 2345)
-  oldNumber    String? // الترقيم القديم
-  internalCode String  @unique // رمز داخلي (مثال: PLAN-C-001)
-  status       String // معتمد، قيد المراجعة، ملغى، معدل
-  isWithout    Boolean @default(false) // هل هو "بدون" مخطط؟
-  properties   Int     @default(0) // عدد الملكيات (للتخزين المؤقت قبل الربط الحقيقي)
-  plots        Int     @default(0) // عدد القطع
-  attachments  Int     @default(0) // عدد المرفقات
+  id         String  @id @default(cuid())
+  planNumber String  @unique // رقم المخطط الرسمي
+  oldNumber  String? // الترقيم القديم
 
-  // علاقة متعدد إلى متعدد مع الأحياء
-  districts RiyadhDistrict[]
+  // جعلنا الكود الداخلي اختيارياً لتجنب أخطاء الإضافة من الواجهة الجديدة
+  internalCode String? @unique @default(cuid())
+
+  status      String  @default("معتمد")
+  isWithout   Boolean @default(false) // هل هو "بدون" مخطط؟
+  properties  Int     @default(0) // عدد الملكيات المربوطة
+  plots       Int     @default(0) // عدد القطع (القديم)
+  attachments Int     @default(0) // عدد المرفقات (القديم)
+
+  // 🚀 --- الحقول الجديدة المضافة لدعم الواجهة الشاملة ---
+  hijriYear        String? // سنة الاعتماد
+  areaKm           String? // المساحة بالكيلومتر
+  areaM            String? // المساحة بالمتر
+  mainUsages       String? // الاستخدام الرئيسي
+  subUsages        String? // الاستخدامات الفرعية
+  totalPlots       Int     @default(0) // إجمالي القطع (من الواجهة)
+  neighborhoods    String? // الأحياء التابع لها كنص
+  officialMapUrl   String? // رابط خريطة الأمانة
+  googleMapUrl     String? // رابط خريطة جوجل
+  officialMapImage String? @db.Text // صورة الخريطة الرسمية (Base64)
+  googleMapImage   String? @db.Text // صورة خريطة جوجل (Base64)
+  notes            String? @db.Text // ملاحظات عامة
+
+  // --- العلاقات القديمة ---
+  districts          RiyadhDistrict[]
+  specialRegulations Json?            @default("[]")
+
+  // 🚀 --- العلاقات الجديدة ---
+  streets RiyadhPlanStreet[]
+  files   RiyadhPlanFile[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// 🚀 نموذج فرعي: شوارع المخطط
+model RiyadhPlanStreet {
+  id     String     @id @default(cuid())
+  planId String
+  plan   RiyadhPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  name          String // اسم الشارع
+  width         String? // عرض الشارع
+  hasSpecialReg Boolean @default(false) // تنظيم خاص؟
+  regDesc       String? // وصف التنظيم الخاص
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// 🚀 نموذج فرعي: ملفات ومرفقات المخطط
+model RiyadhPlanFile {
+  id     String     @id @default(cuid())
+  planId String
+  plan   RiyadhPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  url  String  @db.Text // رابط أو مسار الملف (مؤقتاً Base64 أو URL السيرفر)
+  name String // اسم الملف
+  desc String? // وصف الملف
+  type String? // نوع الملف (PDF, PNG, etc.)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1242,8 +1294,8 @@ model RiyadhStreet {
   sector   RiyadhSector @relation(fields: [sectorId], references: [id])
   sectorId String
 
-  district   RiyadhDistrict @relation(fields: [districtId], references: [id])
-  districtId String
+  district   RiyadhDistrict? @relation(fields: [districtId], references: [id])
+  districtId String?
 
   type   String
   width  Float

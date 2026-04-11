@@ -32,7 +32,7 @@ const generateStreetCode = async () => {
   return `STR-${year}-${String(count + 1).padStart(4, "0")}`;
 };
 
-// 1. إنشاء شارع جديد
+// 1. إنشاء شارع جديد (الأساسية)
 const createStreet = async (req, res) => {
   try {
     const {
@@ -46,8 +46,6 @@ const createStreet = async (req, res) => {
       status,
       centerLat,
       centerLng,
-      lighting,
-      sidewalks,
       hasSpecialRegulation,
       regulationDetails,
     } = req.body;
@@ -58,19 +56,19 @@ const createStreet = async (req, res) => {
       data: {
         streetCode,
         name,
-        sectorId,
-        districtId,
         type,
         width: parseFloat(width),
-        length: parseFloat(length),
-        lanes: parseInt(lanes),
-        status,
+        length: length ? parseFloat(length) : null,
+        lanes: lanes ? parseInt(lanes) : null,
+
+        sectorId: sectorId,
+        districtId: districtId || null, // 👈 أهم تعديل هنا
+
+        status: status || "active",
         centerLat: parseFloat(centerLat || 24.7136),
         centerLng: parseFloat(centerLng || 46.6753),
-        lighting: lighting ?? true,
-        sidewalks: sidewalks ?? true,
+
         hasSpecialRegulation: hasSpecialRegulation ?? false,
-        // تخزين تفاصيل التنظيم كـ JSON
         regulationDetails: hasSpecialRegulation ? regulationDetails : null,
       },
       include: {
@@ -94,7 +92,15 @@ const createStreet = async (req, res) => {
 const updateStreet = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, type, width, length, lanes, lighting, sidewalks } = req.body;
+    const {
+      name,
+      type,
+      width,
+      length,
+      lanes,
+      hasSpecialRegulation, // 👈 تمت الإضافة
+      regulationDetails, // 👈 تمت الإضافة
+    } = req.body;
 
     const updatedStreet = await prisma.riyadhStreet.update({
       where: { id },
@@ -102,14 +108,18 @@ const updateStreet = async (req, res) => {
         name,
         type,
         width: parseFloat(width),
-        length: parseFloat(length),
-        lanes: parseInt(lanes),
-        lighting,
-        sidewalks,
+        length: length ? parseFloat(length) : null,
+        lanes: lanes ? parseInt(lanes) : null,
+
+        // 👈 تحديث التنظيمات الخاصة أثناء التعديل
+        hasSpecialRegulation: hasSpecialRegulation ?? false,
+        regulationDetails: hasSpecialRegulation ? regulationDetails : null,
       },
     });
+
     res.json(updatedStreet);
   } catch (error) {
+    console.error("Update Street Error:", error);
     res.status(500).json({ message: "فشل تحديث الشارع", error: error.message });
   }
 };
@@ -435,11 +445,21 @@ const updateDistrict = async (req, res) => {
 };
 
 // ===================================================
-// 9. إضافة شارع سريع (من الشجرة)
+// 9. إضافة شارع سريع (من الشجرة أو المودال)
 // ===================================================
 const createStreetQuick = async (req, res) => {
   try {
-    const { name, width, type, districtId, sectorId } = req.body;
+    const {
+      name,
+      width,
+      length,
+      lanes,
+      type,
+      districtId,
+      sectorId,
+      hasSpecialRegulation,
+      regulationDetails,
+    } = req.body;
 
     // توليد كود شارع تلقائي
     const count = await prisma.riyadhStreet.count();
@@ -447,23 +467,28 @@ const createStreetQuick = async (req, res) => {
 
     const newStreet = await prisma.riyadhStreet.create({
       data: {
-        name,
-        width: parseFloat(width) || 15, // عرض افتراضي
-        type: type || "normal",
         streetCode,
-        districtId,
-        sectorId,
-        // قيم افتراضية مطلوبة في الـ Schema الخاص بك لتجنب الأخطاء
-        length: 1000,
-        lanes: 2,
+        name,
+        type: type || "normal",
+        width: parseFloat(width) || 15, // العرض إجباري وله قيمة افتراضية
+        length: length ? parseFloat(length) : null,
+        lanes: lanes ? parseInt(lanes) : null,
+
+        sectorId: sectorId, // 👈 القطاع إجباري
+        districtId: districtId || null, // 👈 الحي اختياري ويقبل null
+
         status: "active",
         centerLat: 24.7136,
         centerLng: 46.6753,
+
+        hasSpecialRegulation: hasSpecialRegulation ?? false,
+        regulationDetails: hasSpecialRegulation ? regulationDetails : null,
       },
     });
+
     res.status(201).json(newStreet);
   } catch (error) {
-    console.error(error);
+    console.error("🔥 Quick Street Error:", error);
     res
       .status(500)
       .json({ message: "خطأ في إنشاء الشارع", error: error.message });
@@ -479,7 +504,9 @@ const getPlans = async (req, res) => {
   try {
     const plans = await prisma.riyadhPlan.findMany({
       include: {
-        districts: { select: { name: true } }, // نجلب أسماء الأحياء فقط للعرض
+        districts: { select: { name: true } },
+        streets: true, // 👈 جلب الشوارع التابعة للمخطط
+        files: true, // 👈 جلب الملفات التابعة للمخطط
       },
       orderBy: { updatedAt: "desc" },
     });
@@ -490,7 +517,6 @@ const getPlans = async (req, res) => {
 };
 
 // إنشاء مخطط جديد
-// إنشاء مخطط جديد (نسخة آمنة تدعم الإضافة السريعة والكاملة)
 const createPlan = async (req, res) => {
   try {
     const data = req.body;
@@ -499,8 +525,6 @@ const createPlan = async (req, res) => {
     const count = await prisma.riyadhPlan.count();
     const internalCode = `PLAN-${String(count + 1).padStart(3, "0")}`;
 
-    // 2. معالجة وتأمين البيانات (توفير قيم افتراضية للإضافة السريعة)
-    // إذا لم يرسل planNumber، نأخذ name (المرسل من الإضافة السريعة)، وإلا نضع رقماً مؤقتاً
     const finalPlanNumber = data.isWithout
       ? "بدون"
       : data.planNumber ||
@@ -512,25 +536,62 @@ const createPlan = async (req, res) => {
         planNumber: finalPlanNumber,
         oldNumber: data.oldNumber || null,
         internalCode: internalCode,
-        status: data.status || "معتمد", // 💡 قيمة افتراضية هامة
-        isWithout: data.isWithout === true || data.isWithout === "true", // 💡 تحويل آمن للبوليان لتجنب كراش Prisma
+        status: data.status || "معتمد",
+        isWithout: data.isWithout === true || data.isWithout === "true",
         properties: parseInt(data.properties || 0),
         plots: parseInt(data.plots || 0),
 
-        // ربط المخطط بالأحياء المختارة (فقط إذا تم تمريرها)
+        // 🚀 --- الحقول الجديدة ---
+        hijriYear: data.hijriYear,
+        areaKm: data.areaKm?.toString(),
+        areaM: data.areaM?.toString(),
+        mainUsages: data.mainUsages,
+        subUsages: data.subUsages,
+        totalPlots: parseInt(data.totalPlots) || 0,
+        neighborhoods: data.neighborhoods,
+        officialMapUrl: data.officialMapUrl,
+        googleMapUrl: data.googleMapUrl,
+        officialMapImage: data.officialMapImage, // يخزن كـ Base64 طويل
+        googleMapImage: data.googleMapImage, // يخزن كـ Base64 طويل
+        notes: data.notes,
+        specialRegulations: data.specialRegulations || [],
+
+        // ربط الأحياء إن وجدت
         districts:
           data.districtIds &&
           Array.isArray(data.districtIds) &&
           data.districtIds.length > 0
             ? { connect: data.districtIds.map((id) => ({ id })) }
             : undefined,
+
+        // 🚀 --- إنشاء الشوارع الفرعية المرتبطة ---
+        streets: {
+          create:
+            data.streets?.map((s) => ({
+              name: s.name,
+              width: s.width?.toString(),
+              hasSpecialReg: s.hasSpecialReg,
+              regDesc: s.regDesc,
+            })) || [],
+        },
+
+        // 🚀 --- إنشاء الملفات المرتبطة ---
+        files: {
+          create:
+            data.files?.map((f) => ({
+              url: f.url, // حالياً نخزن الرابط المؤقت أو الـ Base64
+              name: f.name,
+              desc: f.desc,
+              type: f.type,
+            })) || [],
+        },
       },
-      include: { districts: true },
+      include: { districts: true, streets: true, files: true },
     });
 
     res.status(201).json(newPlan);
   } catch (error) {
-    console.error("🔥 Create Plan Error:", error); // 👈 لطباعة الخطأ الدقيق في التيرمنال إذا حدث
+    console.error("🔥 Create Plan Error:", error);
     if (error.code === "P2002") {
       return res
         .status(400)
@@ -544,36 +605,69 @@ const createPlan = async (req, res) => {
 const updatePlan = async (req, res) => {
   try {
     const { id } = req.params;
-    const {
-      planNumber,
-      oldNumber,
-      status,
-      isWithout,
-      properties,
-      plots,
-      districtIds,
-    } = req.body;
+    const data = req.body;
 
     const updatedPlan = await prisma.riyadhPlan.update({
       where: { id },
       data: {
-        planNumber: isWithout ? "بدون" : planNumber,
-        oldNumber,
-        status,
-        isWithout,
-        properties: parseInt(properties || 0),
-        plots: parseInt(plots || 0),
-        // تحديث العلاقات: فصل الأحياء القديمة وربط الجديدة
-        districts: districtIds
+        planNumber: data.isWithout ? "بدون" : data.planNumber,
+        oldNumber: data.oldNumber,
+        status: data.status,
+        isWithout: data.isWithout,
+        properties: parseInt(data.properties || 0),
+        plots: parseInt(data.plots || 0),
+
+        // 🚀 --- الحقول الجديدة ---
+        hijriYear: data.hijriYear,
+        areaKm: data.areaKm?.toString(),
+        areaM: data.areaM?.toString(),
+        mainUsages: data.mainUsages,
+        subUsages: data.subUsages,
+        totalPlots: parseInt(data.totalPlots) || 0,
+        neighborhoods: data.neighborhoods,
+        officialMapUrl: data.officialMapUrl,
+        googleMapUrl: data.googleMapUrl,
+        officialMapImage: data.officialMapImage,
+        googleMapImage: data.googleMapImage,
+        notes: data.notes,
+        specialRegulations: data.specialRegulations || [],
+
+        districts: data.districtIds
           ? {
-              set: districtIds.map((id) => ({ id })),
+              set: data.districtIds.map((id) => ({ id })),
             }
           : undefined,
+
+        // 🚀 --- تحديث الشوارع (مسح القديم وإضافة الجديد بالكامل) ---
+        streets: {
+          deleteMany: {},
+          create:
+            data.streets?.map((s) => ({
+              name: s.name,
+              width: s.width?.toString(),
+              hasSpecialReg: s.hasSpecialReg,
+              regDesc: s.regDesc,
+            })) || [],
+        },
+
+        // 🚀 --- تحديث الملفات (مسح القديم وإضافة الجديد بالكامل) ---
+        files: {
+          deleteMany: {},
+          create:
+            data.files?.map((f) => ({
+              url: f.url,
+              name: f.name,
+              desc: f.desc,
+              type: f.type,
+            })) || [],
+        },
       },
-      include: { districts: true },
+      include: { districts: true, streets: true, files: true },
     });
+
     res.json(updatedPlan);
   } catch (error) {
+    console.error("🔥 Update Plan Error:", error);
     res.status(500).json({ message: "فشل تحديث المخطط", error: error.message });
   }
 };
