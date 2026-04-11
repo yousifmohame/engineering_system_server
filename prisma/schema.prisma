@@ -2676,7 +2676,7 @@ model AdvancedContract {
 
 model OfficeTask {
   id              String    @id @default(uuid())
-  serialNumber    String?    @unique // التنسيق: T-20260411-001
+  serialNumber    String?   
   description     String    @db.Text
   priority        String    @default("medium") // high, medium, low
   status          String    @default("active") // active, completed, frozen, cancelled
@@ -2709,7 +2709,7 @@ model OfficeTask {
 
 model SubTask {
   id           String  @id @default(uuid())
-  serialNumber String?  @unique // التنسيق: ST-20260411-001
+  serialNumber String?  
   title        String
   isCompleted  Boolean @default(false)
   authorName   String? @default("موظف") // 👈 أضف هذا السطر
