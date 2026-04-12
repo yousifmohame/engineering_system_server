@@ -501,3 +501,97 @@ exports.reanalyzeReference = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+
+exports.updateReference = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      title, source, category, type, city, sector,
+      txType, txMainCategory, txSubCategory, issueDate, expiryDate, autoAnalyze
+    } = req.body;
+
+    const buildingTypes = req.body.buildingTypes ? JSON.parse(req.body.buildingTypes) : [];
+    const districts = req.body.districts ? JSON.parse(req.body.districts) : [];
+    
+    const landAreaFrom = req.body.landAreaFrom ? parseFloat(req.body.landAreaFrom) : null;
+    const landAreaTo = req.body.landAreaTo ? parseFloat(req.body.landAreaTo) : null;
+    const floorsFrom = req.body.floorsFrom ? parseInt(req.body.floorsFrom) : null;
+    const floorsTo = req.body.floorsTo ? parseInt(req.body.floorsTo) : null;
+    const streetWidthFrom = req.body.streetWidthFrom ? parseInt(req.body.streetWidthFrom) : null;
+    const streetWidthTo = req.body.streetWidthTo ? parseInt(req.body.streetWidthTo) : null;
+
+    const updateData = {
+      title, source, category, type, city, sector, txType, txMainCategory, txSubCategory,
+      buildingTypes, districts, landAreaFrom, landAreaTo, floorsFrom, floorsTo, streetWidthFrom, streetWidthTo,
+      issueDate: issueDate ? new Date(issueDate) : null,
+      expiryDate: expiryDate ? new Date(expiryDate) : null,
+    };
+
+    // إذا تم رفع ملفات جديدة، سنقوم بتحديث المسارات وتهيئة التحليل الجديد إذا طُلب
+    let absoluteFilePaths = [];
+    let mimeTypes = [];
+    const uploadedFiles = req.files && req.files.length > 0 ? req.files : req.file ? [req.file] : [];
+
+    if (uploadedFiles.length > 0) {
+      let fileUrls = [];
+      uploadedFiles.forEach(file => {
+        fileUrls.push(`/uploads/references/${file.filename}`);
+        absoluteFilePaths.push(path.join(__dirname, "..", "..", "uploads", "references", file.filename));
+        mimeTypes.push(file.mimetype);
+      });
+      updateData.fileUrl = fileUrls.join(",");
+      
+      if (autoAnalyze === "true") {
+        updateData.analysisStatus = "قيد التحليل";
+      }
+    }
+
+    const updatedRef = await prisma.referenceDocument.update({
+      where: { id },
+      data: updateData,
+    });
+
+    // تشغيل التحليل في الخلفية للملفات الجديدة
+    if (uploadedFiles.length > 0 && autoAnalyze === "true") {
+        analyzeReferenceBackground(updatedRef.id, absoluteFilePaths, mimeTypes, "full");
+    }
+
+    req.body.userName = req.user?.name;
+    await addLog(id, "تعديل بيانات المرجع الأساسية", req);
+
+    res.json({ success: true, data: updatedRef });
+  } catch (error) {
+    console.error("Update Reference Error:", error);
+    res.status(500).json({ success: false, message: "فشل تحديث المرجع" });
+  }
+};
+
+// تحديث حالة المرجع (نشط / مجمد) مع تسجيل السبب
+exports.updateReferenceStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, freezeReason } = req.body;
+
+    const updatedRef = await prisma.referenceDocument.update({
+      where: { id },
+      data: { 
+        status,
+        // يمكنك إضافة حقل freezeReason في Schema إذا أردت، 
+        // أو نكتفي بتسجيله في السجل (Log) كما سنفعل الآن
+      },
+    });
+
+    // تسجيل العملية في السجل
+    const actionText = status === "مجمد" 
+      ? `تجميد المرجع. السبب: ${freezeReason}` 
+      : "إعادة تنشيط المرجع";
+
+    req.body.userName = req.user?.name || "مدير النظام";
+    await addLog(id, actionText, req);
+
+    res.json({ success: true, data: updatedRef });
+  } catch (error) {
+    console.error("Update Status Error:", error);
+    res.status(500).json({ success: false, message: "فشل تحديث حالة المرجع" });
+  }
+};

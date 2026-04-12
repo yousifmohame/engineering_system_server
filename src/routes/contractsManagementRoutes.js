@@ -7,6 +7,7 @@ router.post("/", controller.saveContract); // إنشاء عقد جديد
 router.get("/", controller.getAllContracts); // جلب جميع العقود
 router.get("/:id", controller.getContractById); // جلب عقد بواسطة ID
 router.put("/:id", controller.updateContract); // تعديل عقد
+router.patch("/:id/status", controller.updateContractStatus); // تحديث حالة العقد
 router.delete("/:id", controller.deleteContract); // حذف عقد
 
 // --- مسارات الذكاء الاصطناعي (AI) ---

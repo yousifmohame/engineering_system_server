@@ -167,6 +167,48 @@ exports.deleteContract = async (req, res) => {
   }
 };
 
+// contractsManagementController.js
+// أضف هذه الدالة قبل قسم الـ AI
+
+exports.updateContractStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, freezeReason } = req.body;
+
+    // جلب العقد الحالي لمعرفة بياناته القديمة
+    const existingContract = await prisma.advancedContract.findUnique({
+      where: { id: id },
+    });
+
+    if (!existingContract) {
+      return res.status(404).json({ success: false, error: "العقد غير موجود" });
+    }
+
+    // تحديث كائن projectDetails لإضافة سبب التجميد إذا كانت الحالة "مجمد"
+    const updatedProjectDetails = {
+      ...(existingContract.projectDetails || {}),
+    };
+
+    if (status === "مجمد" || status === "frozen") {
+      updatedProjectDetails.freezeReason = freezeReason || "بدون سبب";
+      updatedProjectDetails.frozenAt = new Date();
+    }
+
+    const updatedContract = await prisma.advancedContract.update({
+      where: { id: id },
+      data: {
+        status: status,
+        projectDetails: updatedProjectDetails,
+      },
+    });
+
+    res.status(200).json({ success: true, data: updatedContract });
+  } catch (error) {
+    console.error("Update Contract Status Error:", error);
+    res.status(500).json({ success: false, error: "حدث خطأ أثناء تحديث حالة العقد" });
+  }
+};
+
 // --------------------------------------------------------
 // 2. عمليات الذكاء الاصطناعي (AI Operations)
 // --------------------------------------------------------

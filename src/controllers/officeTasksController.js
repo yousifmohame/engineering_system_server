@@ -35,7 +35,6 @@ exports.getTasks = async (req, res) => {
       include: {
         subTasks: { orderBy: { createdAt: "asc" } },
         comments: { orderBy: { createdAt: "asc" } },
-        // 🚀 إضافة الروابط لكي تظهر الأسماء في الجدول
         client: { select: { name: true } },
         transaction: { select: { transactionCode: true, title: true } },
         ownership: { select: { deedNumber: true } },
@@ -48,7 +47,7 @@ exports.getTasks = async (req, res) => {
   }
 };
 
-// 2. إنشاء مهمة جديدة (دعم كامل للربط والمرفقات والسريال)
+// 2. إنشاء مهمة جديدة (دعم كامل للربط، المرفقات، السريال، والعنوان)
 exports.createTask = async (req, res) => {
   try {
     const data = req.body;
@@ -61,6 +60,7 @@ exports.createTask = async (req, res) => {
     const task = await prisma.officeTask.create({
       data: {
         serialNumber: serial,
+        title: data.title || "مهمة بدون عنوان", // 👈 إضافة حقل العنوان الجديد
         description: data.description,
         priority: data.priority || "medium",
         dueDate: data.dueDate ? new Date(data.dueDate) : null,
@@ -69,7 +69,6 @@ exports.createTask = async (req, res) => {
         assignedEmployees: parseEmployees(data.assignedEmployees),
         creatorName: data.creatorName || "المستخدم",
         status: "active",
-        // 🚀 حفظ الروابط الاختيارية
         clientId: data.clientId || null,
         transactionId: data.transactionId || null,
         ownershipId: data.ownershipId || null,
@@ -83,24 +82,25 @@ exports.createTask = async (req, res) => {
     });
     res.status(201).json({ success: true, data: task });
   } catch (error) {
+    console.error("Create Task Error:", error);
     res.status(500).json({ success: false, error: error.message });
   }
 };
 
-// 3. تعديل المهمة (تحديث الروابط والبيانات)
+// 3. تعديل المهمة (تحديث العنوان والبيانات الأخرى)
 exports.updateTask = async (req, res) => {
   try {
     const { id } = req.params;
     const data = req.body;
 
     const updateData = {
+      title: data.title, // 👈 تحديث حقل العنوان
       description: data.description,
       priority: data.priority,
       dueDate: data.dueDate ? new Date(data.dueDate) : null,
       status: data.status,
       additionalNotes: data.additionalNotes,
       assignedEmployees: parseEmployees(data.assignedEmployees),
-      // 🚀 تحديث الروابط في حال تم تغييرها
       clientId: data.clientId || null,
       transactionId: data.transactionId || null,
       ownershipId: data.ownershipId || null,
@@ -118,12 +118,12 @@ exports.updateTask = async (req, res) => {
 
     res.json({ success: true, data: updatedTask });
   } catch (error) {
+    console.error("Update Task Error:", error);
     res.status(500).json({ success: false, error: error.message });
   }
 };
 
-// --- إدارة الحالات والتعليقات (بقيت كما هي مع التأكد من الربط الصحيح) ---
-
+// --- إدارة الحالات والتعليقات ---
 exports.updateTaskStatus = async (req, res) => {
   try {
     const { id } = req.params;
@@ -149,8 +149,7 @@ exports.updateTaskStatus = async (req, res) => {
   }
 };
 
-// --- إدارة المهام الفرعية (بإضافة السريال الفريد) ---
-
+// --- إدارة المهام الفرعية ---
 exports.addSubTask = async (req, res) => {
   try {
     const { id } = req.params;
@@ -171,9 +170,6 @@ exports.addSubTask = async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 };
-
-// بقية الدوال (toggleSubTask, updateSubTask, deleteSubTask, addComment, updateComment, deleteComment, deleteTask)
-// تبقى كما هي في الكود الخاص بك لأنها تعمل بشكل سليم على المعرفات (IDs).
 
 exports.toggleSubTask = async (req, res) => {
   try {

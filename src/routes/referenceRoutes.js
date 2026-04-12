@@ -14,6 +14,8 @@ const {
   deleteReference,
   getReferenceLogs,
   reanalyzeReference,
+  updateReference,
+  updateReferenceStatus,
 } = require("../controllers/referenceController");
 
 // إعدادات Multer لرفع الملفات بأمان
@@ -43,13 +45,15 @@ router.use(protect);
 router
   .route("/")
   .get(getReferences)
-  .post(upload.array('files'), createReference);
+  .post(upload.array("files"), createReference);
 
 router.route("/:id").delete(deleteReference);
 
 router.route("/:id/notes").put(updateManualNotes);
+router.put("/:id", upload.array("files"), updateReference);
 
 router.route("/:id/logs").get(getReferenceLogs);
+router.put("/:id/status", updateReferenceStatus);
 
 router.route("/:id/reanalyze").post(reanalyzeReference);
 

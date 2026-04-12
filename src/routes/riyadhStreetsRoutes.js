@@ -80,4 +80,6 @@ router.post('/quick-street', controller.createStreetQuick);
 router.put('/:id', controller.updateStreet); 
 router.delete('/:id', controller.deleteStreet); 
 
+router.get('/plans/stats/overview', controller.getPlanStats);
+
 module.exports = router;

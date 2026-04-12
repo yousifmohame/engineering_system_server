@@ -1446,6 +1446,80 @@ const uploadMedia = async (req, res) => {
   }
 };
 
+// ===================================================
+// جلب إحصائيات وبيانات المخطط التفصيلية
+// ===================================================
+const getPlanStats = async (req, res) => {
+  try {
+    const { planNumber } = req.query;
+
+    if (!planNumber) {
+      return res.status(400).json({ message: "رقم المخطط مطلوب" });
+    }
+
+    // 1. جلب الملكيات (الصكوك) المرتبطة بالمخطط مع بيانات العميل
+    const properties = await prisma.ownershipFile.findMany({
+      where: { planNumber: planNumber },
+      include: {
+        client: {
+          select: { name: true, clientCode: true },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+
+    // 2. جلب المعاملات المرتبطة برقم هذا المخطط مع بيانات العميل
+    const transactions = await prisma.privateTransaction.findMany({
+      where: { planNumber: planNumber },
+      include: {
+        client: {
+          select: { name: true, clientCode: true },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+
+    // حساب الإحصائيات (Counts)
+    let completed = 0,
+      pending = 0,
+      draft = 0,
+      cancelled = 0;
+    let plotsWithTx = new Set();
+
+    transactions.forEach((tx) => {
+      const st = tx.status || "";
+      if (st.includes("مكتمل") || st.includes("Completed")) completed++;
+      else if (
+        st.includes("جديد") ||
+        st.includes("مسودة") ||
+        st.includes("Draft")
+      )
+        draft++;
+      else if (st.includes("ملغ") || st.includes("Cancelled")) cancelled++;
+      else pending++;
+
+      if (tx.plots && Array.isArray(tx.plots)) {
+        tx.plots.forEach((p) => plotsWithTx.add(p));
+      }
+    });
+
+    res.json({
+      propertiesCount: properties.length,
+      plotsWithTransactions:
+        plotsWithTx.size > 0 ? plotsWithTx.size : transactions.length,
+      statusCounts: { completed, pending, draft, cancelled },
+      // 🚀 إرسال القوائم الكاملة للواجهة
+      transactions: transactions,
+      properties: properties,
+    });
+  } catch (error) {
+    console.error("Plan Stats Error:", error);
+    res
+      .status(500)
+      .json({ message: "فشل جلب إحصائيات المخطط", error: error.message });
+  }
+};
+
 // لا تنسَ التصدير
 module.exports = {
   createStreet,
@@ -1472,4 +1546,5 @@ module.exports = {
   getNodeDetails,
   addNodeDetail,
   uploadMedia,
+  getPlanStats,
 };
