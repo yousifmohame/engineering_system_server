@@ -1426,6 +1426,21 @@ model PrivateTransaction {
   disbursements Disbursement[]
   treasuryLogs  TreasuryTransaction[]
 
+  // 💡 [احترافي] بيانات الطلب والرخصة (Request & License Data)
+  designerOfficeId           String? // معرف المكتب المصمم
+  supervisorOfficeId         String? // معرف المكتب المشرف
+  electronicLicenseNumber    String? // رقم الرخصة الإلكترونية
+  electronicLicenseHijriYear String? // سنة الرخصة الإلكترونية (هجري)
+  electronicLicenseDate      DateTime? // تاريخ الرخصة الإلكترونية (ميلادي)
+  oldLicenseNumber           String? // رقم الرخصة القديمة (لتصحيح الوضع)
+  oldLicenseHijriYear        String? // سنة الرخصة القديمة (هجري)
+  oldLicenseDate             DateTime? // تاريخ الرخصة القديمة (ميلادي)
+  requestNumber              String? // رقم الطلب (نظام بلدي)
+  requestYear                String? // سنة الطلب (نظام بلدي)
+  serviceNumber              String? // رقم الخدمة (نظام بلدي)
+  serviceYear                String? // سنة الخدمة (نظام بلدي)
+  responsibleEmployee        String? // الموظف المسؤول عن الرفع
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -2515,6 +2530,22 @@ model EmailMessage {
   hasAttachments  Boolean      @default(false)
   messageCategory String? // لتخزين تصنيف الذكاء الاصطناعي
   createdAt       DateTime     @default(now())
+  isAnalyzed      Boolean      @default(false)
+  // البيانات المستخرجة
+  reqNumber       String? // رقم الطلب
+  reqYear         String? // سنة الطلب
+  serviceNumber   String? // رقم الخدمة
+  serviceYear     String? // سنة الخدمة
+  ownerName       String? // اسم المالك
+  serviceType     String? // نوع الخدمة
+  replyText       String? // الإفادة / محتوى الرد
+  entityName      String? // اسم الجهة
+  viewTime        String? // وقت الإطلاع (حقل إضافي)
+  sectorName      String? // القطاع (حقل إضافي)
+
+  // الربط التلقائي بمعاملة (للاستخدام لاحقاً)
+  linkedTxId      String?
+  matchConfidence Int? // نسبة التطابق
 }
 
 model Notification {

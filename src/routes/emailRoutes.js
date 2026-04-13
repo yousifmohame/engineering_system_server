@@ -37,4 +37,7 @@ router.get("/sync", emailController.syncHostingerEmails);
 // إضافة هذا السطر لمسارات البريد
 router.get('/analyze-inbox', emailController.analyzeInboxWithAI);
 
+router.post('/messages/:id/analyze', emailController.analyzeEmail);
+router.get('/messages/search', emailController.searchMessages);
+
 module.exports = router;

@@ -4,8 +4,167 @@ const { ImapFlow } = require("imapflow");
 const simpleParser = require("mailparser").simpleParser;
 const prisma = new PrismaClient();
 const { OpenAI } = require("openai");
-
+const { GoogleGenAI } = require("@google/genai");
+const { z } = require("zod");
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY }); // تأكد من إعداد المفتاح
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY }); // تأكد من إعداد المفتاح في .env
+
+// 💡 Zod Schema للتحقق من هيكل البيانات المستخرجة
+const EmailAISchema = z.object({
+  reqNumber: z.string().nullable().catch(null),
+  reqYear: z.string().nullable().catch(null),
+  serviceNumber: z.string().nullable().catch(null),
+  serviceYear: z.string().nullable().catch(null),
+  ownerName: z.string().nullable().catch(null),
+  serviceType: z.string().nullable().catch(null),
+  replyText: z.string().nullable().catch(null),
+  entityName: z.string().nullable().catch(null),
+  viewTime: z.string().nullable().catch(null),
+  sectorName: z.string().nullable().catch(null),
+});
+
+// 🚀 دالة التحليل
+exports.analyzeEmail = async (req, res) => {
+  try {
+    const { id } = req.params; // الـ ID قد يكون UUID من الداتابيز أو UID من الـ IMAP
+    const { subject, body, text, from, date } = req.body; // يجب إرسال بيانات الرسالة من الواجهة تحسباً لعدم وجودها
+
+    // 1. البحث عن الرسالة (بالـ ID أو بالـ messageId)
+    let message = await prisma.emailMessage.findFirst({
+      where: { OR: [{ id: id }, { messageId: id }] },
+    });
+
+    // 2. إذا لم تكن موجودة، نقوم بإنشائها لتتمكن من حفظ التحليل
+    if (!message) {
+      const account = await prisma.emailAccount.findFirst({
+        where: { isActive: true },
+      });
+      if (!account)
+        return res
+          .status(404)
+          .json({
+            success: false,
+            message: "لا يوجد حساب بريد مربوط لحفظ الرسالة",
+          });
+
+      message = await prisma.emailMessage.create({
+        data: {
+          messageId: id,
+          accountId: account.id,
+          subject: subject || "بدون عنوان",
+          body: body || text || "",
+          from: from || "مجهول",
+          to: account.email,
+          date: date ? new Date(date) : new Date(),
+          isRead: true,
+        },
+      });
+    }
+
+    // 3. تجهيز النص للتحليل
+    const textToAnalyze = `Subject: ${message.subject}\n\nBody:\n${message.body || message.text}`;
+
+    const promptInstruction = `
+    أنت نظام تحليل نصوص حكومي سعودي (منصة بلدي).
+    اقرأ الرسالة التالية بعناية، واستخرج منها البيانات التالية بدقة باللغة العربية:
+    رقم الطلب، سنة الطلب، رقم الخدمة، سنة الخدمة، اسم المالك (إن وجد)، نوع الخدمة، الإفادة (أي محتوى الرد أو الملاحظة)، اسم الجهة المصدرة، وقت الإطلاع (إذا تم ذكره صراحة)، والقطاع (مثل: قطاع وسط الرياض).
+    
+    قم بإرجاع كائن JSON حصرياً بالصيغة التالية (بدون أي نص إضافي أو Markdown):
+    {
+      "reqNumber": "القيمة أو null",
+      "reqYear": "القيمة أو null",
+      "serviceNumber": "القيمة أو null",
+      "serviceYear": "القيمة أو null",
+      "ownerName": "القيمة أو null",
+      "serviceType": "القيمة أو null",
+      "replyText": "القيمة أو null",
+      "entityName": "القيمة أو null",
+      "viewTime": "القيمة أو null",
+      "sectorName": "القيمة أو null"
+    }
+
+    النص:
+    ${textToAnalyze}
+    `;
+
+    // 3. استدعاء Gemini AI
+    console.log(`🤖 جاري تحليل الرسالة [${id}]...`);
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash", // أو gemini-3-flash-preview
+      contents: [{ role: "user", parts: [{ text: promptInstruction }] }],
+      config: { temperature: 0.0, responseMimeType: "application/json" },
+    });
+
+    const responseText = response.text;
+
+    // 4. تنظيف النص والتأكد من توافقه
+    const cleanJson = responseText
+      .replace(/```json/gi, "")
+      .replace(/```/g, "")
+      .trim();
+    let parsedData;
+    try {
+      parsedData = JSON.parse(cleanJson);
+    } catch (e) {
+      throw new Error("فشل الذكاء الاصطناعي في توليد JSON صحيح");
+    }
+
+    const validatedData = EmailAISchema.parse(parsedData);
+
+    // 5. محاولة إيجاد معاملة مطابقة في النظام بناءً على رقم الطلب أو اسم المالك (ميزة إضافية للربط)
+    let linkedTxId = null;
+    let matchConfidence = null;
+    if (validatedData.reqNumber) {
+      // ابحث في معاملاتك عن تطابق في الرقم
+      const matchedTx = await prisma.privateTransaction.findFirst({
+        where: {
+          // افترض أن رقم الطلب محفوظ في transactionCode أو referenceNumber
+          // عدل هذا الحقل بناءً على تصميم قاعدة بياناتك للمعاملات
+          OR: [
+            { transactionCode: { contains: validatedData.reqNumber } },
+            {
+              notes: {
+                path: ["refs", "baladyNumber"],
+                equals: validatedData.reqNumber,
+              },
+            },
+          ],
+        },
+      });
+      if (matchedTx) {
+        linkedTxId = matchedTx.id;
+        matchConfidence = 95; // تطابق قوي
+      }
+    }
+
+    // 6. تحديث الرسالة في قاعدة البيانات
+    const updatedMessage = await prisma.emailMessage.update({
+      // 👇 التعديل هنا: استخدم message.id بدلاً من id
+      where: { id: message.id }, 
+      data: {
+        isAnalyzed: true,
+        reqNumber: validatedData.reqNumber,
+        reqYear: validatedData.reqYear,
+        serviceNumber: validatedData.serviceNumber,
+        serviceYear: validatedData.serviceYear,
+        ownerName: validatedData.ownerName,
+        serviceType: validatedData.serviceType,
+        replyText: validatedData.replyText,
+        entityName: validatedData.entityName,
+        viewTime: validatedData.viewTime,
+        sectorName: validatedData.sectorName,
+        linkedTxId: linkedTxId,
+        matchConfidence: matchConfidence
+      },
+    });
+
+    res.json({ success: true, data: updatedMessage });
+  } catch (error) {
+    console.error("AI Email Analysis Error:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 // جلب جميع حسابات البريد
 exports.getAccounts = async (req, res) => {
   try {
@@ -584,5 +743,38 @@ exports.analyzeInboxWithAI = async (req, res) => {
     res
       .status(500)
       .json({ success: false, message: "فشل التحليل الذكي: " + error.message });
+  }
+};
+
+exports.searchMessages = async (req, res) => {
+  try {
+    const { serviceNumber, reqNumber } = req.query;
+
+    if (!serviceNumber && !reqNumber) {
+      return res.json({ success: true, data: [] });
+    }
+
+    // بناء شروط البحث
+    const orConditions = [];
+    if (serviceNumber) {
+      orConditions.push({ serviceNumber: { contains: serviceNumber } });
+      orConditions.push({ body: { contains: serviceNumber } });
+      orConditions.push({ subject: { contains: serviceNumber } });
+    }
+    if (reqNumber) {
+      orConditions.push({ reqNumber: { contains: reqNumber } });
+      orConditions.push({ body: { contains: reqNumber } });
+      orConditions.push({ subject: { contains: reqNumber } });
+    }
+
+    const messages = await prisma.emailMessage.findMany({
+      where: { OR: orConditions },
+      orderBy: { date: 'desc' },
+      take: 10 // نكتفي بآخر 10 رسائل مطابقة لتجنب الضغط
+    });
+
+    res.json({ success: true, data: messages });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
   }
 };

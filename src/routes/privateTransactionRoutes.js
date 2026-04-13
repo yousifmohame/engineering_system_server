@@ -59,7 +59,8 @@ const {
   deleteCollectionDate,
   assignTask,
   submitTask,
-  deleteTask
+  deleteTask,
+  addAuthorityNote,
 } = require("../controllers/privateTransactionController");
 
 router.use(protect);
@@ -108,5 +109,8 @@ router.post("/:id/tasks/:taskId/submit", upload.single("file"), submitTask);
 
 // مسار الحذف
 router.delete("/:id/tasks/:taskId", deleteTask);
+
+// تأكد من استخدام middleware الرفع (upload)
+router.post("/:id/authority-notes", upload.single("file"), addAuthorityNote);
 
 module.exports = router;

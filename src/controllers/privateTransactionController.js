@@ -412,6 +412,20 @@ const getPrivateTransactions = async (req, res) => {
         licenseNo: true,
         oldDeed: true,
 
+        designerOfficeId: true,
+        supervisorOfficeId: true,
+        electronicLicenseNumber: true,
+        electronicLicenseHijriYear: true,
+        electronicLicenseDate: true,
+        oldLicenseNumber: true,
+        oldLicenseHijriYear: true,
+        oldLicenseDate: true,
+        requestNumber: true,
+        requestYear: true,
+        serviceNumber: true,
+        serviceYear: true,
+        responsibleEmployee: true,
+
         ownerNames: true,
         districtName: true,
         sector: true,
@@ -555,6 +569,22 @@ const getPrivateTransactions = async (req, res) => {
         client: displayNames.join(" و ") || "غير محدد",
         clientObj: tx.client,
         detailedOwnersList: finalDetailedOwners, // 👈 هذه التي سيعتمد عليها التعديل في BasicTab
+
+        requestData: {
+          designerOffice: tx.designerOfficeId || "",
+          supervisorOffice: tx.supervisorOfficeId || "",
+          electronicLicenseNumber: tx.electronicLicenseNumber || "",
+          electronicLicenseHijriYear: tx.electronicLicenseHijriYear || "",
+          electronicLicenseDate: tx.electronicLicenseDate || "",
+          oldLicenseNumber: tx.oldLicenseNumber || "",
+          oldLicenseHijriYear: tx.oldLicenseHijriYear || "",
+          oldLicenseDate: tx.oldLicenseDate || "",
+          requestNumber: tx.requestNumber || "",
+          requestYear: tx.requestYear || "",
+          serviceNumber: tx.serviceNumber || "",
+          serviceYear: tx.serviceYear || "",
+          responsibleEmployee: tx.responsibleEmployee || "",
+        },
 
         district:
           tx.districtName ||
@@ -1121,6 +1151,7 @@ const updatePrivateTransaction = async (req, res) => {
       area,
       mapsLink,
       updatedBy,
+      requestData,
       isOnAxis,
       streetName,
       officialMapLink,
@@ -1210,6 +1241,32 @@ const updatePrivateTransaction = async (req, res) => {
       dataToUpdate.generalNotes = generalNotes;
       dataToUpdate.generalNotesUpdatedBy = updatedBy || "موظف النظام";
       dataToUpdate.generalNotesUpdatedAt = new Date();
+    }
+
+    if (requestData) {
+      dataToUpdate.designerOfficeId = requestData.designerOffice || null;
+      dataToUpdate.supervisorOfficeId = requestData.supervisorOffice || null;
+      dataToUpdate.electronicLicenseNumber =
+        requestData.electronicLicenseNumber || null;
+      dataToUpdate.electronicLicenseHijriYear =
+        requestData.electronicLicenseHijriYear || null;
+      dataToUpdate.electronicLicenseDate = requestData.electronicLicenseDate
+        ? new Date(requestData.electronicLicenseDate)
+        : null;
+
+      dataToUpdate.oldLicenseNumber = requestData.oldLicenseNumber || null;
+      dataToUpdate.oldLicenseHijriYear =
+        requestData.oldLicenseHijriYear || null;
+      dataToUpdate.oldLicenseDate = requestData.oldLicenseDate
+        ? new Date(requestData.oldLicenseDate)
+        : null;
+
+      dataToUpdate.requestNumber = requestData.requestNumber || null;
+      dataToUpdate.requestYear = requestData.requestYear || null;
+      dataToUpdate.serviceNumber = requestData.serviceNumber || null;
+      dataToUpdate.serviceYear = requestData.serviceYear || null;
+      dataToUpdate.responsibleEmployee =
+        requestData.responsibleEmployee || null;
     }
 
     if (req.files) {
@@ -1612,6 +1669,45 @@ const submitTask = async (req, res) => {
   }
 };
 
+// إضافة ملاحظة جهة يدوية مع مرفق
+const addAuthorityNote = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { note, addedBy } = req.body;
+    
+    let attachmentUrl = null;
+    if (req.file) {
+      attachmentUrl = `/uploads/transactions/${req.file.filename}`;
+    }
+
+    const tx = await prisma.privateTransaction.findUnique({ where: { id } });
+    if (!tx) return res.status(404).json({ success: false, message: "المعاملة غير موجودة" });
+
+    const currentNotes = (typeof tx.notes === "object" && tx.notes !== null) ? tx.notes : {};
+    const history = currentNotes.authorityNotesHistory || [];
+
+    // إضافة الملاحظة الجديدة للسجل
+    history.push({
+      id: Date.now().toString(),
+      note,
+      addedBy: addedBy || "مستخدم النظام",
+      date: new Date().toISOString(),
+      attachment: attachmentUrl
+    });
+
+    const updatedTx = await prisma.privateTransaction.update({
+      where: { id },
+      data: { notes: { ...currentNotes, authorityNotesHistory: history } }
+    });
+
+    res.json({ success: true, message: "تم إضافة الملاحظة", data: updatedTx });
+  } catch (error) {
+    console.error("Add Authority Note Error:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+
 module.exports = {
   createPrivateTransaction,
   getPrivateTransactions,
@@ -1632,4 +1728,5 @@ module.exports = {
   assignTask,
   submitTask,
   deleteTask,
+  addAuthorityNote
 };
