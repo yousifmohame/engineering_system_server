@@ -60,4 +60,62 @@ const updateSettings = async (req, res) => {
   }
 };
 
-module.exports = { getSettings, updateSettings };
+const getSidebarSettings = async (req, res) => {
+  try {
+    let settings = await prisma.sidebarSettings.findUnique({
+      where: { id: 1 }
+    });
+
+    // إذا لم يكن هناك إعدادات مسبقة، قم بإنشاء الإعدادات الافتراضية
+    if (!settings) {
+      settings = await prisma.sidebarSettings.create({
+        data: { id: 1 }
+      });
+    }
+
+    res.json(settings);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "فشل جلب إعدادات القائمة الجانبية" });
+  }
+};
+
+// تحديث إعدادات القائمة الجانبية
+const updateSidebarSettings = async (req, res) => {
+  try {
+    // 💡 استخراج الحقول بدقة لمنع بريسما من محاولة تحديث الـ id
+    const { bgColor, textColor, activeColor, width, logoUrl, categoryOrder, customLabels, itemOrder } = req.body;
+    
+    const updatedSettings = await prisma.sidebarSettings.upsert({
+      where: { id: 1 },
+      update: {
+        bgColor,
+        textColor,
+        activeColor,
+        width: parseInt(width) || 280, // ضمان تحويله لرقم
+        logoUrl,
+        categoryOrder: categoryOrder || [],
+        customLabels: customLabels || {},
+        itemOrder: itemOrder || {}
+      },
+      create: { 
+        id: 1, 
+        bgColor: bgColor || "#293241", 
+        textColor: textColor || "#cbd5e1", 
+        activeColor: activeColor || "#2563eb", 
+        width: parseInt(width) || 280, 
+        logoUrl: logoUrl || "/logo.jpeg",
+        categoryOrder: categoryOrder || [],
+        customLabels: customLabels || {},
+        itemOrder: itemOrder || {}
+      }
+    });
+
+    res.json(updatedSettings);
+  } catch (error) {
+    console.error("خطأ في حفظ إعدادات المظهر:", error);
+    res.status(500).json({ error: "فشل تحديث إعدادات القائمة الجانبية", details: error.message });
+  }
+};
+
+module.exports = { getSettings, updateSettings, getSidebarSettings, updateSidebarSettings };

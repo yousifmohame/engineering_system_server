@@ -1989,6 +1989,33 @@ model SystemSettings {
   updatedAt DateTime @updatedAt
 }
 
+// ===============================================
+// إعدادات مظهر القائمة الجانبية (Sidebar Settings)
+// ===============================================
+model SidebarSettings {
+  id Int @id @default(1)
+
+  // الألوان
+  bgColor     String @default("#293241")
+  textColor   String @default("#cbd5e1")
+  activeColor String @default("#2563eb")
+  hoverColor  String @default("#1e293b")
+
+  // الأبعاد والسلوك
+  width       Int     @default(280)
+  isCollapsed Boolean @default(false)
+
+  // اللوجو والترتيب
+  logoUrl       String? @default("/logo.jpeg")
+  categoryOrder Json?   @default("[]") // لتخزين ترتيب الأقسام [ "CAT_FINANCE", "CAT_DASHBOARD", ... ]
+  customLabels  Json?   @default("{}") // لتخزين الأسماء المعدلة { "CAT_FINANCE": "المالية", "01": "لوحة المدير" }
+  itemOrder     Json?   @default("{}")
+
+  updatedAt DateTime @updatedAt
+
+  @@map("sidebar_settings")
+}
+
 model OutsourceSalary {
   id              String   @id @default(uuid())
   employeeId      String
