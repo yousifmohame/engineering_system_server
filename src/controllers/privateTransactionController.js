@@ -1728,7 +1728,7 @@ const addAuthorityNote = async (req, res) => {
 
     let attachmentUrl = null;
     if (req.file) {
-      attachmentUrl = `/uploads/transactions/${req.file.filename}`;
+      attachmentUrl = `../../uploads/transactions/${req.file.filename}`;
     }
 
     const tx = await prisma.privateTransaction.findUnique({ where: { id } });
