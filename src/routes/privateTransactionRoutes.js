@@ -61,6 +61,8 @@ const {
   submitTask,
   deleteTask,
   addAuthorityNote,
+  updateAuthorityNote,
+  deleteAuthorityNote,
 } = require("../controllers/privateTransactionController");
 
 router.use(protect);
@@ -111,6 +113,15 @@ router.post("/:id/tasks/:taskId/submit", upload.single("file"), submitTask);
 router.delete("/:id/tasks/:taskId", deleteTask);
 
 // تأكد من استخدام middleware الرفع (upload)
+// إضافة الملاحظة (موجود مسبقاً، تأكد من وجود upload)
 router.post("/:id/authority-notes", upload.single("file"), addAuthorityNote);
+
+// 🚀 المسارات الجديدة للتعديل والحذف
+router.put(
+  "/:id/authority-notes/:noteId",
+  upload.single("file"),
+  updateAuthorityNote,
+);
+router.delete("/:id/authority-notes/:noteId", deleteAuthorityNote);
 
 module.exports = router;

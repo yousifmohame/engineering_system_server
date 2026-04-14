@@ -1704,11 +1704,27 @@ const submitTask = async (req, res) => {
   }
 };
 
-// إضافة ملاحظة جهة يدوية مع مرفق
+// ... (في نفس الملف privateTransactionController.js، تأكد من وجود دالة توليد السريال أو قم بإضافتها في الأعلى)
+const generateSmartSerial = async (modelName, prefix) => {
+  const today = new Date();
+  const dateStr = today.toISOString().slice(0, 10).replace(/-/g, "");
+  const startOfDay = new Date(today.setHours(0, 0, 0, 0));
+  const endOfDay = new Date(today.setHours(23, 59, 59, 999));
+
+  const countToday = await prisma[modelName].count({
+    where: { createdAt: { gte: startOfDay, lte: endOfDay } },
+  });
+
+  const sequence = String(countToday + 1).padStart(3, "0");
+  return `${prefix}-${dateStr}-${sequence}`;
+};
+
+// --------------------------------------------------
+
 const addAuthorityNote = async (req, res) => {
   try {
     const { id } = req.params;
-    const { note, addedBy } = req.body;
+    const { note, addedBy, assignedTo } = req.body;
 
     let attachmentUrl = null;
     if (req.file) {
@@ -1725,11 +1741,11 @@ const addAuthorityNote = async (req, res) => {
       typeof tx.notes === "object" && tx.notes !== null ? tx.notes : {};
     const history = currentNotes.authorityNotesHistory || [];
 
-    // إضافة الملاحظة الجديدة للسجل
     history.push({
       id: Date.now().toString(),
       note,
       addedBy: addedBy || "مستخدم النظام",
+      assignedTo: assignedTo || null,
       date: new Date().toISOString(),
       attachment: attachmentUrl,
     });
@@ -1739,9 +1755,106 @@ const addAuthorityNote = async (req, res) => {
       data: { notes: { ...currentNotes, authorityNotesHistory: history } },
     });
 
+    // 🚀 إصلاح إنشاء المهمة التلقائية
+    if (assignedTo) {
+      try {
+        // توليد سريال للمهمة
+        const serial = await generateSmartSerial("officeTask", "T");
+
+        await prisma.officeTask.create({
+          data: {
+            serialNumber: serial,
+            title: `إفادة بلدي - ${tx.transactionCode || "معاملة"}`, // حقل الـ Title الذي أضفناه سابقاً
+            description: `توجيه من (${addedBy || "النظام"}):\n\n${note}`,
+            priority: "high",
+            status: "active",
+            creatorName: addedBy || "نظام التوجيه الآلي",
+            transactionId: id,
+            // تخزين الموظف كـ JSON string كما يتطلب الموديل لديك
+            assignedEmployees: JSON.stringify([
+              { id: "auto", name: assignedTo },
+            ]),
+          },
+        });
+      } catch (taskError) {
+        console.error("خطأ غير حرج: فشل إنشاء مهمة من التوجيه", taskError);
+        // لا نوقف العملية إذا فشلت المهمة، فالملاحظة تم حفظها بالفعل
+      }
+    }
+
     res.json({ success: true, message: "تم إضافة الملاحظة", data: updatedTx });
   } catch (error) {
     console.error("Add Authority Note Error:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// 🚀 تحديث ملاحظة موجودة
+const updateAuthorityNote = async (req, res) => {
+  try {
+    const { id, noteId } = req.params;
+    const { note, assignedTo } = req.body;
+
+    const tx = await prisma.privateTransaction.findUnique({ where: { id } });
+    if (!tx)
+      return res
+        .status(404)
+        .json({ success: false, message: "المعاملة غير موجودة" });
+
+    const currentNotes = tx.notes || {};
+    const history = currentNotes.authorityNotesHistory || [];
+
+    const noteIndex = history.findIndex((n) => n.id === noteId);
+    if (noteIndex === -1)
+      return res
+        .status(404)
+        .json({ success: false, message: "الملاحظة غير موجودة" });
+
+    // تحديث النص والتوجيه
+    history[noteIndex].note = note;
+    if (assignedTo !== undefined) history[noteIndex].assignedTo = assignedTo;
+
+    // إذا كان هناك ملف جديد، استبدل القديم
+    if (req.file) {
+      history[noteIndex].attachment =
+        `/uploads/transactions/${req.file.filename}`;
+    }
+
+    const updatedTx = await prisma.privateTransaction.update({
+      where: { id },
+      data: { notes: { ...currentNotes, authorityNotesHistory: history } },
+    });
+
+    res.json({ success: true, message: "تم التحديث بنجاح", data: updatedTx });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// 🚀 حذف ملاحظة
+const deleteAuthorityNote = async (req, res) => {
+  try {
+    const { id, noteId } = req.params;
+
+    const tx = await prisma.privateTransaction.findUnique({ where: { id } });
+    if (!tx)
+      return res
+        .status(404)
+        .json({ success: false, message: "المعاملة غير موجودة" });
+
+    const currentNotes = tx.notes || {};
+    let history = currentNotes.authorityNotesHistory || [];
+
+    // فلترة الملاحظة لحذفها
+    history = history.filter((n) => n.id !== noteId);
+
+    const updatedTx = await prisma.privateTransaction.update({
+      where: { id },
+      data: { notes: { ...currentNotes, authorityNotesHistory: history } },
+    });
+
+    res.json({ success: true, message: "تم الحذف بنجاح", data: updatedTx });
+  } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -1767,4 +1880,6 @@ module.exports = {
   submitTask,
   deleteTask,
   addAuthorityNote,
+  updateAuthorityNote,
+  deleteAuthorityNote,
 };
