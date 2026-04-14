@@ -426,6 +426,16 @@ const getPrivateTransactions = async (req, res) => {
         serviceYear: true,
         responsibleEmployee: true,
 
+        surveyRequestNumber: true,
+        surveyRequestYear: true,
+        surveyServiceNumber: true,
+        surveyServiceYear: true,
+        surveyReportNumber: true,
+        surveyReportDate: true,
+        contractNumber: true,
+        contractApprovalDate: true,
+        contractApprovedBy: true,
+
         ownerNames: true,
         districtName: true,
         sector: true,
@@ -584,6 +594,15 @@ const getPrivateTransactions = async (req, res) => {
           serviceNumber: tx.serviceNumber || "",
           serviceYear: tx.serviceYear || "",
           responsibleEmployee: tx.responsibleEmployee || "",
+          surveyRequestNumber: tx.surveyRequestNumber || "",
+          surveyRequestYear: tx.surveyRequestYear || "",
+          surveyServiceNumber: tx.surveyServiceNumber || "",
+          surveyServiceYear: tx.surveyServiceYear || "",
+          surveyReportNumber: tx.surveyReportNumber || "",
+          surveyReportDate: tx.surveyReportDate || "",
+          contractNumber: tx.contractNumber || "",
+          contractApprovalDate: tx.contractApprovalDate || "",
+          contractApprovedBy: tx.contractApprovedBy || "",
         },
 
         district:
@@ -1267,6 +1286,22 @@ const updatePrivateTransaction = async (req, res) => {
       dataToUpdate.serviceYear = requestData.serviceYear || null;
       dataToUpdate.responsibleEmployee =
         requestData.responsibleEmployee || null;
+      dataToUpdate.surveyRequestNumber =
+        requestData.surveyRequestNumber || null;
+      dataToUpdate.surveyRequestYear = requestData.surveyRequestYear || null;
+      dataToUpdate.surveyServiceNumber =
+        requestData.surveyServiceNumber || null;
+      dataToUpdate.surveyServiceYear = requestData.surveyServiceYear || null;
+      dataToUpdate.surveyReportNumber = requestData.surveyReportNumber || null;
+      dataToUpdate.surveyReportDate = requestData.surveyReportDate
+        ? new Date(requestData.surveyReportDate)
+        : null;
+
+      dataToUpdate.contractNumber = requestData.contractNumber || null;
+      dataToUpdate.contractApprovalDate = requestData.contractApprovalDate
+        ? new Date(requestData.contractApprovalDate)
+        : null;
+      dataToUpdate.contractApprovedBy = requestData.contractApprovedBy || null;
     }
 
     if (req.files) {
@@ -1674,16 +1709,20 @@ const addAuthorityNote = async (req, res) => {
   try {
     const { id } = req.params;
     const { note, addedBy } = req.body;
-    
+
     let attachmentUrl = null;
     if (req.file) {
       attachmentUrl = `/uploads/transactions/${req.file.filename}`;
     }
 
     const tx = await prisma.privateTransaction.findUnique({ where: { id } });
-    if (!tx) return res.status(404).json({ success: false, message: "المعاملة غير موجودة" });
+    if (!tx)
+      return res
+        .status(404)
+        .json({ success: false, message: "المعاملة غير موجودة" });
 
-    const currentNotes = (typeof tx.notes === "object" && tx.notes !== null) ? tx.notes : {};
+    const currentNotes =
+      typeof tx.notes === "object" && tx.notes !== null ? tx.notes : {};
     const history = currentNotes.authorityNotesHistory || [];
 
     // إضافة الملاحظة الجديدة للسجل
@@ -1692,12 +1731,12 @@ const addAuthorityNote = async (req, res) => {
       note,
       addedBy: addedBy || "مستخدم النظام",
       date: new Date().toISOString(),
-      attachment: attachmentUrl
+      attachment: attachmentUrl,
     });
 
     const updatedTx = await prisma.privateTransaction.update({
       where: { id },
-      data: { notes: { ...currentNotes, authorityNotesHistory: history } }
+      data: { notes: { ...currentNotes, authorityNotesHistory: history } },
     });
 
     res.json({ success: true, message: "تم إضافة الملاحظة", data: updatedTx });
@@ -1706,7 +1745,6 @@ const addAuthorityNote = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
-
 
 module.exports = {
   createPrivateTransaction,
@@ -1728,5 +1766,5 @@ module.exports = {
   assignTask,
   submitTask,
   deleteTask,
-  addAuthorityNote
+  addAuthorityNote,
 };

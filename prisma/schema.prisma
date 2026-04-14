@@ -1441,6 +1441,18 @@ model PrivateTransaction {
   serviceYear                String? // سنة الخدمة (نظام بلدي)
   responsibleEmployee        String? // الموظف المسؤول عن الرفع
 
+  surveyRequestNumber String?
+  surveyRequestYear   String?
+  surveyServiceNumber String?
+  surveyServiceYear   String?
+  surveyReportNumber  String?
+  surveyReportDate    DateTime?
+
+  // 💡 حقول التعاقد الإلكتروني/التفويض (Electronic Contract / Authorization)
+  contractNumber       String?
+  contractApprovalDate DateTime?
+  contractApprovedBy   String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
