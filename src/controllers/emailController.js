@@ -6,8 +6,8 @@ const prisma = new PrismaClient();
 const { OpenAI } = require("openai");
 const { GoogleGenAI } = require("@google/genai");
 const { z } = require("zod");
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY }); // تأكد من إعداد المفتاح
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY }); // تأكد من إعداد المفتاح في .env
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 // 💡 Zod Schema للتحقق من هيكل البيانات المستخرجة
 const EmailAISchema = z.object({
@@ -26,26 +26,24 @@ const EmailAISchema = z.object({
 // 🚀 دالة التحليل
 exports.analyzeEmail = async (req, res) => {
   try {
-    const { id } = req.params; // الـ ID قد يكون UUID من الداتابيز أو UID من الـ IMAP
-    const { subject, body, text, from, date } = req.body; // يجب إرسال بيانات الرسالة من الواجهة تحسباً لعدم وجودها
+    const { id } = req.params;
+    const { subject, body, text, from, date } = req.body;
 
-    // 1. البحث عن الرسالة (بالـ ID أو بالـ messageId)
+    // 1. البحث عن الرسالة
     let message = await prisma.emailMessage.findFirst({
       where: { OR: [{ id: id }, { messageId: id }] },
     });
 
-    // 2. إذا لم تكن موجودة، نقوم بإنشائها لتتمكن من حفظ التحليل
+    // 2. إذا لم تكن موجودة، نقوم بإنشائها
     if (!message) {
       const account = await prisma.emailAccount.findFirst({
         where: { isActive: true },
       });
       if (!account)
-        return res
-          .status(404)
-          .json({
-            success: false,
-            message: "لا يوجد حساب بريد مربوط لحفظ الرسالة",
-          });
+        return res.status(404).json({
+          success: false,
+          message: "لا يوجد حساب بريد مربوط لحفظ الرسالة",
+        });
 
       message = await prisma.emailMessage.create({
         data: {
@@ -87,17 +85,16 @@ exports.analyzeEmail = async (req, res) => {
     ${textToAnalyze}
     `;
 
-    // 3. استدعاء Gemini AI
     console.log(`🤖 جاري تحليل الرسالة [${id}]...`);
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash", // أو gemini-3-flash-preview
+      model: "gemini-2.5-flash",
       contents: [{ role: "user", parts: [{ text: promptInstruction }] }],
       config: { temperature: 0.0, responseMimeType: "application/json" },
     });
 
     const responseText = response.text;
 
-    // 4. تنظيف النص والتأكد من توافقه
+    // 4. تنظيف النص
     const cleanJson = responseText
       .replace(/```json/gi, "")
       .replace(/```/g, "")
@@ -111,15 +108,12 @@ exports.analyzeEmail = async (req, res) => {
 
     const validatedData = EmailAISchema.parse(parsedData);
 
-    // 5. محاولة إيجاد معاملة مطابقة في النظام بناءً على رقم الطلب أو اسم المالك (ميزة إضافية للربط)
+    // 5. محاولة إيجاد معاملة مطابقة
     let linkedTxId = null;
     let matchConfidence = null;
     if (validatedData.reqNumber) {
-      // ابحث في معاملاتك عن تطابق في الرقم
       const matchedTx = await prisma.privateTransaction.findFirst({
         where: {
-          // افترض أن رقم الطلب محفوظ في transactionCode أو referenceNumber
-          // عدل هذا الحقل بناءً على تصميم قاعدة بياناتك للمعاملات
           OR: [
             { transactionCode: { contains: validatedData.reqNumber } },
             {
@@ -133,14 +127,13 @@ exports.analyzeEmail = async (req, res) => {
       });
       if (matchedTx) {
         linkedTxId = matchedTx.id;
-        matchConfidence = 95; // تطابق قوي
+        matchConfidence = 95;
       }
     }
 
     // 6. تحديث الرسالة في قاعدة البيانات
     const updatedMessage = await prisma.emailMessage.update({
-      // 👇 التعديل هنا: استخدم message.id بدلاً من id
-      where: { id: message.id }, 
+      where: { id: message.id },
       data: {
         isAnalyzed: true,
         reqNumber: validatedData.reqNumber,
@@ -154,7 +147,7 @@ exports.analyzeEmail = async (req, res) => {
         viewTime: validatedData.viewTime,
         sectorName: validatedData.sectorName,
         linkedTxId: linkedTxId,
-        matchConfidence: matchConfidence
+        matchConfidence: matchConfidence,
       },
     });
 
@@ -175,27 +168,30 @@ exports.getAccounts = async (req, res) => {
   }
 };
 
-// إضافة حساب بريد جديد مع التحقق الفعلي من صحة البيانات
+// إضافة حساب بريد جديد
 exports.addAccount = async (req, res) => {
   try {
     const { accountName, email, password } = req.body;
 
-    // 1. محاولة الاتصال بخادم SMTP للتحقق من صحة البريد وكلمة المرور
+    // 💡 إجبار استخدام المنفذ 465 المشفر لتجنب حظر الاستضافة للمنفذ 587
     const transporter = nodemailer.createTransport({
       host: "smtp.hostinger.com",
-      port: 587, // 👈 تغيير المنفذ
-      secure: false, // 👈 تغيير هذه إلى false مع منفذ 587
+      port: 465,
+      secure: true, // 👈 465 يتطلب secure: true
       auth: {
         user: email,
         pass: password,
       },
       tls: {
-        rejectUnauthorized: false, // 👈 أضف هذا السطر لتجنب مشاكل الشهادات
+        rejectUnauthorized: false,
       },
+      // 💡 تجنب التعليق أثناء التحقق
+      connectionTimeout: 10000,
+      greetingTimeout: 10000,
+      socketTimeout: 10000,
     });
 
     try {
-      // إذا كانت البيانات خاطئة، ستفشل هذه الدالة وترمي خطأ (throw error)
       await transporter.verify();
     } catch (verifyError) {
       console.error("Verification Error:", verifyError);
@@ -206,17 +202,17 @@ exports.addAccount = async (req, res) => {
       });
     }
 
-    // 2. إذا نجح التحقق، نقوم بحفظ الحساب في قاعدة البيانات
     const account = await prisma.emailAccount.create({
       data: {
         accountName,
         email,
         username: email,
-        password: password, // ملاحظة: من الأفضل تشفيرها باستخدام AES مستقبلاً
+        password: password,
         imapServer: "imap.hostinger.com",
         imapPort: 993,
         smtpServer: "smtp.hostinger.com",
-        smtpPort: 465,
+        smtpPort: 465, // حفظه كـ 465
+        useSSL: true, // تأكيد استخدام SSL
       },
     });
 
@@ -227,20 +223,11 @@ exports.addAccount = async (req, res) => {
 };
 
 // تحديث حساب بريد إلكتروني موجود
-// تحديث حساب بريد إلكتروني موجود
 exports.updateAccount = async (req, res) => {
   try {
     const { id } = req.params;
-    const {
-      accountName,
-      email,
-      password,
-      imapServer,
-      imapPort,
-      smtpServer,
-      smtpPort,
-      useSSL,
-    } = req.body;
+    const { accountName, email, password, imapServer, imapPort, smtpServer } =
+      req.body;
 
     const existingAccount = await prisma.emailAccount.findUnique({
       where: { id },
@@ -254,18 +241,11 @@ exports.updateAccount = async (req, res) => {
     const passToVerify = password || existingAccount.password;
     const emailToVerify = email || existingAccount.email;
 
-    // 👇 التعديل هنا: التأكد من استخدام 587 و STARTTLS
-    const finalSmtpPort = smtpPort
-      ? parseInt(smtpPort)
-      : existingAccount.smtpPort === 465
-        ? 587
-        : existingAccount.smtpPort;
-    const isSecure = finalSmtpPort === 465; // إذا كان 465 اجعله true، غير ذلك (مثل 587) اجعله false
-
+    // 💡 إجبار استخدام المنفذ 465 المشفر
     const transporter = nodemailer.createTransport({
       host: smtpServer || existingAccount.smtpServer,
-      port: finalSmtpPort,
-      secure: isSecure,
+      port: 465, // إجبار 465
+      secure: true, // إجبار true
       auth: {
         user: emailToVerify,
         pass: passToVerify,
@@ -273,6 +253,9 @@ exports.updateAccount = async (req, res) => {
       tls: {
         rejectUnauthorized: false,
       },
+      connectionTimeout: 10000,
+      greetingTimeout: 10000,
+      socketTimeout: 10000,
     });
 
     try {
@@ -296,8 +279,8 @@ exports.updateAccount = async (req, res) => {
         imapServer: imapServer || existingAccount.imapServer,
         imapPort: imapPort ? parseInt(imapPort) : existingAccount.imapPort,
         smtpServer: smtpServer || existingAccount.smtpServer,
-        smtpPort: finalSmtpPort, // حفظ المنفذ الصحيح
-        useSSL: isSecure,
+        smtpPort: 465, // إجبار التخزين كـ 465
+        useSSL: true,
       },
     });
 
@@ -316,7 +299,6 @@ exports.deleteAccount = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // التحقق من وجود الحساب
     const account = await prisma.emailAccount.findUnique({ where: { id } });
     if (!account) {
       return res
@@ -324,7 +306,6 @@ exports.deleteAccount = async (req, res) => {
         .json({ success: false, message: "الحساب غير موجود" });
     }
 
-    // حذف الحساب (الرسائل المرتبطة به ستُحذف تلقائياً بفضل onDelete: Cascade في الـ Prisma Schema)
     await prisma.emailAccount.delete({
       where: { id },
     });
@@ -348,7 +329,6 @@ exports.getMessages = async (req, res) => {
 };
 
 // إرسال رسالة بريد إلكتروني وحفظها في الصادر
-// إرسال رسالة بريد إلكتروني وحفظها في الصادر
 exports.sendMessage = async (req, res) => {
   try {
     const { accountId, to, subject, body } = req.body;
@@ -363,14 +343,11 @@ exports.sendMessage = async (req, res) => {
         .json({ success: false, message: "الحساب غير موجود" });
     }
 
-    // 👇 التعديل هنا: التأكد من الإعدادات للاتصال بالسيرفر
-    // نعتمد على المنفذ المحفوظ (الذي أصبح 587 الآن) ونحدد secure بناءً عليه
-    const isSecure = account.smtpPort === 587;
-
+    // 💡 إجبار استخدام المنفذ 465 لحل مشكلة الحظر المؤدية لـ 504 Timeout
     const transporter = nodemailer.createTransport({
       host: account.smtpServer,
-      port: account.smtpPort,
-      secure: isSecure, // false للمنفذ 587
+      port: 465, // إجبار 465
+      secure: true, // إجبار true للاتصال الآمن
       auth: {
         user: account.username,
         pass: account.password,
@@ -378,7 +355,15 @@ exports.sendMessage = async (req, res) => {
       tls: {
         rejectUnauthorized: false,
       },
+      // 💡 هذه الإعدادات تمنع السيرفر من التعليق للأبد (504 Timeout)
+      connectionTimeout: 10000,
+      greetingTimeout: 10000,
+      socketTimeout: 10000,
     });
+
+    console.log(
+      `⏳ جاري محاولة إرسال الرسالة عبر ${account.smtpServer}:465...`,
+    );
 
     const info = await transporter.sendMail({
       from: `"${account.accountName}" <${account.email}>`,
@@ -386,6 +371,8 @@ exports.sendMessage = async (req, res) => {
       subject,
       text: body,
     });
+
+    console.log("✅ تم الإرسال بنجاح:", info.messageId);
 
     const sentMessage = await prisma.emailMessage.create({
       data: {
@@ -403,48 +390,43 @@ exports.sendMessage = async (req, res) => {
 
     res.json({ success: true, data: sentMessage });
   } catch (error) {
-    console.error("Send Email Error:", error);
+    // بفضل إعدادات Timeout، سيتم رمي الخطأ هنا فوراً بدلاً من تعليق السيرفر
+    console.error("❌ Send Email Error:", error);
     res
       .status(500)
       .json({ success: false, message: "فشل الإرسال: " + error.message });
   }
 };
 
-// تحديث حالة الرسالة (مقروءة، مفضلة، مؤرشفة، محذوفة)
+// تحديث حالة الرسالة
 exports.updateMessageStatus = async (req, res) => {
   try {
     const { id } = req.params;
-    const updateData = req.body; // { isDeleted: true, isStarred: true, etc }
+    const updateData = req.body;
 
-    // 1. محاولة تحديث الرسالة إذا كانت موجودة مسبقاً في الداتابيز (رسائل الصادر أو رسائل تم التفاعل معها سابقاً)
     try {
       const message = await prisma.emailMessage.update({
-        where: { messageId: id }, // نستخدم messageId لأنه الـ UID القادم من Hostinger
+        where: { messageId: id },
         data: updateData,
       });
       return res.json({ success: true, data: message });
     } catch (dbError) {
-      // إذا لم تكن الرسالة موجودة (Record to update not found)، ننتقل للخطوة الثانية
       if (dbError.code === "P2025") {
-        // 2. إذا لم تكن موجودة، نقوم بإنشائها في الداتابيز مع حالتها الجديدة
-        // نحتاج أولاً للحصول على accountId المربوط
         const account = await prisma.emailAccount.findFirst({
           where: { isActive: true },
         });
         if (!account) throw new Error("لا يوجد حساب بريد نشط");
 
-        // بما أن الواجهة الأمامية ترسل الـ ID فقط ولا ترسل محتوى الرسالة،
-        // سنقوم بإنشاء "سجل ظل" (Shadow Record) في الداتابيز ليحفظ حالة هذه الرسالة (مثلاً: محذوفة)
         const shadowMessage = await prisma.emailMessage.create({
           data: {
-            messageId: id, // الـ UID من Hostinger
+            messageId: id,
             accountId: account.id,
-            from: req.body.from || "مجهول", // من الأفضل إرسال هذه البيانات من الفرونت إند
+            from: req.body.from || "مجهول",
             to: account.email,
             subject: req.body.subject || "رسالة واردة",
             body: "تم إنشاء هذا السجل لحفظ حالة الرسالة",
             date: new Date(),
-            ...updateData, // نطبق الحالة الجديدة هنا (isDeleted: true مثلاً)
+            ...updateData,
           },
         });
 
@@ -454,8 +436,6 @@ exports.updateMessageStatus = async (req, res) => {
           message: "تم حفظ الحالة الجديدة للرسالة الواردة",
         });
       }
-
-      // إذا كان الخطأ شيئاً آخر غير "عدم الوجود"، نرمي الخطأ
       throw dbError;
     }
   } catch (error) {
@@ -466,7 +446,6 @@ exports.updateMessageStatus = async (req, res) => {
 
 exports.syncHostingerEmails = async (req, res) => {
   try {
-    // 💡 استقبال رقم الصفحة من الواجهة الأمامية (الافتراضي 1)
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 50;
 
@@ -498,7 +477,6 @@ exports.syncHostingerEmails = async (req, res) => {
     try {
       const totalMessages = client.mailbox.exists;
       if (totalMessages === 0) {
-        // 💡 تم إصلاح إغلاق الاتصال هنا لتجنب تسرب الذاكرة
         lock.release();
         await client.logout();
         return res.json({
@@ -508,13 +486,10 @@ exports.syncHostingerEmails = async (req, res) => {
         });
       }
 
-      // 💡 معادلات حساب النطاق (Range) بناءً على رقم الصفحة
       const fetchEnd = totalMessages - (page - 1) * limit;
       const fetchStart = Math.max(1, totalMessages - page * limit + 1);
 
-      // إذا تجاوزنا عدد الرسائل المتاحة
       if (fetchEnd < 1) {
-        // 💡 تم إصلاح إغلاق الاتصال هنا أيضاً
         lock.release();
         await client.logout();
         return res.json({ success: true, data: [] });
@@ -548,11 +523,8 @@ exports.syncHostingerEmails = async (req, res) => {
           subject: parsed.subject || "(بدون عنوان)",
           from:
             parsed.from?.value[0]?.address || parsed.from?.text || "غير معروف",
-
-          // 🚀 التعديل الجوهري هنا: استخراج الـ Text والـ HTML معاً
           body: parsed.text || "",
           html: parsed.html || parsed.textAsHtml || "",
-
           date: parsed.date,
           isRead: msg.flags?.has("\\Seen") || false,
           category: category,
@@ -560,7 +532,6 @@ exports.syncHostingerEmails = async (req, res) => {
         });
       }
     } finally {
-      // سيتم تحرير القفل هنا دائماً بفضل الـ finally
       if (lock) lock.release();
     }
 
@@ -596,7 +567,6 @@ exports.analyzeInboxWithAI = async (req, res) => {
     let lock = await client.getMailboxLock("INBOX");
     const rawMessages = [];
 
-    // 💡 1. قائمة الكلمات المفتاحية لرسائل شركات الاتصالات (السبام)
     const telecomSpamKeywords = [
       "باقة",
       "باقات",
@@ -627,7 +597,7 @@ exports.analyzeInboxWithAI = async (req, res) => {
       const totalMessages = client.mailbox.exists;
       if (totalMessages === 0) return res.json({ success: true, data: [] });
 
-      const fetchStart = Math.max(1, totalMessages - 19); // جلب آخر 20 رسالة مثلاً
+      const fetchStart = Math.max(1, totalMessages - 19);
       for await (let msg of client.fetch(
         `${fetchStart}:*`,
         { source: true, flags: true, uid: true },
@@ -639,12 +609,10 @@ exports.analyzeInboxWithAI = async (req, res) => {
         const bodyText = parsed.text || "";
         const fullTextForCheck = (subject + " " + bodyText).toLowerCase();
 
-        // 💡 2. الفلترة المبدئية: هل تحتوي الرسالة على كلمات سبام صريحة؟
         const isObviousSpam = telecomSpamKeywords.some((keyword) =>
           fullTextForCheck.includes(keyword),
         );
 
-        // إذا كانت سبام واضح، لا نرسلها للذكاء الاصطناعي (توفيراً للتكلفة) ونصنفها فوراً
         if (isObviousSpam) {
           rawMessages.push({
             id: msg.uid.toString(),
@@ -656,13 +624,12 @@ exports.analyzeInboxWithAI = async (req, res) => {
             amount: null,
             relatedEntityCode: "TELECOM-AD",
             timestamp: parsed.date,
-            isRead: true, // نعتبرها مقروءة حتى لا تزعجنا
+            isRead: true,
             from: parsed.from?.text || "شركة الاتصالات",
           });
-          continue; // تخطي إرسالها للـ AI
+          continue;
         }
 
-        // إذا كانت رسالة عادية، نجهزها للـ AI
         rawMessages.push({
           id: msg.uid.toString(),
           subject: subject,
@@ -677,13 +644,11 @@ exports.analyzeInboxWithAI = async (req, res) => {
     }
     await client.logout();
 
-    // فصل الرسائل التي تحتاج ذكاء اصطناعي عن رسائل السبام الجاهزة
     const messagesForAI = rawMessages.filter((m) => m.category !== "سبام");
     const preFilteredSpam = rawMessages.filter((m) => m.category === "سبام");
 
-    let finalArray = [...preFilteredSpam]; // نبدأ بإضافة السبام المفلتر للنتيجة النهائية
+    let finalArray = [...preFilteredSpam];
 
-    // 💡 3. إرسال الرسائل المتبقية للذكاء الاصطناعي مع تعليمات صارمة
     if (messagesForAI.length > 0) {
       const prompt = `
           أنت مساعد ذكي لنظام إدارة مكتب هندسي. تم استلام رسائل محولة من شريحة جوال (SMS) أو إيميلات.
@@ -730,11 +695,9 @@ exports.analyzeInboxWithAI = async (req, res) => {
           parsedData.data ||
           [];
 
-      // دمج نتائج الـ AI مع نتائج الفلترة السريعة
       finalArray = [...finalArray, ...aiAnalyzedMessages];
     }
 
-    // ترتيب الرسائل من الأحدث للأقدم
     finalArray.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
     res.json({ success: true, data: finalArray });
@@ -754,7 +717,6 @@ exports.searchMessages = async (req, res) => {
       return res.json({ success: true, data: [] });
     }
 
-    // بناء شروط البحث
     const orConditions = [];
     if (serviceNumber) {
       orConditions.push({ serviceNumber: { contains: serviceNumber } });
@@ -769,8 +731,8 @@ exports.searchMessages = async (req, res) => {
 
     const messages = await prisma.emailMessage.findMany({
       where: { OR: orConditions },
-      orderBy: { date: 'desc' },
-      take: 10 // نكتفي بآخر 10 رسائل مطابقة لتجنب الضغط
+      orderBy: { date: "desc" },
+      take: 10,
     });
 
     res.json({ success: true, data: messages });
