@@ -1415,6 +1415,10 @@ model PrivateTransaction {
   sourceName    String?
   sourcePercent Float?  @default(0)
 
+  // 💡 مصدر المعاملة (مرتبط بجدول الأشخاص فقط: موظف، وسيط، معقب)
+  sourcePersonId String?
+  sourcePerson   Person? @relation("TxSourcePerson", fields: [sourcePersonId], references: [id])
+
   // --- التفاصيل الإضافية ---
   authorities String[]
   attachments String[]
@@ -1427,19 +1431,25 @@ model PrivateTransaction {
   treasuryLogs  TreasuryTransaction[]
 
   // 💡 [احترافي] بيانات الطلب والرخصة (Request & License Data)
-  designerOfficeId           String? // معرف المكتب المصمم
-  supervisorOfficeId         String? // معرف المكتب المشرف
+  designerOfficeId   String? // معرف المكتب المصمم
+  supervisorOfficeId String? // معرف المكتب المشرف
+  hasAgreement       Boolean   @default(false)
+  requestDate        DateTime? // 👈 جديد: تاريخ الطلب 
+
+  // 💡 بيانات الخدمة (مفصول الرقم عن التاريخ والسنة)
+  serviceDate                DateTime? // 👈 جديد: تاريخ الخدمة
   electronicLicenseNumber    String? // رقم الرخصة الإلكترونية
-  electronicLicenseHijriYear String? // سنة الرخصة الإلكترونية (هجري)
-  electronicLicenseDate      DateTime? // تاريخ الرخصة الإلكترونية (ميلادي)
-  oldLicenseNumber           String? // رقم الرخصة القديمة (لتصحيح الوضع)
-  oldLicenseHijriYear        String? // سنة الرخصة القديمة (هجري)
-  oldLicenseDate             DateTime? // تاريخ الرخصة القديمة (ميلادي)
-  requestNumber              String? // رقم الطلب (نظام بلدي)
-  requestYear                String? // سنة الطلب (نظام بلدي)
-  serviceNumber              String? // رقم الخدمة (نظام بلدي)
-  serviceYear                String? // سنة الخدمة (نظام بلدي)
-  responsibleEmployee        String? // الموظف المسؤول عن الرفع
+  electronicLicenseHijriYear String? // سنة الرخصة (هجري)
+  electronicLicenseDate      DateTime? // تاريخ الرخصة (ميلادي)
+
+  oldLicenseNumber    String? // رقم الرخصة القديمة (لتصحيح الوضع)
+  oldLicenseHijriYear String? // سنة الرخصة القديمة (هجري)
+  oldLicenseDate      DateTime? // تاريخ الرخصة القديمة (ميلادي)
+  requestNumber       String? // رقم الطلب (نظام بلدي)
+  requestYear         String? // سنة الطلب (نظام بلدي)
+  serviceNumber       String? // رقم الخدمة (نظام بلدي)
+  serviceYear         String? // سنة الخدمة (نظام بلدي)
+  responsibleEmployee String? // الموظف المسؤول عن الرفع
 
   surveyRequestNumber String?
   surveyRequestYear   String?
@@ -1897,6 +1907,8 @@ model Person {
   receivedTransactions    PrivateTransaction[] @relation("TxReceiver")
   engBrokeredTransactions PrivateTransaction[] @relation("TxEngBroker")
   assignedTasks           TransactionTask[]    @relation("WorkerTasks")
+  // 💡 إضافة العلاقة العكسية لمصدر المعاملة
+  sourcedTransactions     PrivateTransaction[] @relation("TxSourcePerson")
 }
 
 model TransactionTask {

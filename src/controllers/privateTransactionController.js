@@ -138,6 +138,22 @@ const createPrivateTransaction = async (req, res) => {
       receiverId,
       engOfficeBrokerId,
       addedBy,
+      designerOffice,
+      supervisorOffice,
+
+      // 👇 1. إضافة الحقول الجديدة هنا لاستقبالها من الفرونت إند
+      hasAgreement,
+      sourcePersonId,
+      serviceNumber,
+      serviceYear,
+      serviceDate,
+      requestNumber,
+      requestYear,
+      requestDate,
+      electronicLicenseNumber,
+      electronicLicenseHijriYear,
+      electronicLicenseDate,
+      // 👆 ==================================================
     } = req.body;
 
     let finalClientId = clientId;
@@ -222,7 +238,11 @@ const createPrivateTransaction = async (req, res) => {
         title: txTitle,
         category: transactionType || "غير محدد",
         complexity: surveyType || "بدون رفع",
+
         source: source || "مكتب ديتيلز",
+        // 👇 2. حفظ مصدر المعاملة المرتبط بجدول الأشخاص
+        sourcePersonId: sourcePersonId || undefined,
+
         status: "in_progress",
         createdBy: addedBy || "مدير النظام",
 
@@ -230,6 +250,12 @@ const createPrivateTransaction = async (req, res) => {
         clientType: clientType || null,
         ownerNames: ownerName || null,
         ownerIds: ownerIdNumber || null,
+
+        designerOfficeId: designerOffice || undefined,
+        supervisorOfficeId: supervisorOffice || undefined,
+
+        // 👇 3. حفظ حالة الاتفاقية
+        hasAgreement: hasAgreement || false,
 
         // 💡 👈 إنشاء الروابط في الجدول الوسيط للملاك
         ownersList: {
@@ -249,9 +275,26 @@ const createPrivateTransaction = async (req, res) => {
         landArea: landArea ? parseFloat(landArea) : null,
         oldDeed: oldDeed || null,
 
+        // الحقول القديمة (في حال كان هناك اعتماد عليها)
         serviceNo: serviceNo || null,
         requestNo: requestNo || null,
         licenseNo: licenseNo || null,
+
+        // 👇 4. تخزين الحقول الجديدة المفصلة (الخدمة، الطلب، الرخصة)
+        serviceNumber: serviceNumber || null,
+        serviceYear: serviceYear || null,
+        serviceDate: serviceDate ? new Date(serviceDate) : null,
+
+        requestNumber: requestNumber || null,
+        requestYear: requestYear || null,
+        requestDate: requestDate ? new Date(requestDate) : null,
+
+        electronicLicenseNumber: electronicLicenseNumber || null,
+        electronicLicenseHijriYear: electronicLicenseHijriYear || null,
+        electronicLicenseDate: electronicLicenseDate
+          ? new Date(electronicLicenseDate)
+          : null,
+        // 👆 =========================================================
 
         totalFees: parsedTotalFees,
         paidAmount: parsedFirstPayment,
@@ -348,23 +391,6 @@ const createPrivateTransaction = async (req, res) => {
   }
 };
 
-// دالة مساعدة لاستخراج اسم العميل بشكل آمن وموحد
-const getFullName = (name) => {
-  if (!name) return "غير محدد";
-  if (typeof name === "string") return name;
-  if (name.ar) return name.ar;
-
-  const parts = [
-    name.firstName,
-    name.fatherName,
-    name.grandFatherName,
-    name.familyName,
-  ];
-  const fullName = parts.filter(Boolean).join(" ").trim();
-
-  return fullName || name.en || "غير محدد";
-};
-
 // ==================================================
 // 3. جلب قائمة المعاملات (مع دعم الربط التلقائي للرخص والبيانات الشاملة)
 // GET /api/private-transactions
@@ -389,7 +415,6 @@ const getPrivateTransactions = async (req, res) => {
       ];
     }
 
-    // 💡 إزالة take و skip و cursor لجلب كل البيانات دفعة واحدة
     const transactions = await prisma.privateTransaction.findMany({
       where,
       orderBy: { createdAt: "desc" },
@@ -414,18 +439,24 @@ const getPrivateTransactions = async (req, res) => {
 
         designerOfficeId: true,
         supervisorOfficeId: true,
+        hasAgreement: true, // 💡 حقل الاتفاقية
+
         electronicLicenseNumber: true,
         electronicLicenseHijriYear: true,
         electronicLicenseDate: true,
         oldLicenseNumber: true,
         oldLicenseHijriYear: true,
         oldLicenseDate: true,
+
+        // 💡 التواريخ الجديدة للطلب والخدمة
         requestNumber: true,
         requestYear: true,
+        requestDate: true,
         serviceNumber: true,
         serviceYear: true,
-        responsibleEmployee: true,
+        serviceDate: true,
 
+        responsibleEmployee: true,
         surveyRequestNumber: true,
         surveyRequestYear: true,
         surveyServiceNumber: true,
@@ -447,7 +478,11 @@ const getPrivateTransactions = async (req, res) => {
         taxAmount: true,
         sourceName: true,
 
-        // 💡 👈 جلب قائمة الملاك مع بياناتهم الحقيقية من جدول العملاء
+        // 💡 مصدر المعاملة المرتبط بجدول الموظفين
+        sourcePerson: {
+          select: { id: true, name: true, role: true },
+        },
+
         ownersList: {
           select: {
             isPrimary: true,
@@ -501,7 +536,6 @@ const getPrivateTransactions = async (req, res) => {
       const notes =
         typeof tx.notes === "object" && tx.notes !== null ? tx.notes : {};
 
-      // 💡 👈 استخراج وبناء الملاك من الجدول الوسيط (بأسمائهم الحقيقية المحدثة)
       const sortedOwners =
         tx.ownersList?.sort(
           (a, b) => (b.isPrimary ? 1 : -1) - (a.isPrimary ? 1 : -1),
@@ -528,7 +562,6 @@ const getPrivateTransactions = async (req, res) => {
           };
         });
       } else {
-        // Fallback للبيانات القديمة إذا لم تكن مسجلة في ownersList
         let cName =
           typeof tx.client?.name === "string"
             ? tx.client?.name
@@ -575,24 +608,32 @@ const getPrivateTransactions = async (req, res) => {
         internalName: notes?.internalName || tx.title?.split(" - ")[0] || "",
         type: tx.category || "غير محدد",
 
-        // 💡 إرسال البيانات المجهزة للفرونت
         client: displayNames.join(" و ") || "غير محدد",
         clientObj: tx.client,
-        detailedOwnersList: finalDetailedOwners, // 👈 هذه التي سيعتمد عليها التعديل في BasicTab
+        detailedOwnersList: finalDetailedOwners,
 
+        // 💡 تحديث object الـ requestData ليتضمن التواريخ الجديدة والاتفاقية
         requestData: {
           designerOffice: tx.designerOfficeId || "",
           supervisorOffice: tx.supervisorOfficeId || "",
+          hasAgreement: tx.hasAgreement || false, // 👈
+
           electronicLicenseNumber: tx.electronicLicenseNumber || "",
           electronicLicenseHijriYear: tx.electronicLicenseHijriYear || "",
           electronicLicenseDate: tx.electronicLicenseDate || "",
+
           oldLicenseNumber: tx.oldLicenseNumber || "",
           oldLicenseHijriYear: tx.oldLicenseHijriYear || "",
           oldLicenseDate: tx.oldLicenseDate || "",
+
           requestNumber: tx.requestNumber || "",
           requestYear: tx.requestYear || "",
+          requestDate: tx.requestDate || "", // 👈
+
           serviceNumber: tx.serviceNumber || "",
           serviceYear: tx.serviceYear || "",
+          serviceDate: tx.serviceDate || "", // 👈
+
           responsibleEmployee: tx.responsibleEmployee || "",
           surveyRequestNumber: tx.surveyRequestNumber || "",
           surveyRequestYear: tx.surveyRequestYear || "",
@@ -628,7 +669,10 @@ const getPrivateTransactions = async (req, res) => {
 
         mapsLink: notes?.refs?.mapsLink || "",
 
-        office: tx.source || "مكتب ديتيلز",
+        // 💡 تحديث مصدر المعاملة ليأخذ الاسم من الجدول المرتبط إذا وجد
+        office: tx.sourcePerson?.name || tx.source || "مكتب ديتيلز",
+        sourcePersonId: tx.sourcePerson?.id || null, // 👈
+
         sourceName: tx.sourceName || notes?.sourceName || "مباشر",
         mediator: brokerNames,
         mediatorFees: totalBrokerFees,
@@ -666,7 +710,6 @@ const getPrivateTransactions = async (req, res) => {
       };
     });
 
-    // 💡 تم إزالة nextCursor من الاستجابة النهائية لعدم الحاجة إليه بعد إلغاء الليمت
     res.json({
       success: true,
       count: formattedData.length,
@@ -1238,9 +1281,15 @@ const updatePrivateTransaction = async (req, res) => {
       updatedAt: new Date(),
       category: type || tx.category,
       source: office || tx.source,
-      districtId: districtId || tx.districtId,
+      
       status: req.body.status || tx.status,
     };
+
+    if (districtId) {
+      dataToUpdate.districtNode = {
+        connect: { id: districtId }
+      };
+    }
 
     if (ownerNames !== undefined) dataToUpdate.ownerNames = ownerNames;
     if (area !== undefined) dataToUpdate.landArea = parseFloat(area);
@@ -1251,10 +1300,12 @@ const updatePrivateTransaction = async (req, res) => {
     if (streetName !== undefined) dataToUpdate.streetName = streetName;
     if (officialMapLink !== undefined)
       dataToUpdate.officialMapLink = officialMapLink;
+    // 💡 تصحيح أسماء الحقول لتتطابق مع Prisma Schema
     if (supervisingOfficeId !== undefined)
-      dataToUpdate.supervisingOfficeId = supervisingOfficeId;
+      dataToUpdate.supervisorOfficeId = supervisingOfficeId;
+      
     if (designingOfficeId !== undefined)
-      dataToUpdate.designingOfficeId = designingOfficeId;
+      dataToUpdate.designerOfficeId = designingOfficeId;
 
     if (generalNotes !== undefined) {
       dataToUpdate.generalNotes = generalNotes;
@@ -1265,6 +1316,13 @@ const updatePrivateTransaction = async (req, res) => {
     if (requestData) {
       dataToUpdate.designerOfficeId = requestData.designerOffice || null;
       dataToUpdate.supervisorOfficeId = requestData.supervisorOffice || null;
+
+      // 💡 تحديث الاتفاقية ومصدر المعاملة
+      if (requestData.hasAgreement !== undefined)
+        dataToUpdate.hasAgreement = requestData.hasAgreement;
+      if (requestData.sourcePersonId !== undefined)
+        dataToUpdate.sourcePersonId = requestData.sourcePersonId || null;
+
       dataToUpdate.electronicLicenseNumber =
         requestData.electronicLicenseNumber || null;
       dataToUpdate.electronicLicenseHijriYear =
@@ -1280,10 +1338,19 @@ const updatePrivateTransaction = async (req, res) => {
         ? new Date(requestData.oldLicenseDate)
         : null;
 
+      // 💡 تواريخ الطلب والخدمة الجديدة
       dataToUpdate.requestNumber = requestData.requestNumber || null;
       dataToUpdate.requestYear = requestData.requestYear || null;
+      dataToUpdate.requestDate = requestData.requestDate
+        ? new Date(requestData.requestDate)
+        : null;
+
       dataToUpdate.serviceNumber = requestData.serviceNumber || null;
       dataToUpdate.serviceYear = requestData.serviceYear || null;
+      dataToUpdate.serviceDate = requestData.serviceDate
+        ? new Date(requestData.serviceDate)
+        : null;
+
       dataToUpdate.responsibleEmployee =
         requestData.responsibleEmployee || null;
       dataToUpdate.surveyRequestNumber =
