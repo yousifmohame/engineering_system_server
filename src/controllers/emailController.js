@@ -346,16 +346,19 @@ exports.sendMessage = async (req, res) => {
     // 💡 إجبار استخدام المنفذ 465 لحل مشكلة الحظر المؤدية لـ 504 Timeout
     const transporter = nodemailer.createTransport({
       host: account.smtpServer,
-      port: 2525, // 👈 استخدام هذا المنفذ البديل
-      secure: false, // 👈 يجب أن تكون false مع منفذ 2525
+      port: 465, // إجبار 465
+      secure: true, // إجبار true للاتصال الآمن
       auth: {
-        user: account.email,
+        user: account.username,
         pass: account.password,
       },
       tls: {
         rejectUnauthorized: false,
       },
+      // 💡 هذه الإعدادات تمنع السيرفر من التعليق للأبد (504 Timeout)
       connectionTimeout: 10000,
+      greetingTimeout: 10000,
+      socketTimeout: 10000,
     });
 
     console.log(
