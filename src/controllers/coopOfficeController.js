@@ -7,7 +7,6 @@ const getOffices = async (req, res) => {
     const offices = await prisma.coopOffice.findMany({
       orderBy: { createdAt: "desc" },
       include: {
-        // 💡 جلب اسم المسؤول من جدول الأشخاص
         responsible: { select: { name: true } },
       },
     });
@@ -20,11 +19,12 @@ const getOffices = async (req, res) => {
       agreementType: office.agreementType,
       monthlyAmount:
         office.monthlyAmount > 0 ? `${office.monthlyAmount} ر.س` : "—",
-      // 💡 قراءة الاسم من العلاقة، والاحتفاظ بالـ ID للتعديل
       responsible: office.responsible?.name || "—",
       responsibleId: office.responsibleId || "",
       isLinkedToSystem: office.isLinkedToSystem ? "مفعل" : "غير مفعل",
       notes: office.notes || "لا توجد ملاحظات",
+      // 💡 التعديل الأهم: إرجاع حالة المكتب الرئيسي للفرونت إند
+      isMainBranch: office.isMainBranch || false,
       txCount: 0,
       pendingSettlement: "0",
       paidSettlement: "0",
@@ -47,10 +47,11 @@ const createOffice = async (req, res) => {
         phone: data.phone,
         agreementType: data.agreementType,
         monthlyAmount: parseFloat(data.monthlyAmount) || 0,
-        // 💡 حفظ הـ ID الخاص بالمسؤول
         responsibleId: data.responsibleId || null,
         isLinkedToSystem: data.isLinkedToSystem === "مفعل",
         notes: data.notes,
+        // 💡 حفظ حالة المكتب الرئيسي في قاعدة البيانات
+        isMainBranch: data.isMainBranch === true,
       },
     });
     res.status(201).json({ success: true, data: newOffice });
@@ -72,10 +73,11 @@ const updateOffice = async (req, res) => {
         phone: data.phone,
         agreementType: data.agreementType,
         monthlyAmount: parseFloat(data.monthlyAmount) || 0,
-        // 💡 حفظ הـ ID الخاص بالمسؤول
         responsibleId: data.responsibleId || null,
         isLinkedToSystem: data.isLinkedToSystem === "مفعل",
         notes: data.notes,
+        // 💡 تحديث حالة المكتب الرئيسي
+        isMainBranch: data.isMainBranch === true,
       },
     });
     res.json({ success: true, data: updatedOffice });
@@ -84,19 +86,17 @@ const updateOffice = async (req, res) => {
   }
 };
 
-// 4. حذف مكتب (إضافة جديدة)
+// 4. حذف مكتب
 const deleteOffice = async (req, res) => {
   try {
     const { id } = req.params;
     await prisma.coopOffice.delete({ where: { id } });
     res.json({ success: true, message: "تم حذف المكتب بنجاح" });
   } catch (error) {
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "لا يمكن الحذف بسبب وجود ارتباطات مالية أو معاملات.",
-      });
+    res.status(500).json({
+      success: false,
+      message: "لا يمكن الحذف بسبب وجود ارتباطات مالية أو معاملات.",
+    });
   }
 };
 

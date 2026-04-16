@@ -1633,8 +1633,10 @@ model CoopOffice {
   isLinkedToSystem Boolean @default(false)
   notes            String? @db.Text
 
-  createdAt          DateTime             @default(now())
-  updatedAt          DateTime             @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  isMainBranch       Boolean              @default(false)
   fees               CoopOfficeFee[]
   PrivateTransaction PrivateTransaction[]
 }
