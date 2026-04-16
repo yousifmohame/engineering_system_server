@@ -365,7 +365,7 @@ exports.sendMessage = async (req, res) => {
 
     // 👇 التعديل هنا: التأكد من الإعدادات للاتصال بالسيرفر
     // نعتمد على المنفذ المحفوظ (الذي أصبح 587 الآن) ونحدد secure بناءً عليه
-    const isSecure = account.smtpPort === 465;
+    const isSecure = account.smtpPort === 587;
 
     const transporter = nodemailer.createTransport({
       host: account.smtpServer,
