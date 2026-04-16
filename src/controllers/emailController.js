@@ -349,16 +349,13 @@ exports.sendMessage = async (req, res) => {
       port: 2525, // 👈 استخدام هذا المنفذ البديل
       secure: false, // 👈 يجب أن تكون false مع منفذ 2525
       auth: {
-        user: account.username,
+        user: account.email,
         pass: account.password,
       },
       tls: {
         rejectUnauthorized: false,
       },
-      // 💡 هذه الإعدادات تمنع السيرفر من التعليق للأبد (504 Timeout)
       connectionTimeout: 10000,
-      greetingTimeout: 10000,
-      socketTimeout: 10000,
     });
 
     console.log(
