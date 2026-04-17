@@ -2872,3 +2872,34 @@ model TaskComment {
 
   @@map("office_task_comments")
 }
+
+model Device {
+  id                  String    @id @default(cuid())
+  deviceCode          String    @unique // لحفظ رمز مثل DEV-001
+  type                String
+  name                String
+  brand               String
+  model               String
+  serialNumber        String
+  status              String    @default("Active")
+  location            String?
+  assignedTo          String?
+  purchaseDate        DateTime?
+  purchasePrice       String?
+  vendor              String?
+  invoiceAttachment   String?
+  nextMaintenanceDate DateTime?
+  warrantyEnd         DateTime?
+  linkedSystem        String?
+
+  // استخدام JSON للحقول المرنة والمصفوفات لتطابق تصميمك
+  network            Json? @default("{}") // { internalIp, tailscaleIp, zeroTierIp, domain, staticIp, mac }
+  specs              Json? @default("{}") // { cpu, ram, storage, gpu, os, chassisNumber }
+  customFields       Json? @default("[]") // [{ name, value }]
+  maintenanceHistory Json? @default("[]") // [{ date, type, description, technician }]
+  consumables        Json? @default("[]") // [{ name, status, validity }]
+  aiInsights         Json? @default("{}") // { healthScore, maintenancePrediction, anomalies }
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
