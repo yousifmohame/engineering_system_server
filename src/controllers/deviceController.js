@@ -7,14 +7,20 @@ const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY }); // تأكد 
 exports.getDevices = async (req, res) => {
   try {
     const devices = await prisma.device.findMany({
-      orderBy: { createdAt: 'desc' }
+      orderBy: { createdAt: "desc" },
     });
-    
-    const formattedDevices = devices.map(dev => ({
+
+    const formattedDevices = devices.map((dev) => ({
       ...dev,
-      purchaseDate: dev.purchaseDate ? dev.purchaseDate.toISOString().split('T')[0] : '',
-      nextMaintenanceDate: dev.nextMaintenanceDate ? dev.nextMaintenanceDate.toISOString().split('T')[0] : '',
-      warrantyEnd: dev.warrantyEnd ? dev.warrantyEnd.toISOString().split('T')[0] : '',
+      purchaseDate: dev.purchaseDate
+        ? dev.purchaseDate.toISOString().split("T")[0]
+        : "",
+      nextMaintenanceDate: dev.nextMaintenanceDate
+        ? dev.nextMaintenanceDate.toISOString().split("T")[0]
+        : "",
+      warrantyEnd: dev.warrantyEnd
+        ? dev.warrantyEnd.toISOString().split("T")[0]
+        : "",
     }));
 
     res.json({ success: true, data: formattedDevices });
@@ -27,7 +33,7 @@ exports.createDevice = async (req, res) => {
   try {
     const data = req.body;
     const count = await prisma.device.count();
-    const deviceCode = `DEV-${String(count + 1).padStart(3, '0')}`;
+    const deviceCode = `DEV-${String(count + 1).padStart(3, "0")}`;
 
     const newDevice = await prisma.device.create({
       data: {
@@ -50,12 +56,12 @@ exports.createDevice = async (req, res) => {
         maintenanceHistory: [],
         consumables: [],
         customFields: [],
-        aiInsights: { 
-          healthScore: 100, 
-          maintenancePrediction: 'جهاز جديد، يعمل بكفاءة', 
-          anomalies: [] 
-        }
-      }
+        aiInsights: {
+          healthScore: 100,
+          maintenancePrediction: "جهاز جديد، يعمل بكفاءة",
+          anomalies: [],
+        },
+      },
     });
     res.status(201).json({ success: true, data: newDevice });
   } catch (error) {
@@ -73,9 +79,11 @@ exports.updateDevice = async (req, res) => {
       data: {
         ...data,
         purchaseDate: data.purchaseDate ? new Date(data.purchaseDate) : null,
-        nextMaintenanceDate: data.nextMaintenanceDate ? new Date(data.nextMaintenanceDate) : null,
+        nextMaintenanceDate: data.nextMaintenanceDate
+          ? new Date(data.nextMaintenanceDate)
+          : null,
         warrantyEnd: data.warrantyEnd ? new Date(data.warrantyEnd) : null,
-      }
+      },
     });
 
     res.json({ success: true, data: updatedDevice });
@@ -97,26 +105,35 @@ exports.deleteDevice = async (req, res) => {
 // 🚀 رفع مرفقات الفواتير والضمان
 exports.uploadAttachment = (req, res) => {
   try {
-    if (!req.file) return res.status(400).json({ success: false, message: "لم يتم استلام أي ملف" });
+    if (!req.file)
+      return res
+        .status(400)
+        .json({ success: false, message: "لم يتم استلام أي ملف" });
     const fileUrl = `/uploads/devices/${req.file.filename}`;
     res.json({ success: true, url: fileUrl });
   } catch (error) {
-    res.status(500).json({ success: false, message: "فشل رفع الملف: " + error.message });
+    res
+      .status(500)
+      .json({ success: false, message: "فشل رفع الملف: " + error.message });
   }
 };
 
-// 🚀 الذكاء الاصطناعي: استخراج المواصفات من صورة
+// 🚀 الذكاء الاصطناعي: استخراج المواصفات والماك أدريس والاحتفاظ بالصورة
 exports.extractSpecsFromImage = async (req, res) => {
   try {
-    if (!req.file) return res.status(400).json({ success: false, message: "الرجاء إرفاق صورة المواصفات" });
+    if (!req.file)
+      return res
+        .status(400)
+        .json({ success: false, message: "الرجاء إرفاق صورة المواصفات" });
 
-    console.log("🤖 جاري تحليل صورة مواصفات الجهاز...");
+    console.log("🤖 جاري تحليل صورة الجهاز (المواصفات + MAC)...");
 
     // تحويل الصورة إلى Base64 لقرائتها عبر Gemini
     const fileBytes = fs.readFileSync(req.file.path).toString("base64");
-    
+
+    // 💡 تحديث الـ Prompt لطلب الـ MAC Addresses كمصفوفة
     const promptInstruction = `
-      قم بتحليل هذه الصورة التي تحتوي على مواصفات جهاز كمبيوتر أو لابتوب.
+      قم بتحليل هذه الصورة التي تحتوي على مواصفات جهاز كمبيوتر، لابتوب، أو شبكة.
       استخرج البيانات التالية بدقة شديدة وقم بإرجاعها ككائن JSON حصرياً (بدون أي نصوص إضافية أو علامات Markdown).
       المفاتيح المطلوبة في الـ JSON هي:
       {
@@ -124,9 +141,10 @@ exports.extractSpecsFromImage = async (req, res) => {
         "ram": "سعة الذاكرة العشوائية",
         "storage": "سعة ونوع التخزين (إن وجد)",
         "gpu": "كرت الشاشة (إن وجد)",
-        "os": "نظام التشغيل (إن وجد)"
+        "os": "نظام التشغيل (إن وجد)",
+        "macAddresses": ["الماك أدريس الأول", "الماك أدريس الثاني"] // استخرج أي عنوان MAC تجده وضعه في هذه المصفوفة
       }
-      إذا لم تجد معلومة معينة، اترك قيمتها فارغة "".
+      إذا لم تجد معلومة معينة، اترك قيمتها فارغة "" (أو مصفوفة فارغة للماك أدريس []).
     `;
 
     const response = await ai.models.generateContent({
@@ -136,25 +154,34 @@ exports.extractSpecsFromImage = async (req, res) => {
           role: "user",
           parts: [
             { inlineData: { data: fileBytes, mimeType: req.file.mimetype } },
-            { text: promptInstruction }
-          ]
-        }
+            { text: promptInstruction },
+          ],
+        },
       ],
-      config: { temperature: 0.1, responseMimeType: "application/json" }
+      config: { temperature: 0.1, responseMimeType: "application/json" },
     });
 
-    const cleanJson = response.text.replace(/```json/gi, "").replace(/```/g, "").trim();
+    const cleanJson = response.text
+      .replace(/```json/gi, "")
+      .replace(/```/g, "")
+      .trim();
     const specsData = JSON.parse(cleanJson);
 
-    // حذف الصورة بعد معالجتها لتوفير المساحة
-    fs.unlinkSync(req.file.path);
+    // 💡 التعديل الجوهري: لن نقوم بحذف الصورة (fs.unlinkSync)، بل سنحتفظ بها في المجلد
+    // ونقوم بتوليد الرابط الخاص بها لإرجاعه للفرونت إند
+    const imageUrl = `/uploads/devices/${req.file.filename}`;
 
-    res.json({ success: true, data: specsData });
+    res.json({ success: true, data: specsData, imageUrl: imageUrl });
   } catch (error) {
     console.error("AI Specs Extraction Error:", error);
-    // تنظيف الصورة في حالة الخطأ
+    // تنظيف الصورة فقط في حالة فشل الذكاء الاصطناعي
     if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-    res.status(500).json({ success: false, message: "فشل الذكاء الاصطناعي في قراءة الصورة" });
+    res
+      .status(500)
+      .json({
+        success: false,
+        message: "فشل الذكاء الاصطناعي في قراءة الصورة",
+      });
   }
 };
 
@@ -162,7 +189,7 @@ exports.extractSpecsFromImage = async (req, res) => {
 exports.getCategories = async (req, res) => {
   try {
     const categories = await prisma.deviceCategory.findMany({
-      orderBy: { createdAt: 'asc' }
+      orderBy: { createdAt: "asc" },
     });
     res.json({ success: true, data: categories });
   } catch (error) {
@@ -175,13 +202,15 @@ exports.addCategory = async (req, res) => {
   try {
     const { label, value } = req.body;
     const newCategory = await prisma.deviceCategory.create({
-      data: { label, value }
+      data: { label, value },
     });
     res.status(201).json({ success: true, data: newCategory });
   } catch (error) {
     // التحقق إذا كان التصنيف موجود مسبقاً
-    if (error.code === 'P2002') {
-      return res.status(400).json({ success: false, message: "هذا التصنيف موجود مسبقاً" });
+    if (error.code === "P2002") {
+      return res
+        .status(400)
+        .json({ success: false, message: "هذا التصنيف موجود مسبقاً" });
     }
     res.status(500).json({ success: false, message: error.message });
   }

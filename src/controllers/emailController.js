@@ -28,69 +28,85 @@ exports.aiComposeEmail = async (req, res) => {
     const { text, action } = req.body;
 
     if (!text || text.trim() === "") {
-      return res.status(400).json({ success: false, message: "يجب إرسال النص المطلوب معالجته" });
+      return res
+        .status(400)
+        .json({ success: false, message: "يجب إرسال النص المطلوب معالجته" });
     }
+
+    // 💡 1. هذه التعليمات الصارمة ستجبر الذكاء الاصطناعي على إعطائك نص الرسالة فقط
+    const strictRules = `
+    تعليمات صارمة جداً لتنفيذ المهمة:
+    1. أعد فقط النص النهائي للرسالة ليكون جاهزاً للنسخ والإرسال للعميل مباشرة.
+    2. إياك أن تكتب أي مقدمات أو ترحيب من طرفك (مثل: "بالتأكيد، إليك الصيغة"، "الخيار الأول"، أو "إليك النص").
+    3. لا تضع خيارات متعددة أبداً، أعطني رسالة واحدة فقط.
+    4. إياك أن تكتب نصائح أو ملاحظات في نهاية النص.
+    5. لا تقم بكتابة التوقيع أو بيانات الاتصال في الأسفل (مثل: [اسمك]، [المسمى الوظيفي])، فقط انهِ الرسالة بخاتمة مهذبة مثل "مع خالص التحية والتقدير".
+    `;
 
     let promptInstruction = "";
     switch (action) {
       case "rewrite":
-        promptInstruction = `أعد صياغة النص التالي بأسلوب بريد إلكتروني احترافي، لغوي سليم، وواضح:\n\n${text}`;
+        promptInstruction = `أعد صياغة النص التالي بأسلوب بريد إلكتروني احترافي ومقنع:\n\n${text}\n\n${strictRules}`;
         break;
       case "formal":
-        promptInstruction = `حول النص التالي إلى صيغة بريد إلكتروني رسمي جداً ومهني، مناسب لمخاطبة الجهات الحكومية أو الشركات الكبرى:\n\n${text}`;
+        promptInstruction = `حول النص التالي إلى صيغة بريد إلكتروني رسمي جداً ومهني، مناسب لمخاطبة الجهات الحكومية أو الشركات الكبرى:\n\n${text}\n\n${strictRules}`;
         break;
       case "shorten":
-        promptInstruction = `لخص وقصر النص التالي مع الحفاظ على جوهر الرسالة والمعلومات الهامة فقط، واجعله مباشراً:\n\n${text}`;
+        promptInstruction = `لخص النص التالي واجعله بريداً إلكترونياً مباشراً وقصيراً مع الحفاظ على الفكرة الأساسية:\n\n${text}\n\n${strictRules}`;
         break;
       case "expand":
-        promptInstruction = `قم بتوسيع النص التالي وإضافة عبارات ترحيبية وختامية احترافية، وتفاصيل منطقية تجعله بريداً إلكترونياً متكاملاً ومقنعاً من مكتب هندسي:\n\n${text}`;
+        promptInstruction = `قم بتوسيع النص التالي ليصبح بريداً إلكترونياً احترافياً متكاملاً يشرح الفكرة بوضوح وتفصيل:\n\n${text}\n\n${strictRules}`;
         break;
       default:
-        promptInstruction = `قم بتصحيح وتنسيق النص التالي ليكون بريداً إلكترونياً احترافياً:\n\n${text}`;
+        promptInstruction = `قم بتصحيح وتنسيق النص التالي ليكون بريداً إلكترونياً احترافياً:\n\n${text}\n\n${strictRules}`;
     }
 
     console.log(`🤖 جاري صياغة النص باستخدام الذكاء الاصطناعي (${action})...`);
-    
+
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
       contents: [{ role: "user", parts: [{ text: promptInstruction }] }],
-      config: { temperature: 0.7 }, // حرارة متوسطة للسماح بالإبداع في الصياغة
+      config: {
+        // 💡 2. رفع الـ Temperature إلى 0.85 يجبر الـ AI على التفكير في صياغات جديدة تماماً في كل مرة تطلب منه المعالجة
+        temperature: 0.85,
+      },
     });
 
-    res.json({ success: true, data: response.text });
+    // إزالة أي فراغات زائدة في بداية أو نهاية النص المسترجع
+    const cleanText = response.text.trim();
+
+    res.json({ success: true, data: cleanText });
   } catch (error) {
     console.error("AI Compose Error:", error);
-    res.status(500).json({ success: false, message: "فشل مساعد الذكاء الاصطناعي في صياغة النص" });
+    res.status(500).json({
+      success: false,
+      message: "فشل مساعد الذكاء الاصطناعي في صياغة النص",
+    });
   }
 };
 
-// =========================================================
-// 🚀 3. جلب جهات الاتصال (Contacts) من الرسائل السابقة تلقائياً
-// =========================================================
 exports.getAutoContacts = async (req, res) => {
   try {
-    // يستخرج كل الإيميلات التي تم الإرسال لها مسبقاً (Distinct)
     const sentMessages = await prisma.emailMessage.findMany({
       where: { isSent: true },
       select: { to: true },
-      distinct: ['to'],
+      distinct: ["to"],
     });
 
-    // تنظيف وترتيب الإيميلات 
     const contactsSet = new Set();
-    sentMessages.forEach(msg => {
-      if(msg.to) {
-        const emails = msg.to.split(',').map(e => e.trim());
-        emails.forEach(e => {
-          if (e.includes('@')) {
+    sentMessages.forEach((msg) => {
+      if (msg.to) {
+        const emails = msg.to.split(",").map((e) => e.trim());
+        emails.forEach((e) => {
+          if (e.includes("@")) {
             contactsSet.add(e);
           }
         });
       }
     });
 
-    const contactsList = Array.from(contactsSet).map(email => {
-      const name = email.split('@')[0];
+    const contactsList = Array.from(contactsSet).map((email) => {
+      const name = email.split("@")[0];
       return { name, email };
     });
 
@@ -100,18 +116,15 @@ exports.getAutoContacts = async (req, res) => {
   }
 };
 
-// 🚀 دالة التحليل
 exports.analyzeEmail = async (req, res) => {
   try {
     const { id } = req.params;
     const { subject, body, text, from, date } = req.body;
 
-    // 1. البحث عن الرسالة
     let message = await prisma.emailMessage.findFirst({
       where: { OR: [{ id: id }, { messageId: id }] },
     });
 
-    // 2. إذا لم تكن موجودة، نقوم بإنشائها
     if (!message) {
       const account = await prisma.emailAccount.findFirst({
         where: { isActive: true },
@@ -136,7 +149,6 @@ exports.analyzeEmail = async (req, res) => {
       });
     }
 
-    // 3. تجهيز النص للتحليل
     const textToAnalyze = `Subject: ${message.subject}\n\nBody:\n${message.body || message.text}`;
 
     const promptInstruction = `
@@ -146,21 +158,10 @@ exports.analyzeEmail = async (req, res) => {
     
     قم بإرجاع كائن JSON حصرياً بالصيغة التالية (بدون أي نص إضافي أو Markdown):
     {
-      "reqNumber": "القيمة أو null",
-      "reqYear": "القيمة أو null",
-      "serviceNumber": "القيمة أو null",
-      "serviceYear": "القيمة أو null",
-      "ownerName": "القيمة أو null",
-      "serviceType": "القيمة أو null",
-      "replyText": "القيمة أو null",
-      "entityName": "القيمة أو null",
-      "viewTime": "القيمة أو null",
-      "sectorName": "القيمة أو null"
-    }
-
-    النص:
-    ${textToAnalyze}
-    `;
+      "reqNumber": "القيمة أو null", "reqYear": "القيمة أو null", "serviceNumber": "القيمة أو null",
+      "serviceYear": "القيمة أو null", "ownerName": "القيمة أو null", "serviceType": "القيمة أو null",
+      "replyText": "القيمة أو null", "entityName": "القيمة أو null", "viewTime": "القيمة أو null", "sectorName": "القيمة أو null"
+    }`;
 
     console.log(`🤖 جاري تحليل الرسالة [${id}]...`);
     const response = await ai.models.generateContent({
@@ -169,23 +170,13 @@ exports.analyzeEmail = async (req, res) => {
       config: { temperature: 0.0, responseMimeType: "application/json" },
     });
 
-    const responseText = response.text;
-
-    // 4. تنظيف النص
-    const cleanJson = responseText
+    const cleanJson = response.text
       .replace(/```json/gi, "")
       .replace(/```/g, "")
       .trim();
-    let parsedData;
-    try {
-      parsedData = JSON.parse(cleanJson);
-    } catch (e) {
-      throw new Error("فشل الذكاء الاصطناعي في توليد JSON صحيح");
-    }
-
+    const parsedData = JSON.parse(cleanJson);
     const validatedData = EmailAISchema.parse(parsedData);
 
-    // 5. محاولة إيجاد معاملة مطابقة
     let linkedTxId = null;
     let matchConfidence = null;
     if (validatedData.reqNumber) {
@@ -208,21 +199,11 @@ exports.analyzeEmail = async (req, res) => {
       }
     }
 
-    // 6. تحديث الرسالة في قاعدة البيانات
     const updatedMessage = await prisma.emailMessage.update({
       where: { id: message.id },
       data: {
         isAnalyzed: true,
-        reqNumber: validatedData.reqNumber,
-        reqYear: validatedData.reqYear,
-        serviceNumber: validatedData.serviceNumber,
-        serviceYear: validatedData.serviceYear,
-        ownerName: validatedData.ownerName,
-        serviceType: validatedData.serviceType,
-        replyText: validatedData.replyText,
-        entityName: validatedData.entityName,
-        viewTime: validatedData.viewTime,
-        sectorName: validatedData.sectorName,
+        ...validatedData,
         linkedTxId: linkedTxId,
         matchConfidence: matchConfidence,
       },
@@ -235,7 +216,6 @@ exports.analyzeEmail = async (req, res) => {
   }
 };
 
-// جلب جميع حسابات البريد
 exports.getAccounts = async (req, res) => {
   try {
     const accounts = await prisma.emailAccount.findMany();
@@ -245,24 +225,15 @@ exports.getAccounts = async (req, res) => {
   }
 };
 
-// إضافة حساب بريد جديد
 exports.addAccount = async (req, res) => {
   try {
     const { accountName, email, password } = req.body;
-
-    // 💡 إجبار استخدام المنفذ 465 المشفر لتجنب حظر الاستضافة للمنفذ 587
     const transporter = nodemailer.createTransport({
       host: "smtp.hostinger.com",
       port: 465,
-      secure: true, // 👈 465 يتطلب secure: true
-      auth: {
-        user: email,
-        pass: password,
-      },
-      tls: {
-        rejectUnauthorized: false,
-      },
-      // 💡 تجنب التعليق أثناء التحقق
+      secure: true,
+      auth: { user: email, pass: password },
+      tls: { rejectUnauthorized: false },
       connectionTimeout: 10000,
       greetingTimeout: 10000,
       socketTimeout: 10000,
@@ -271,12 +242,9 @@ exports.addAccount = async (req, res) => {
     try {
       await transporter.verify();
     } catch (verifyError) {
-      console.error("Verification Error:", verifyError);
-      return res.status(401).json({
-        success: false,
-        message:
-          "فشل التحقق: البريد الإلكتروني أو كلمة المرور غير صحيحة، أو الخادم يرفض الاتصال.",
-      });
+      return res
+        .status(401)
+        .json({ success: false, message: "فشل التحقق من البريد أو الخادم." });
     }
 
     const account = await prisma.emailAccount.create({
@@ -288,8 +256,8 @@ exports.addAccount = async (req, res) => {
         imapServer: "imap.hostinger.com",
         imapPort: 993,
         smtpServer: "smtp.hostinger.com",
-        smtpPort: 465, // حفظه كـ 465
-        useSSL: true, // تأكيد استخدام SSL
+        smtpPort: 465,
+        useSSL: true,
       },
     });
 
@@ -299,7 +267,6 @@ exports.addAccount = async (req, res) => {
   }
 };
 
-// تحديث حساب بريد إلكتروني موجود
 exports.updateAccount = async (req, res) => {
   try {
     const { id } = req.params;
@@ -309,27 +276,20 @@ exports.updateAccount = async (req, res) => {
     const existingAccount = await prisma.emailAccount.findUnique({
       where: { id },
     });
-    if (!existingAccount) {
+    if (!existingAccount)
       return res
         .status(404)
         .json({ success: false, message: "الحساب غير موجود" });
-    }
 
     const passToVerify = password || existingAccount.password;
     const emailToVerify = email || existingAccount.email;
 
-    // 💡 إجبار استخدام المنفذ 465 المشفر
     const transporter = nodemailer.createTransport({
       host: smtpServer || existingAccount.smtpServer,
-      port: 465, // إجبار 465
-      secure: true, // إجبار true
-      auth: {
-        user: emailToVerify,
-        pass: passToVerify,
-      },
-      tls: {
-        rejectUnauthorized: false,
-      },
+      port: 465,
+      secure: true,
+      auth: { user: emailToVerify, pass: passToVerify },
+      tls: { rejectUnauthorized: false },
       connectionTimeout: 10000,
       greetingTimeout: 10000,
       socketTimeout: 10000,
@@ -338,12 +298,9 @@ exports.updateAccount = async (req, res) => {
     try {
       await transporter.verify();
     } catch (verifyError) {
-      console.error("Verification Error on Update:", verifyError);
-      return res.status(401).json({
-        success: false,
-        message:
-          "فشل التحقق: تأكد من صحة البريد أو كلمة المرور الجديدة أو إعدادات الخادم.",
-      });
+      return res
+        .status(401)
+        .json({ success: false, message: "فشل التحقق من الإعدادات الجديدة." });
     }
 
     const updatedAccount = await prisma.emailAccount.update({
@@ -356,7 +313,7 @@ exports.updateAccount = async (req, res) => {
         imapServer: imapServer || existingAccount.imapServer,
         imapPort: imapPort ? parseInt(imapPort) : existingAccount.imapPort,
         smtpServer: smtpServer || existingAccount.smtpServer,
-        smtpPort: 465, // إجبار التخزين كـ 465
+        smtpPort: 465,
         useSSL: true,
       },
     });
@@ -371,29 +328,16 @@ exports.updateAccount = async (req, res) => {
   }
 };
 
-// حذف حساب بريد إلكتروني
 exports.deleteAccount = async (req, res) => {
   try {
     const { id } = req.params;
-
-    const account = await prisma.emailAccount.findUnique({ where: { id } });
-    if (!account) {
-      return res
-        .status(404)
-        .json({ success: false, message: "الحساب غير موجود" });
-    }
-
-    await prisma.emailAccount.delete({
-      where: { id },
-    });
-
+    await prisma.emailAccount.delete({ where: { id } });
     res.json({ success: true, message: "تم حذف الحساب بنجاح" });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// جلب الرسائل من قاعدة البيانات
 exports.getMessages = async (req, res) => {
   try {
     const messages = await prisma.emailMessage.findMany({
@@ -405,145 +349,213 @@ exports.getMessages = async (req, res) => {
   }
 };
 
-// إرسال رسالة بريد إلكتروني وحفظها في الصادر
+// =========================================================
+// 🚀 إرسال الرسالة (تم دعم التوقيع الديناميكي، CC، و BCC)
+// =========================================================
 exports.sendMessage = async (req, res) => {
   try {
-    const { accountId, to, subject, body, attachments = [] } = req.body;
+    // 💡 نستقبل draftId لمعرفة ما إذا كانت هذه الرسالة مسودة سابقة أم لا
+    const {
+      draftId,
+      accountId,
+      to,
+      cc,
+      bcc,
+      subject,
+      body,
+      signature,
+      footer,
+      html,
+      attachments = [],
+    } = req.body;
 
     const account = await prisma.emailAccount.findUnique({
       where: { id: accountId },
     });
+    if (!account)
+      return res
+        .status(404)
+        .json({ success: false, message: "الحساب غير موجود" });
 
-    if (!account) {
-      return res.status(404).json({ success: false, message: "الحساب غير موجود" });
-    }
-
-    // إعدادات الاتصال (إجبار المنفذ 465 وتفعيل الـ Timeouts لمنع التعليق)
     const transporter = nodemailer.createTransport({
       host: account.smtpServer,
       port: 465,
       secure: true,
-      auth: {
-        user: account.username,
-        pass: account.password,
-      },
-      tls: {
-        rejectUnauthorized: false,
-      },
-      connectionTimeout: 10000,
-      greetingTimeout: 10000,
-      socketTimeout: 10000,
+      auth: { user: account.username, pass: account.password },
+      tls: { rejectUnauthorized: false },
+      connectionTimeout: 15000,
+      greetingTimeout: 15000,
+      socketTimeout: 15000,
     });
 
-    console.log(`⏳ جاري محاولة إرسال الرسالة عبر ${account.smtpServer}:465...`);
-
-    // 💡 تحويل النص العادي إلى HTML مع الحفاظ على الأسطر الجديدة
-    // إذا كان الفرونت إند يرسل HTML جاهز، لا نستخدم replace
-    const isHtml = /<[a-z][\s\S]*>/i.test(body);
-    const formattedBody = isHtml ? body : body.replace(/\n/g, "<br/>");
-
-    // 💡 القالب الاحترافي للإيميل (يطابق الصورة تماماً)
-    const professionalHtmlTemplate = `
-    <div dir="rtl" style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; font-size: 16px; color: #111; line-height: 1.8; text-align: right; max-width: 800px; padding: 20px;">
-      
-      <div style="min-height: 150px;">
-        ${formattedBody}
-      </div>
-      
-      <br><br>
-      
-      <div style="margin-top: 30px; border-top: 1px solid #ddd; padding-top: 20px;">
-        <img src="https://details-worksystem1.com/logo.jpeg" alt="Details Consults Logo" style="max-width: 180px; height: auto; margin-bottom: 12px; display: block;" />
-        
-        <div style="font-size: 11px; color: #444; line-height: 1.6; font-family: Arial, Helvetica, sans-serif;" dir="ltr">
-          <div style="text-align: right;">
-            <strong style="color: #222; font-size: 12px;">DETAILS CONSULTS CO. LTD – Engineering Consultants</strong><br>
-            <strong style="color: #222; font-size: 13px;">شركة ديتيلز كونسلتس المحدودة للاستشارات الهندسية</strong><br>
-            Office No. 7, First Floor – Building 2957<br>
-            Saud Ibn Abdulaziz Ibn Muhammad Branch St.<br>
-            Riyadh 12274, Kingdom of Saudi Arabia<br>
-            +966-590722827<br>
-            <a href="mailto:info@details-consults.sa" style="color: #005596; text-decoration: none;">info@details-consults.sa</a>
-          </div>
+    let finalHtml = html;
+    if (!finalHtml) {
+      const formattedBody = body ? body.replace(/\n/g, "<br/>") : "";
+      finalHtml = `
+      <div dir="rtl" style="font-family: 'Segoe UI', Tahoma, sans-serif; font-size: 16px; color: #111; line-height: 1.8; text-align: right; max-width: 800px; padding: 20px;">
+        <div style="min-height: 100px;">
+          ${formattedBody}
         </div>
+        ${signature ? `<div style="margin-top: 30px; border-top: 1px solid #ddd; padding-top: 20px;">${signature}</div>` : ""}
+        ${footer ? `<div style="margin-top: 10px; font-size: 11px; color: #444; text-align: center;">${footer}</div>` : ""}
       </div>
-    </div>
-    `;
+      `;
+    }
 
-    // معالجة المرفقات (إذا كانت موجودة)
     const mailOptions = {
       from: `"${account.accountName}" <${account.email}>`,
       to,
+      cc,
+      bcc,
       subject,
-      text: body, // كنسخة احتياطية للأجهزة التي لا تدعم HTML
-      html: professionalHtmlTemplate,
-      attachments: attachments, // يدعم مصفوفة مخرجات Nodemailer: [{filename: 'doc.pdf', path: 'link_or_base64'}]
+      text: body,
+      html: finalHtml,
+      attachments: attachments,
     };
 
     const info = await transporter.sendMail(mailOptions);
-    console.log("✅ تم الإرسال بنجاح:", info.messageId);
 
-    // حفظ الرسالة في الصادر بقاعدة البيانات
     const sentMessage = await prisma.emailMessage.create({
       data: {
         messageId: info.messageId || Date.now().toString(),
         accountId: account.id,
         from: account.email,
         to,
+        cc,
+        bcc,
         subject,
-        body: body, // نحفظ النص الأصلي بدون القالب في الداتابيز لتسهيل قراءته داخلياً
+        body: body,
         date: new Date(),
         isSent: true,
         isRead: true,
       },
     });
 
+    // 💡 🚀 إذا كانت الرسالة عبارة عن مسودة، قم بحذف المسودة الأصلية من الداتابيز لتنظيف الشاشة
+    if (draftId) {
+      await prisma.emailMessage
+        .delete({ where: { id: draftId } })
+        .catch(() => {});
+    }
+
     res.json({ success: true, data: sentMessage });
   } catch (error) {
     console.error("❌ Send Email Error:", error);
-    res.status(500).json({ success: false, message: "فشل الإرسال: " + error.message });
+    res
+      .status(500)
+      .json({ success: false, message: "فشل الإرسال: " + error.message });
   }
 };
 
-// تحديث حالة الرسالة
+// =========================================================
+// 🚀 حفظ رسالة كمسودة (Draft)
+// =========================================================
+exports.saveDraft = async (req, res) => {
+  try {
+    const {
+      accountId,
+      to,
+      cc,
+      bcc,
+      subject,
+      body,
+      signature,
+      footerText,
+      footerColor,
+      footerSize,
+    } = req.body;
+
+    const account = await prisma.emailAccount.findUnique({
+      where: { id: accountId },
+    });
+    if (!account)
+      return res
+        .status(404)
+        .json({ success: false, message: "الحساب غير موجود" });
+
+    const draftMessage = await prisma.emailMessage.create({
+      data: {
+        messageId: `draft-${Date.now()}`,
+        accountId: account.id,
+        from: account.email,
+        to: to || "",
+        cc: cc || "",
+        bcc: bcc || "",
+        subject: subject || "(مسودة بدون موضوع)",
+        body: body || "",
+        signature: signature, // 👈 إضافة التوقيع
+        footerText: footerText, // 👈 إضافة نص الفوتر
+        footerColor: footerColor, // 👈 إضافة لون الفوتر
+        footerSize: footerSize, // 👈 إضافة حجم الفوتر
+        date: new Date(),
+        isSent: false,
+        isRead: true,
+        isDraft: true,
+      },
+    });
+
+    res.json({
+      success: true,
+      data: draftMessage,
+      message: "تم حفظ المسودة بنجاح",
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// =========================================================
+// 🚀 تحديث حالة رسالة أو حفظ مسودة
+// =========================================================
 exports.updateMessageStatus = async (req, res) => {
   try {
     const { id } = req.params;
-    const updateData = req.body;
 
-    try {
-      const message = await prisma.emailMessage.update({
-        where: { messageId: id },
-        data: updateData,
+    // 💡 تنظيف البيانات: استبعاد الحقول التي لا يعرفها Prisma مثل attachments و signature
+    const {
+      id: bodyId,
+      attachments,
+      signature,
+      footer,
+      html,
+      ...safeUpdateData
+    } = req.body;
+
+    // إذا تم إرسال مرفقات، قم بتحديث حقل hasAttachments
+    if (attachments && Array.isArray(attachments)) {
+      safeUpdateData.hasAttachments = attachments.length > 0;
+    }
+
+    const existingMessage = await prisma.emailMessage.findFirst({
+      where: { OR: [{ id: id }, { messageId: id }] },
+    });
+
+    if (existingMessage) {
+      const updatedMessage = await prisma.emailMessage.update({
+        where: { id: existingMessage.id },
+        data: safeUpdateData, // إرسال البيانات النظيفة فقط
       });
-      return res.json({ success: true, data: message });
-    } catch (dbError) {
-      if (dbError.code === "P2025") {
-        const account = await prisma.emailAccount.findFirst({
-          where: { isActive: true },
-        });
-        if (!account) throw new Error("لا يوجد حساب بريد نشط");
+      return res.json({ success: true, data: updatedMessage });
+    } else {
+      // إنشاء "سجل ظل"
+      const account = await prisma.emailAccount.findFirst({
+        where: { isActive: true },
+      });
+      if (!account) throw new Error("لا يوجد حساب بريد نشط");
 
-        const shadowMessage = await prisma.emailMessage.create({
-          data: {
-            messageId: id,
-            accountId: account.id,
-            from: req.body.from || "مجهول",
-            to: account.email,
-            subject: req.body.subject || "رسالة واردة",
-            body: "تم إنشاء هذا السجل لحفظ حالة الرسالة",
-            date: new Date(),
-            ...updateData,
-          },
-        });
-
-        return res.json({
-          success: true,
-          data: shadowMessage,
-          message: "تم حفظ الحالة الجديدة للرسالة الواردة",
-        });
-      }
-      throw dbError;
+      const shadowMessage = await prisma.emailMessage.create({
+        data: {
+          messageId: id.toString(),
+          accountId: account.id,
+          from: req.body.from || "مجهول",
+          to: account.email,
+          subject: req.body.subject || "رسالة واردة",
+          body: "تم إنشاء هذا السجل لحفظ حالة الرسالة",
+          date: new Date(),
+          ...safeUpdateData,
+        },
+      });
+      return res.json({ success: true, data: shadowMessage });
     }
   } catch (error) {
     console.error("Update Message Status Error:", error);
@@ -551,6 +563,77 @@ exports.updateMessageStatus = async (req, res) => {
   }
 };
 
+// =========================================================
+// 🚀 دالة الذكاء الاصطناعي المخصصة للترجمة الاحترافية
+// =========================================================
+exports.translateWithAI = async (req, res) => {
+  try {
+    const { text, targetLanguage = "English" } = req.body;
+
+    if (!text || text.trim() === "") {
+      return res
+        .status(400)
+        .json({ success: false, message: "يجب إرسال النص المطلوب ترجمته" });
+    }
+
+    // تعليمات صارمة للترجمة الدقيقة والرسمية
+    const promptInstruction = `
+    أنت مترجم محترف وخبير في الصياغات القانونية والرسمية للشركات والمكاتب الهندسية.
+    قم بترجمة النص التالي إلى اللغة ${targetLanguage} بدقة شديدة واحترافية.
+    
+    تعليمات صارمة:
+    1. أعد فقط النص المترجم.
+    2. لا تضف أي مقدمات، ملاحظات، أو أقواس.
+    3. حافظ على المعنى القانوني والرسمي للنص.
+
+    النص:
+    ${text}
+    `;
+
+    console.log(`🤖 جاري الترجمة إلى ${targetLanguage}...`);
+
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: [{ role: "user", parts: [{ text: promptInstruction }] }],
+      config: {
+        temperature: 0.2, // 💡 درجة حرارة منخفضة جداً لضمان دقة الترجمة ومنع التأليف
+      },
+    });
+
+    const translatedText = response.text.trim();
+
+    res.json({ success: true, data: translatedText });
+  } catch (error) {
+    console.error("AI Translation Error:", error);
+    res.status(500).json({
+      success: false,
+      message: "فشل مساعد الذكاء الاصطناعي في الترجمة",
+    });
+  }
+};
+
+exports.deleteMessagePermanently = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const message = await prisma.emailMessage.findFirst({
+      where: { OR: [{ id: id }, { messageId: id }] },
+    });
+
+    if (!message)
+      return res
+        .status(404)
+        .json({ success: false, message: "الرسالة غير موجودة" });
+
+    await prisma.emailMessage.delete({ where: { id: message.id } });
+    res.json({ success: true, message: "تم الحذف النهائي بنجاح" });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// =========================================================
+// 🚀 جلب الرسائل من السيرفر (IMAP) + تحليل الرسائل الجديدة تلقائياً بالذكاء الاصطناعي
+// =========================================================
 exports.syncHostingerEmails = async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
@@ -559,21 +642,16 @@ exports.syncHostingerEmails = async (req, res) => {
     const account = await prisma.emailAccount.findFirst({
       where: { isActive: true },
     });
-
-    if (!account) {
+    if (!account)
       return res
         .status(404)
         .json({ success: false, message: "لا يوجد حساب بريد مربوط" });
-    }
 
     const client = new ImapFlow({
       host: account.imapServer || "imap.hostinger.com",
       port: account.imapPort || 993,
       secure: true,
-      auth: {
-        user: account.email,
-        pass: account.password,
-      },
+      auth: { user: account.email, pass: account.password },
       logger: false,
     });
 
@@ -602,41 +680,105 @@ exports.syncHostingerEmails = async (req, res) => {
         return res.json({ success: true, data: [] });
       }
 
-      const fetchRange = `${fetchStart}:${fetchEnd}`;
-      console.log(`⏳ جاري جلب الصفحة ${page} (النطاق: ${fetchRange})...`);
+      console.log(`⏳ جاري جلب ومزامنة الرسائل من السيرفر...`);
 
       for await (let msg of client.fetch(
-        fetchRange,
+        `${fetchStart}:${fetchEnd}`,
         { source: true, envelope: true, flags: true, uid: true },
         { reverse: true },
       )) {
+        const msgIdStr = msg.uid.toString();
         const parsed = await simpleParser(msg.source);
 
-        let category = "عام";
-        let severity = "low";
-        if (parsed.subject?.includes("عاجل")) {
-          category = "عاجل";
-          severity = "high";
-        } else if (
-          parsed.subject?.includes("فاتورة") ||
-          parsed.subject?.includes("دفع")
-        ) {
-          category = "مالي";
-          severity = "high";
+        // 1. هل الرسالة موجودة مسبقاً في الداتابيز؟
+        let dbMessage = await prisma.emailMessage.findUnique({
+          where: { messageId: msgIdStr },
+        });
+
+        // 2. إذا كانت الرسالة جديدة، نقوم بتحليلها وحفظها
+        if (!dbMessage) {
+          console.log(
+            `✨ رسالة جديدة! جاري تحليل الرسالة [${msgIdStr}] بالذكاء الاصطناعي...`,
+          );
+
+          const subject = parsed.subject || "(بدون عنوان)";
+          const bodyText = parsed.text || "";
+          const textToAnalyze = `Subject: ${subject}\n\nBody:\n${bodyText.substring(0, 1000)}`; // أخذ أول 1000 حرف لتسريع التحليل
+
+          const promptInstruction = `
+          أنت نظام تحليل نصوص حكومي سعودي (منصة بلدي). استخرج البيانات التالية بصيغة JSON حصرياً:
+          { "reqNumber": null, "reqYear": null, "serviceNumber": null, "serviceYear": null, "ownerName": null, "serviceType": null, "replyText": null, "entityName": null, "viewTime": null, "sectorName": null }
+          النص:\n${textToAnalyze}
+          `;
+
+          let validatedData = {};
+          try {
+            const aiResponse = await ai.models.generateContent({
+              model: "gemini-2.5-flash",
+              contents: [
+                { role: "user", parts: [{ text: promptInstruction }] },
+              ],
+              config: {
+                temperature: 0.0,
+                responseMimeType: "application/json",
+              },
+            });
+            const cleanJson = aiResponse.text
+              .replace(/```json/gi, "")
+              .replace(/```/g, "")
+              .trim();
+            validatedData = EmailAISchema.parse(JSON.parse(cleanJson));
+          } catch (aiError) {
+            console.error(
+              "⚠️ فشل في التحليل الآلي للرسالة، سيتم حفظها بدون تحليل.",
+            );
+          }
+
+          // محاولة الربط بمعاملة موجودة
+          let linkedTxId = null,
+            matchConfidence = null;
+          if (validatedData.reqNumber) {
+            const matchedTx = await prisma.privateTransaction.findFirst({
+              where: {
+                OR: [
+                  { transactionCode: { contains: validatedData.reqNumber } },
+                  {
+                    notes: {
+                      path: ["refs", "baladyNumber"],
+                      equals: validatedData.reqNumber,
+                    },
+                  },
+                ],
+              },
+            });
+            if (matchedTx) {
+              linkedTxId = matchedTx.id;
+              matchConfidence = 95;
+            }
+          }
+
+          // حفظ الرسالة الجديدة بعد تحليلها
+          dbMessage = await prisma.emailMessage.create({
+            data: {
+              messageId: msgIdStr,
+              accountId: account.id,
+              subject: subject,
+              from:
+                parsed.from?.value[0]?.address || parsed.from?.text || "مجهول",
+              to: account.email,
+              body: bodyText,
+              html: parsed.html || parsed.textAsHtml || "",
+              date: parsed.date,
+              isRead: msg.flags?.has("\\Seen") || false,
+              isAnalyzed: Object.keys(validatedData).length > 0,
+              ...validatedData,
+              linkedTxId,
+              matchConfidence,
+            },
+          });
         }
 
-        messages.push({
-          id: msg.uid.toString(),
-          subject: parsed.subject || "(بدون عنوان)",
-          from:
-            parsed.from?.value[0]?.address || parsed.from?.text || "غير معروف",
-          body: parsed.text || "",
-          html: parsed.html || parsed.textAsHtml || "",
-          date: parsed.date,
-          isRead: msg.flags?.has("\\Seen") || false,
-          category: category,
-          severity: severity,
-        });
+        messages.push(dbMessage);
       }
     } finally {
       if (lock) lock.release();
@@ -645,10 +787,9 @@ exports.syncHostingerEmails = async (req, res) => {
     await client.logout();
     res.json({ success: true, data: messages });
   } catch (error) {
-    console.error("IMAP Error:", error);
     res
       .status(500)
-      .json({ success: false, message: "فشل الاتصال: " + error.message });
+      .json({ success: false, message: "فشل مزامنة البريد: " + error.message });
   }
 };
 
@@ -819,10 +960,8 @@ exports.analyzeInboxWithAI = async (req, res) => {
 exports.searchMessages = async (req, res) => {
   try {
     const { serviceNumber, reqNumber } = req.query;
-
-    if (!serviceNumber && !reqNumber) {
+    if (!serviceNumber && !reqNumber)
       return res.json({ success: true, data: [] });
-    }
 
     const orConditions = [];
     if (serviceNumber) {
@@ -844,37 +983,6 @@ exports.searchMessages = async (req, res) => {
 
     res.json({ success: true, data: messages });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
-
-// حذف الرسالة نهائياً من قاعدة البيانات (Hard Delete)
-exports.deleteMessagePermanently = async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    // البحث عن الرسالة سواء بالـ id أو messageId
-    const message = await prisma.emailMessage.findFirst({
-      where: {
-        OR: [
-          { id: id },
-          { messageId: id }
-        ]
-      }
-    });
-
-    if (!message) {
-      return res.status(404).json({ success: false, message: "الرسالة غير موجودة" });
-    }
-
-    // حذف نهائي من قاعدة البيانات
-    await prisma.emailMessage.delete({
-      where: { id: message.id }
-    });
-
-    res.json({ success: true, message: "تم الحذف النهائي بنجاح" });
-  } catch (error) {
-    console.error("Hard Delete Error:", error);
     res.status(500).json({ success: false, message: error.message });
   }
 };

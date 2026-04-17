@@ -41,8 +41,12 @@ router.post('/messages/:id/analyze', emailController.analyzeEmail);
 router.get('/messages/search', emailController.searchMessages);
 
 router.post("/ai-compose", emailController.aiComposeEmail);
+// أضف هذا السطر مع مسارات الذكاء الاصطناعي
+router.post("/translate", emailController.translateWithAI);
 router.get("/contacts", emailController.getAutoContacts);
-
+// يجب أن يكون فوق مسار /messages/:id/status
+router.post("/messages/draft", emailController.saveDraft);
+router.put("/messages/:id/status", emailController.updateMessageStatus);
 // أضف هذا السطر مع باقي المسارات
 router.put("/messages/:id/status", emailController.updateMessageStatus);
 // أضف هذا السطر مع باقي المسارات

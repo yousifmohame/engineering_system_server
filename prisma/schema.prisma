@@ -2566,24 +2566,30 @@ model EmailAccount {
 }
 
 model EmailMessage {
-  id              String       @id @default(uuid())
-  messageId       String       @unique // المعرف الآتي من مزود البريد
-  accountId       String
-  account         EmailAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  from            String
-  to              String
-  subject         String
-  body            String       @db.Text
-  date            DateTime
-  isRead          Boolean      @default(false)
-  isStarred       Boolean      @default(false)
-  isArchived      Boolean      @default(false)
-  isDeleted       Boolean      @default(false)
-  isSent          Boolean      @default(false)
-  hasAttachments  Boolean      @default(false)
+  id        String       @id @default(uuid())
+  messageId String       @unique // المعرف الآتي من مزود البريد
+  accountId String
+  account   EmailAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  from      String
+  to        String?
+  cc        String? // 👈 يجب إضافته
+  bcc       String? // 👈 يجب إضافته
+  subject   String?
+  body      String?      @db.Text
+  html      String?      @db.Text
+  date      DateTime     @default(now())
+
+  isRead     Boolean @default(false)
+  isStarred  Boolean @default(false)
+  isArchived Boolean @default(false)
+  isDeleted  Boolean @default(false)
+  isSent     Boolean @default(false)
+  isDraft    Boolean @default(false)
+
+  hasAttachments  Boolean  @default(false)
   messageCategory String? // لتخزين تصنيف الذكاء الاصطناعي
-  createdAt       DateTime     @default(now())
-  isAnalyzed      Boolean      @default(false)
+  createdAt       DateTime @default(now())
+  isAnalyzed      Boolean  @default(false)
   // البيانات المستخرجة
   reqNumber       String? // رقم الطلب
   reqYear         String? // سنة الطلب
@@ -2595,6 +2601,12 @@ model EmailMessage {
   entityName      String? // اسم الجهة
   viewTime        String? // وقت الإطلاع (حقل إضافي)
   sectorName      String? // القطاع (حقل إضافي)
+
+  // 💡 حقول التوقيع والفوتر للمسودات
+  signature   String? @db.Text
+  footerText  String? @db.Text
+  footerColor String?
+  footerSize  String?
 
   // الربط التلقائي بمعاملة (للاستخدام لاحقاً)
   linkedTxId      String?
@@ -2892,6 +2904,8 @@ model Device {
   invoiceAttachment   String?
   linkedSystem        String?
   nextMaintenanceDate DateTime?
+  // أضف هذا الحقل داخل model Device في schema.prisma
+  attachments         Json?     @default("[]") // [{ name, url, date }]
 
   // الحقول المرنة
   network            Json? @default("{}")
