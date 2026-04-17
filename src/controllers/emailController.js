@@ -847,3 +847,34 @@ exports.searchMessages = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+
+// حذف الرسالة نهائياً من قاعدة البيانات (Hard Delete)
+exports.deleteMessagePermanently = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // البحث عن الرسالة سواء بالـ id أو messageId
+    const message = await prisma.emailMessage.findFirst({
+      where: {
+        OR: [
+          { id: id },
+          { messageId: id }
+        ]
+      }
+    });
+
+    if (!message) {
+      return res.status(404).json({ success: false, message: "الرسالة غير موجودة" });
+    }
+
+    // حذف نهائي من قاعدة البيانات
+    await prisma.emailMessage.delete({
+      where: { id: message.id }
+    });
+
+    res.json({ success: true, message: "تم الحذف النهائي بنجاح" });
+  } catch (error) {
+    console.error("Hard Delete Error:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};

@@ -43,4 +43,8 @@ router.get('/messages/search', emailController.searchMessages);
 router.post("/ai-compose", emailController.aiComposeEmail);
 router.get("/contacts", emailController.getAutoContacts);
 
+// أضف هذا السطر مع باقي المسارات
+router.put("/messages/:id/status", emailController.updateMessageStatus);
+// أضف هذا السطر مع باقي المسارات
+router.delete("/messages/:id/permanent", emailController.deleteMessagePermanently);
 module.exports = router;
