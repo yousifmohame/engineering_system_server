@@ -40,4 +40,7 @@ router.get('/analyze-inbox', emailController.analyzeInboxWithAI);
 router.post('/messages/:id/analyze', emailController.analyzeEmail);
 router.get('/messages/search', emailController.searchMessages);
 
+router.post("/ai-compose", emailController.aiComposeEmail);
+router.get("/contacts", emailController.getAutoContacts);
+
 module.exports = router;

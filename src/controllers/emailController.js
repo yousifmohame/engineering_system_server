@@ -23,6 +23,83 @@ const EmailAISchema = z.object({
   sectorName: z.string().nullable().catch(null),
 });
 
+exports.aiComposeEmail = async (req, res) => {
+  try {
+    const { text, action } = req.body;
+
+    if (!text || text.trim() === "") {
+      return res.status(400).json({ success: false, message: "يجب إرسال النص المطلوب معالجته" });
+    }
+
+    let promptInstruction = "";
+    switch (action) {
+      case "rewrite":
+        promptInstruction = `أعد صياغة النص التالي بأسلوب بريد إلكتروني احترافي، لغوي سليم، وواضح:\n\n${text}`;
+        break;
+      case "formal":
+        promptInstruction = `حول النص التالي إلى صيغة بريد إلكتروني رسمي جداً ومهني، مناسب لمخاطبة الجهات الحكومية أو الشركات الكبرى:\n\n${text}`;
+        break;
+      case "shorten":
+        promptInstruction = `لخص وقصر النص التالي مع الحفاظ على جوهر الرسالة والمعلومات الهامة فقط، واجعله مباشراً:\n\n${text}`;
+        break;
+      case "expand":
+        promptInstruction = `قم بتوسيع النص التالي وإضافة عبارات ترحيبية وختامية احترافية، وتفاصيل منطقية تجعله بريداً إلكترونياً متكاملاً ومقنعاً من مكتب هندسي:\n\n${text}`;
+        break;
+      default:
+        promptInstruction = `قم بتصحيح وتنسيق النص التالي ليكون بريداً إلكترونياً احترافياً:\n\n${text}`;
+    }
+
+    console.log(`🤖 جاري صياغة النص باستخدام الذكاء الاصطناعي (${action})...`);
+    
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: [{ role: "user", parts: [{ text: promptInstruction }] }],
+      config: { temperature: 0.7 }, // حرارة متوسطة للسماح بالإبداع في الصياغة
+    });
+
+    res.json({ success: true, data: response.text });
+  } catch (error) {
+    console.error("AI Compose Error:", error);
+    res.status(500).json({ success: false, message: "فشل مساعد الذكاء الاصطناعي في صياغة النص" });
+  }
+};
+
+// =========================================================
+// 🚀 3. جلب جهات الاتصال (Contacts) من الرسائل السابقة تلقائياً
+// =========================================================
+exports.getAutoContacts = async (req, res) => {
+  try {
+    // يستخرج كل الإيميلات التي تم الإرسال لها مسبقاً (Distinct)
+    const sentMessages = await prisma.emailMessage.findMany({
+      where: { isSent: true },
+      select: { to: true },
+      distinct: ['to'],
+    });
+
+    // تنظيف وترتيب الإيميلات 
+    const contactsSet = new Set();
+    sentMessages.forEach(msg => {
+      if(msg.to) {
+        const emails = msg.to.split(',').map(e => e.trim());
+        emails.forEach(e => {
+          if (e.includes('@')) {
+            contactsSet.add(e);
+          }
+        });
+      }
+    });
+
+    const contactsList = Array.from(contactsSet).map(email => {
+      const name = email.split('@')[0];
+      return { name, email };
+    });
+
+    res.json({ success: true, data: contactsList });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 // 🚀 دالة التحليل
 exports.analyzeEmail = async (req, res) => {
   try {
@@ -331,23 +408,21 @@ exports.getMessages = async (req, res) => {
 // إرسال رسالة بريد إلكتروني وحفظها في الصادر
 exports.sendMessage = async (req, res) => {
   try {
-    const { accountId, to, subject, body } = req.body;
+    const { accountId, to, subject, body, attachments = [] } = req.body;
 
     const account = await prisma.emailAccount.findUnique({
       where: { id: accountId },
     });
 
     if (!account) {
-      return res
-        .status(404)
-        .json({ success: false, message: "الحساب غير موجود" });
+      return res.status(404).json({ success: false, message: "الحساب غير موجود" });
     }
 
-    // 💡 إجبار استخدام المنفذ 465 لحل مشكلة الحظر المؤدية لـ 504 Timeout
+    // إعدادات الاتصال (إجبار المنفذ 465 وتفعيل الـ Timeouts لمنع التعليق)
     const transporter = nodemailer.createTransport({
       host: account.smtpServer,
-      port: 465, // إجبار 465
-      secure: true, // إجبار true للاتصال الآمن
+      port: 465,
+      secure: true,
       auth: {
         user: account.username,
         pass: account.password,
@@ -355,25 +430,60 @@ exports.sendMessage = async (req, res) => {
       tls: {
         rejectUnauthorized: false,
       },
-      // 💡 هذه الإعدادات تمنع السيرفر من التعليق للأبد (504 Timeout)
       connectionTimeout: 10000,
       greetingTimeout: 10000,
       socketTimeout: 10000,
     });
 
-    console.log(
-      `⏳ جاري محاولة إرسال الرسالة عبر ${account.smtpServer}:465...`,
-    );
+    console.log(`⏳ جاري محاولة إرسال الرسالة عبر ${account.smtpServer}:465...`);
 
-    const info = await transporter.sendMail({
+    // 💡 تحويل النص العادي إلى HTML مع الحفاظ على الأسطر الجديدة
+    // إذا كان الفرونت إند يرسل HTML جاهز، لا نستخدم replace
+    const isHtml = /<[a-z][\s\S]*>/i.test(body);
+    const formattedBody = isHtml ? body : body.replace(/\n/g, "<br/>");
+
+    // 💡 القالب الاحترافي للإيميل (يطابق الصورة تماماً)
+    const professionalHtmlTemplate = `
+    <div dir="rtl" style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; font-size: 16px; color: #111; line-height: 1.8; text-align: right; max-width: 800px; padding: 20px;">
+      
+      <div style="min-height: 150px;">
+        ${formattedBody}
+      </div>
+      
+      <br><br>
+      
+      <div style="margin-top: 30px; border-top: 1px solid #ddd; padding-top: 20px;">
+        <img src="https://details-worksystem1.com/logo.jpeg" alt="Details Consults Logo" style="max-width: 180px; height: auto; margin-bottom: 12px; display: block;" />
+        
+        <div style="font-size: 11px; color: #444; line-height: 1.6; font-family: Arial, Helvetica, sans-serif;" dir="ltr">
+          <div style="text-align: right;">
+            <strong style="color: #222; font-size: 12px;">DETAILS CONSULTS CO. LTD – Engineering Consultants</strong><br>
+            <strong style="color: #222; font-size: 13px;">شركة ديتيلز كونسلتس المحدودة للاستشارات الهندسية</strong><br>
+            Office No. 7, First Floor – Building 2957<br>
+            Saud Ibn Abdulaziz Ibn Muhammad Branch St.<br>
+            Riyadh 12274, Kingdom of Saudi Arabia<br>
+            +966-590722827<br>
+            <a href="mailto:info@details-consults.sa" style="color: #005596; text-decoration: none;">info@details-consults.sa</a>
+          </div>
+        </div>
+      </div>
+    </div>
+    `;
+
+    // معالجة المرفقات (إذا كانت موجودة)
+    const mailOptions = {
       from: `"${account.accountName}" <${account.email}>`,
       to,
       subject,
-      text: body,
-    });
+      text: body, // كنسخة احتياطية للأجهزة التي لا تدعم HTML
+      html: professionalHtmlTemplate,
+      attachments: attachments, // يدعم مصفوفة مخرجات Nodemailer: [{filename: 'doc.pdf', path: 'link_or_base64'}]
+    };
 
+    const info = await transporter.sendMail(mailOptions);
     console.log("✅ تم الإرسال بنجاح:", info.messageId);
 
+    // حفظ الرسالة في الصادر بقاعدة البيانات
     const sentMessage = await prisma.emailMessage.create({
       data: {
         messageId: info.messageId || Date.now().toString(),
@@ -381,7 +491,7 @@ exports.sendMessage = async (req, res) => {
         from: account.email,
         to,
         subject,
-        body,
+        body: body, // نحفظ النص الأصلي بدون القالب في الداتابيز لتسهيل قراءته داخلياً
         date: new Date(),
         isSent: true,
         isRead: true,
@@ -390,11 +500,8 @@ exports.sendMessage = async (req, res) => {
 
     res.json({ success: true, data: sentMessage });
   } catch (error) {
-    // بفضل إعدادات Timeout، سيتم رمي الخطأ هنا فوراً بدلاً من تعليق السيرفر
     console.error("❌ Send Email Error:", error);
-    res
-      .status(500)
-      .json({ success: false, message: "فشل الإرسال: " + error.message });
+    res.status(500).json({ success: false, message: "فشل الإرسال: " + error.message });
   }
 };
 
