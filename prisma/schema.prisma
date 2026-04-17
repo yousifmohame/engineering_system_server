@@ -2875,7 +2875,7 @@ model TaskComment {
 
 model Device {
   id                  String    @id @default(cuid())
-  deviceCode          String    @unique // لحفظ رمز مثل DEV-001
+  deviceCode          String    @unique
   type                String
   name                String
   brand               String
@@ -2886,20 +2886,28 @@ model Device {
   assignedTo          String?
   purchaseDate        DateTime?
   purchasePrice       String?
+  depreciationRate    String? // 💡 الحقل الجديد لمعدل الإهلاك
   vendor              String?
-  invoiceAttachment   String?
-  nextMaintenanceDate DateTime?
   warrantyEnd         DateTime?
+  invoiceAttachment   String?
   linkedSystem        String?
+  nextMaintenanceDate DateTime?
 
-  // استخدام JSON للحقول المرنة والمصفوفات لتطابق تصميمك
-  network            Json? @default("{}") // { internalIp, tailscaleIp, zeroTierIp, domain, staticIp, mac }
-  specs              Json? @default("{}") // { cpu, ram, storage, gpu, os, chassisNumber }
-  customFields       Json? @default("[]") // [{ name, value }]
-  maintenanceHistory Json? @default("[]") // [{ date, type, description, technician }]
-  consumables        Json? @default("[]") // [{ name, status, validity }]
-  aiInsights         Json? @default("{}") // { healthScore, maintenancePrediction, anomalies }
+  // الحقول المرنة
+  network            Json? @default("{}")
+  specs              Json? @default("{}")
+  customFields       Json? @default("[]")
+  maintenanceHistory Json? @default("[]")
+  consumables        Json? @default("[]")
+  aiInsights         Json? @default("{}")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model DeviceCategory {
+  id        String   @id @default(cuid())
+  value     String   @unique // مثل: screens, cables
+  label     String // مثل: شاشات، كابلات
+  createdAt DateTime @default(now())
 }

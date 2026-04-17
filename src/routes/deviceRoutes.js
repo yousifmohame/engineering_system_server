@@ -5,40 +5,36 @@ const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 
-// ==========================================
-// 🚀 إعداد Multer لمعالجة ورفع الملفات
-// ==========================================
-const uploadDir = path.join(__dirname, "../../uploads/devices"); // مسار حفظ الملفات داخل مجلد المشروع
+// إعداد مجلد المرفقات
+const uploadDir = path.join(__dirname, "../../uploads/devices");
 if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true }); // إنشاء المجلد تلقائياً إذا لم يكن موجوداً
+  fs.mkdirSync(uploadDir, { recursive: true });
 }
 
 const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, uploadDir);
-  },
+  destination: function (req, file, cb) { cb(null, uploadDir); },
   filename: function (req, file, cb) {
-    // إنشاء اسم فريد للملف لمنع تداخل الأسماء
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, "dev-doc-" + uniqueSuffix + path.extname(file.originalname));
+    cb(null, "dev-" + uniqueSuffix + path.extname(file.originalname));
   }
 });
-
-// فلترة حجم الملف (مثلاً الحد الأقصى 10 ميجابايت)
-const upload = multer({ 
-  storage: storage,
-  limits: { fileSize: 10 * 1024 * 1024 } 
-});
+const upload = multer({ storage: storage, limits: { fileSize: 15 * 1024 * 1024 } });
 
 // ==========================================
-// المسارات
+// المسارات (Routes)
 // ==========================================
+router.get("/categories", deviceController.getCategories);
+router.post("/categories", deviceController.addCategory);
+
 router.get("/", deviceController.getDevices);
 router.post("/", deviceController.createDevice);
 router.put("/:id", deviceController.updateDevice);
 router.delete("/:id", deviceController.deleteDevice);
 
-// 🚀 مسار رفع الملف (يجب أن يكون اسم الحقل 'file' كما هو في الواجهة الأمامية)
+// مسار رفع المرفقات (الفواتير/الضمان)
 router.post("/upload", upload.single("file"), deviceController.uploadAttachment);
+
+// 🚀 مسار رفع صورة المواصفات للذكاء الاصطناعي
+router.post("/extract-specs", upload.single("image"), deviceController.extractSpecsFromImage);
 
 module.exports = router;

@@ -1,5 +1,8 @@
 const { PrismaClient } = require("@prisma/client");
 const prisma = new PrismaClient();
+const fs = require("fs");
+const { GoogleGenAI } = require("@google/genai");
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY }); // تأكد من وجود المفتاح في .env
 
 exports.getDevices = async (req, res) => {
   try {
@@ -7,7 +10,6 @@ exports.getDevices = async (req, res) => {
       orderBy: { createdAt: 'desc' }
     });
     
-    // تنسيق التواريخ لتناسب الواجهة
     const formattedDevices = devices.map(dev => ({
       ...dev,
       purchaseDate: dev.purchaseDate ? dev.purchaseDate.toISOString().split('T')[0] : '',
@@ -24,8 +26,6 @@ exports.getDevices = async (req, res) => {
 exports.createDevice = async (req, res) => {
   try {
     const data = req.body;
-    
-    // إنشاء كود تلقائي للجهاز DEV-XXX
     const count = await prisma.device.count();
     const deviceCode = `DEV-${String(count + 1).padStart(3, '0')}`;
 
@@ -41,6 +41,7 @@ exports.createDevice = async (req, res) => {
         location: data.location,
         assignedTo: data.assignedTo,
         purchasePrice: data.purchasePrice,
+        depreciationRate: data.depreciationRate, // 💡 حفظ معدل الإهلاك
         vendor: data.vendor,
         purchaseDate: data.purchaseDate ? new Date(data.purchaseDate) : null,
         warrantyEnd: data.warrantyEnd ? new Date(data.warrantyEnd) : null,
@@ -93,19 +94,95 @@ exports.deleteDevice = async (req, res) => {
   }
 };
 
+// 🚀 رفع مرفقات الفواتير والضمان
 exports.uploadAttachment = (req, res) => {
   try {
-    if (!req.file) {
-      return res.status(400).json({ success: false, message: "لم يتم استلام أي ملف" });
-    }
-
-    // بناء الرابط الذي سيتم حفظه في قاعدة البيانات
-    // سيتم حفظه بصيغة /uploads/devices/filename.pdf
+    if (!req.file) return res.status(400).json({ success: false, message: "لم يتم استلام أي ملف" });
     const fileUrl = `/uploads/devices/${req.file.filename}`;
-
-    // نرجع الرابط للفرونت إند ليقوم بحفظه مع بيانات الجهاز
     res.json({ success: true, url: fileUrl });
   } catch (error) {
     res.status(500).json({ success: false, message: "فشل رفع الملف: " + error.message });
+  }
+};
+
+// 🚀 الذكاء الاصطناعي: استخراج المواصفات من صورة
+exports.extractSpecsFromImage = async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ success: false, message: "الرجاء إرفاق صورة المواصفات" });
+
+    console.log("🤖 جاري تحليل صورة مواصفات الجهاز...");
+
+    // تحويل الصورة إلى Base64 لقرائتها عبر Gemini
+    const fileBytes = fs.readFileSync(req.file.path).toString("base64");
+    
+    const promptInstruction = `
+      قم بتحليل هذه الصورة التي تحتوي على مواصفات جهاز كمبيوتر أو لابتوب.
+      استخرج البيانات التالية بدقة شديدة وقم بإرجاعها ككائن JSON حصرياً (بدون أي نصوص إضافية أو علامات Markdown).
+      المفاتيح المطلوبة في الـ JSON هي:
+      {
+        "cpu": "اسم المعالج بدقة",
+        "ram": "سعة الذاكرة العشوائية",
+        "storage": "سعة ونوع التخزين (إن وجد)",
+        "gpu": "كرت الشاشة (إن وجد)",
+        "os": "نظام التشغيل (إن وجد)"
+      }
+      إذا لم تجد معلومة معينة، اترك قيمتها فارغة "".
+    `;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: [
+        {
+          role: "user",
+          parts: [
+            { inlineData: { data: fileBytes, mimeType: req.file.mimetype } },
+            { text: promptInstruction }
+          ]
+        }
+      ],
+      config: { temperature: 0.1, responseMimeType: "application/json" }
+    });
+
+    const cleanJson = response.text.replace(/```json/gi, "").replace(/```/g, "").trim();
+    const specsData = JSON.parse(cleanJson);
+
+    // حذف الصورة بعد معالجتها لتوفير المساحة
+    fs.unlinkSync(req.file.path);
+
+    res.json({ success: true, data: specsData });
+  } catch (error) {
+    console.error("AI Specs Extraction Error:", error);
+    // تنظيف الصورة في حالة الخطأ
+    if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+    res.status(500).json({ success: false, message: "فشل الذكاء الاصطناعي في قراءة الصورة" });
+  }
+};
+
+// جلب التصنيفات المخصصة
+exports.getCategories = async (req, res) => {
+  try {
+    const categories = await prisma.deviceCategory.findMany({
+      orderBy: { createdAt: 'asc' }
+    });
+    res.json({ success: true, data: categories });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// إضافة تصنيف جديد
+exports.addCategory = async (req, res) => {
+  try {
+    const { label, value } = req.body;
+    const newCategory = await prisma.deviceCategory.create({
+      data: { label, value }
+    });
+    res.status(201).json({ success: true, data: newCategory });
+  } catch (error) {
+    // التحقق إذا كان التصنيف موجود مسبقاً
+    if (error.code === 'P2002') {
+      return res.status(400).json({ success: false, message: "هذا التصنيف موجود مسبقاً" });
+    }
+    res.status(500).json({ success: false, message: error.message });
   }
 };
