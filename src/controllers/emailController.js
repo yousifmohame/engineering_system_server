@@ -632,9 +632,10 @@ exports.deleteMessagePermanently = async (req, res) => {
 };
 
 // =========================================================
-// 🚀 جلب الرسائل من السيرفر (IMAP) + تحليل الرسائل الجديدة تلقائياً بالذكاء الاصطناعي
+// 🚀 جلب الرسائل وحفظها فوراً مع تشغيل التحليل في الخلفية
 // =========================================================
 exports.syncHostingerEmails = async (req, res) => {
+  let client; // تعريف العميل خارج النطاق لاستخدامه في الإغلاق
   try {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 50;
@@ -647,7 +648,7 @@ exports.syncHostingerEmails = async (req, res) => {
         .status(404)
         .json({ success: false, message: "لا يوجد حساب بريد مربوط" });
 
-    const client = new ImapFlow({
+    client = new ImapFlow({
       host: account.imapServer || "imap.hostinger.com",
       port: account.imapPort || 993,
       secure: true,
@@ -664,11 +665,7 @@ exports.syncHostingerEmails = async (req, res) => {
       if (totalMessages === 0) {
         lock.release();
         await client.logout();
-        return res.json({
-          success: true,
-          data: [],
-          message: "صندوق الوارد فارغ.",
-        });
+        return res.json({ success: true, data: [] });
       }
 
       const fetchEnd = totalMessages - (page - 1) * limit;
@@ -680,7 +677,9 @@ exports.syncHostingerEmails = async (req, res) => {
         return res.json({ success: true, data: [] });
       }
 
-      console.log(`⏳ جاري جلب ومزامنة الرسائل من السيرفر...`);
+      console.log(
+        `⏳ جاري مزامنة الرسائل... النطاق: ${fetchStart}:${fetchEnd}`,
+      );
 
       for await (let msg of client.fetch(
         `${fetchStart}:${fetchEnd}`,
@@ -688,76 +687,18 @@ exports.syncHostingerEmails = async (req, res) => {
         { reverse: true },
       )) {
         const msgIdStr = msg.uid.toString();
-        const parsed = await simpleParser(msg.source);
 
-        // 1. هل الرسالة موجودة مسبقاً في الداتابيز؟
+        // 1. التحقق السريع في قاعدة البيانات
         let dbMessage = await prisma.emailMessage.findUnique({
           where: { messageId: msgIdStr },
         });
 
-        // 2. إذا كانت الرسالة جديدة، نقوم بتحليلها وحفظها
+        // 2. إذا لم تكن موجودة، احفظها فوراً واعرضها
         if (!dbMessage) {
-          console.log(
-            `✨ رسالة جديدة! جاري تحليل الرسالة [${msgIdStr}] بالذكاء الاصطناعي...`,
-          );
-
+          const parsed = await simpleParser(msg.source);
           const subject = parsed.subject || "(بدون عنوان)";
           const bodyText = parsed.text || "";
-          const textToAnalyze = `Subject: ${subject}\n\nBody:\n${bodyText.substring(0, 1000)}`; // أخذ أول 1000 حرف لتسريع التحليل
 
-          const promptInstruction = `
-          أنت نظام تحليل نصوص حكومي سعودي (منصة بلدي). استخرج البيانات التالية بصيغة JSON حصرياً:
-          { "reqNumber": null, "reqYear": null, "serviceNumber": null, "serviceYear": null, "ownerName": null, "serviceType": null, "replyText": null, "entityName": null, "viewTime": null, "sectorName": null }
-          النص:\n${textToAnalyze}
-          `;
-
-          let validatedData = {};
-          try {
-            const aiResponse = await ai.models.generateContent({
-              model: "gemini-2.5-flash",
-              contents: [
-                { role: "user", parts: [{ text: promptInstruction }] },
-              ],
-              config: {
-                temperature: 0.0,
-                responseMimeType: "application/json",
-              },
-            });
-            const cleanJson = aiResponse.text
-              .replace(/```json/gi, "")
-              .replace(/```/g, "")
-              .trim();
-            validatedData = EmailAISchema.parse(JSON.parse(cleanJson));
-          } catch (aiError) {
-            console.error(
-              "⚠️ فشل في التحليل الآلي للرسالة، سيتم حفظها بدون تحليل.",
-            );
-          }
-
-          // محاولة الربط بمعاملة موجودة
-          let linkedTxId = null,
-            matchConfidence = null;
-          if (validatedData.reqNumber) {
-            const matchedTx = await prisma.privateTransaction.findFirst({
-              where: {
-                OR: [
-                  { transactionCode: { contains: validatedData.reqNumber } },
-                  {
-                    notes: {
-                      path: ["refs", "baladyNumber"],
-                      equals: validatedData.reqNumber,
-                    },
-                  },
-                ],
-              },
-            });
-            if (matchedTx) {
-              linkedTxId = matchedTx.id;
-              matchConfidence = 95;
-            }
-          }
-
-          // حفظ الرسالة الجديدة بعد تحليلها
           dbMessage = await prisma.emailMessage.create({
             data: {
               messageId: msgIdStr,
@@ -770,12 +711,13 @@ exports.syncHostingerEmails = async (req, res) => {
               html: parsed.html || parsed.textAsHtml || "",
               date: parsed.date,
               isRead: msg.flags?.has("\\Seen") || false,
-              isAnalyzed: Object.keys(validatedData).length > 0,
-              ...validatedData,
-              linkedTxId,
-              matchConfidence,
+              isAnalyzed: false, // لم تُحلل بعد
             },
           });
+
+          // 💡 سر الحل: تشغيل دالة التحليل في الخلفية "بدون await"
+          // هذا يسمح للسيرفر بإكمال الرد للمستخدم بينما الذكاء الاصطناعي يعمل في صمت
+          analyzeInBackground(dbMessage.id, subject, bodyText);
         }
 
         messages.push(dbMessage);
@@ -785,13 +727,50 @@ exports.syncHostingerEmails = async (req, res) => {
     }
 
     await client.logout();
+    // إرجاع النتيجة فوراً
     res.json({ success: true, data: messages });
   } catch (error) {
-    res
-      .status(500)
-      .json({ success: false, message: "فشل مزامنة البريد: " + error.message });
+    if (client) await client.logout();
+    console.error("IMAP Error:", error);
+    res.status(500).json({ success: false, message: "حدث خطأ أثناء المزامنة" });
   }
 };
+
+// =========================================================
+// 🤖 دالة التحليل في الخلفية (Background AI Worker)
+// =========================================================
+async function analyzeInBackground(dbId, subject, body) {
+  try {
+    console.log(`✨ بدء تحليل الرسالة [${dbId}] في الخلفية...`);
+
+    const textToAnalyze = `Subject: ${subject}\n\nBody:\n${body.substring(0, 1500)}`;
+    const promptInstruction = `أنت نظام تحليل نصوص حكومي سعودي. استخرج البيانات بصيغة JSON:\n{ "reqNumber": null, "reqYear": null, "serviceNumber": null, "serviceYear": null, "ownerName": null, "serviceType": null, "replyText": null, "entityName": null, "viewTime": null, "sectorName": null }\nالنص:\n${textToAnalyze}`;
+
+    const aiResponse = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: [{ role: "user", parts: [{ text: promptInstruction }] }],
+      config: { temperature: 0.0, responseMimeType: "application/json" },
+    });
+
+    const cleanJson = aiResponse.text
+      .replace(/```json/gi, "")
+      .replace(/```/g, "")
+      .trim();
+    const validatedData = EmailAISchema.parse(JSON.parse(cleanJson));
+
+    // تحديث قاعدة البيانات بالتحليل
+    await prisma.emailMessage.update({
+      where: { id: dbId },
+      data: {
+        isAnalyzed: true,
+        ...validatedData,
+      },
+    });
+    console.log(`✅ انتهى تحليل الرسالة [${dbId}] بنجاح.`);
+  } catch (err) {
+    console.error(`❌ خطأ في تحليل الرسالة الخلفي [${dbId}]:`, err.message);
+  }
+}
 
 exports.analyzeInboxWithAI = async (req, res) => {
   try {
