@@ -234,3 +234,47 @@ exports.deleteRequest = async (req, res) => {
     res.status(500).json({ success: false, message: "حدث خطأ أثناء الحذف: " + error.message });
   }
 };
+
+// ==========================================
+// 🔍 التحقق من صحة رابط العميل وجلب التفاصيل
+// ==========================================
+exports.verifyLink = async (req, res) => {
+  try {
+    const { shortLink } = req.params;
+    
+    const requestInfo = await prisma.fileRequest.findUnique({
+      where: { shortLink }
+    });
+
+    // 1. إذا كان الرابط غير موجود (تم حذفه)
+    if (!requestInfo) {
+      return res.status(404).json({ success: false, message: "الرابط غير صحيح أو تم حذفه من قبل النظام." });
+    }
+
+    // 2. إذا كان الرابط منتهي الصلاحية
+    if (requestInfo.expiresAt && new Date(requestInfo.expiresAt) < new Date()) {
+      return res.status(403).json({ success: false, message: "عذراً، لقد انتهت صلاحية هذا الرابط." });
+    }
+
+    // 3. زيادة عداد الزيارات (View Count) للرابط
+    await prisma.fileRequest.update({
+      where: { id: requestInfo.id },
+      data: { viewCount: { increment: 1 }, status: requestInfo.status === 'sent' ? 'viewed' : requestInfo.status }
+    });
+
+    // 4. إرسال البيانات العامة التي يحتاجها العميل فقط (لأسباب أمنية لا نرسل كل شيء)
+    res.json({ 
+      success: true, 
+      data: {
+        title: requestInfo.title,
+        description: requestInfo.description,
+        maxSizeMB: requestInfo.maxSizeMB,
+        reqSenderName: requestInfo.reqSenderName,
+        reqSenderPhone: requestInfo.reqSenderPhone
+      }
+    });
+  } catch (error) {
+    console.error("Verify Link Error:", error);
+    res.status(500).json({ success: false, message: "حدث خطأ في السيرفر" });
+  }
+};
