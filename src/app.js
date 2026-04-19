@@ -229,6 +229,10 @@ app.use("/api/office-tasks", officeTasksRoutes);
 
 const deviceRoutes = require("./routes/deviceRoutes");
 app.use('/api/devices', deviceRoutes)
+
+// في ملف app.js أو server.js
+const fileRequestRoutes = require("./routes/fileRequestRoutes");
+app.use("/api/file-requests", fileRequestRoutes);
 // فحص صحة السيرفر
 app.get("/", (req, res) => {
   res.json({ status: "Online", message: "Engineering System API v1" });

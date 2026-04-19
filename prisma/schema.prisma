@@ -2925,3 +2925,47 @@ model DeviceCategory {
   label     String // مثل: شاشات، كابلات
   createdAt DateTime @default(now())
 }
+
+// جدول طلبات الوثائق (الروابط المولدة)
+model FileRequest {
+  id             String    @id @default(cuid())
+  requestNumber  String    @unique
+  title          String
+  description    String?
+  status         String    @default("sent") // sent, viewed, completed, expired
+  maxSizeMB      Int       @default(10)
+  expiresAt      DateTime?
+  reqSenderName  Boolean   @default(true)
+  reqSenderPhone Boolean   @default(true)
+  sentToEmail    String?
+  uniqueLink     String    @unique
+  shortLink      String    @unique
+  viewCount      Int       @default(0)
+  uploadCount    Int       @default(0)
+  createdAt      DateTime  @default(now())
+
+  receivedFiles ReceivedFile[]
+}
+
+// جدول الملفات المستلمة من العملاء
+model ReceivedFile {
+  id          String      @id @default(cuid())
+  requestId   String
+  fileRequest FileRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  fileName      String
+  originalName  String
+  fileSize      Int
+  fileExtension String
+  filePath      String
+
+  senderName  String?
+  senderEmail String?
+  senderPhone String?
+
+  isProcessed Boolean @default(false) // هل تم نقلها لمعاملة؟
+  isSafe      Boolean @default(true) // نتيجة فحص الفيروسات
+  aiAnalysis  Json? // نتيجة تحليل الذكاء الاصطناعي للملف
+
+  uploadedAt DateTime @default(now())
+}
