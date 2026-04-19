@@ -233,6 +233,9 @@ app.use('/api/devices', deviceRoutes)
 // في ملف app.js أو server.js
 const fileRequestRoutes = require("./routes/fileRequestRoutes");
 app.use("/api/file-requests", fileRequestRoutes);
+
+app.use('/api/transfer-center', require('./routes/transferCenterRoutes'));
+app.use('/api/contacts', require('./routes/contactRoutes'));
 // فحص صحة السيرفر
 app.get("/", (req, res) => {
   res.json({ status: "Online", message: "Engineering System API v1" });

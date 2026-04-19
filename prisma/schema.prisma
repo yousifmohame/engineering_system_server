@@ -15,22 +15,49 @@ datasource db {
 
 // ------ نموذج الموظفين (شاشة 817) ------
 model Employee {
-  id                String    @id @default(cuid())
-  employeeCode      String    @unique @default(cuid())
-  name              String
-  nameEn            String?
-  nationalId        String    @unique
-  email             String    @unique
-  phone             String    @unique
-  position          String
-  qiwaPosition      String?
-  department        String
-  hireDate          DateTime
-  baseSalary        Float?
-  jobLevel          Int?
-  type              String    @default("full-time")
-  status            String    @default("active")
-  nationality       String?
+  id           String @id @default(cuid())
+  employeeCode String @unique @default(cuid())
+
+  // 💡 [تعديل] يمكن إبقاء name للاستخدام السريع، ولكن تم إضافة نظام الاسم الرباعي
+  name   String
+  nameEn String?
+
+  // 🚀 --- الإضافات الجديدة: نظام الاسم الرباعي ---
+  firstNameAr  String?
+  secondNameAr String?
+  thirdNameAr  String?
+  fourthNameAr String?
+  firstNameEn  String?
+  secondNameEn String?
+  thirdNameEn  String?
+  fourthNameEn String?
+
+  // 🚀 --- الإضافات الجديدة: الصورة الشخصية والتحكم في العرض ---
+  profilePicture         String?
+  isPhotoVisible         Boolean @default(true)
+  isAgeVisible           Boolean @default(true)
+  isInternalTitleVisible Boolean @default(true)
+
+  // 🚀 --- الإضافات الجديدة: البيانات الشخصية ---
+  birthDate   DateTime? @db.Date
+  nationality String?
+
+  nationalId String @unique
+  email      String @unique
+  phone      String @unique
+
+  // البيانات الوظيفية
+  position        String // المسمى الداخلي
+  qiwaPosition    String? // المسمى الرسمي حسب قوى
+  department      String
+  hireDate        DateTime // تاريخ الالتحاق (العقد)
+  actualStartDate DateTime? @db.Date // 🚀 جديد: تاريخ المباشرة الفعلي
+
+  baseSalary Float?
+  jobLevel   Int?
+  type       String @default("full-time")
+  status     String @default("active")
+
   gosiNumber        String?
   iqamaNumber       String?
   performanceRating Float?
@@ -40,10 +67,24 @@ model Employee {
   refreshToken      String?
   permissionsCount  Int? // عدد الصلاحيات المخصصة
 
+  // 🚀 --- الإضافات الجديدة: تفاصيل العنوان الوطني ---
+  shortAddress     String? // العنوان المختصر (مثال: RRRD2929)
+  streetNameAr     String? // اسم الشارع
+  streetNameEn     String?
+  districtAr       String? // الحي
+  districtEn       String?
+  buildingNumber   String? // رقم المبنى
+  unitNumber       String? // رقم الوحدة
+  floorNumber      String? // رقم الدور
+  postalCode       String? // الرمز البريدي
+  additionalNumber String? // الرقم الإضافي
+  cityAr           String? // المدينة
+  cityEn           String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  // --- العلاقات الفرعية للموظف ---
+  // --- العلاقات الفرعية للموظف (كما هي بدون تغيير) ---
   attachments       Attachment[]            @relation("EmployeeAttachments")
   attendanceRecords EmployeeAttendance[]
   leaveRequests     EmployeeLeaveRequest[]
@@ -2926,46 +2967,187 @@ model DeviceCategory {
   createdAt DateTime @default(now())
 }
 
-// جدول طلبات الوثائق (الروابط المولدة)
+// ============================================================================
+// 📁 1. مركز الإرسال والاستقبال (Document Transfer Center)
+// ============================================================================
+
+// 🟢 أ. روابط طلب الوثائق (للاستقبال من العملاء)
 model FileRequest {
-  id             String    @id @default(cuid())
-  requestNumber  String    @unique
-  title          String
-  description    String?
-  status         String    @default("sent") // sent, viewed, completed, expired
-  maxSizeMB      Int       @default(10)
-  expiresAt      DateTime?
-  reqSenderName  Boolean   @default(true)
-  reqSenderPhone Boolean   @default(true)
-  sentToEmail    String?
-  uniqueLink     String    @unique
-  shortLink      String    @unique
-  viewCount      Int       @default(0)
-  uploadCount    Int       @default(0)
-  createdAt      DateTime  @default(now())
+  id           String  @id @default(cuid())
+  title        String
+  description  String? @db.Text
+  instructions String? @db.Text
+
+  // التوجيه والهدف
+  targetType       String  @default("general") // specific, general
+  entityName       String? // اسم العميل/الجهة
+  mobile           String?
+  email            String?
+  systemLinkStatus String  @default("unlinked") // unlinked, client, transaction, property
+  linkedEntityId   String? // معرف المعاملة أو العميل المرتبط
+
+  // قيود المرسل
+  reqSenderName   Boolean @default(true)
+  reqSenderMobile Boolean @default(true)
+  reqSenderEmail  Boolean @default(false)
+  reqSenderNote   Boolean @default(false)
+  reqRefNumber    Boolean @default(false)
+
+  // قيود الملفات
+  allowMultiple Boolean @default(true)
+  maxFiles      Int     @default(10)
+  maxFileSize   Int     @default(50) // MB
+  totalSize     Int     @default(500) // MB
+  allowedTypes  String  @default("all")
+
+  // الحماية والصلاحية
+  linkType   String    @default("open") // open, pin, single, expire
+  pinCode    String?
+  expireDate DateTime?
+  maxUses    Int       @default(0)
+
+  // العرض
+  showDisclaimer Boolean @default(true)
+  disclaimerText String? @db.Text
+
+  // حالة الرابط
+  shortLink String @unique
+  status    String @default("نشط") // نشط، منتهي، مغلق
+  viewCount Int    @default(0)
+
+  createdBy String   @default("مدير النظام")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   receivedFiles ReceivedFile[]
 }
 
-// جدول الملفات المستلمة من العملاء
+// 🔵 ب. الملفات المستلمة عبر الروابط
 model ReceivedFile {
   id          String      @id @default(cuid())
   requestId   String
   fileRequest FileRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
 
-  fileName      String
-  originalName  String
-  fileSize      Int
-  fileExtension String
-  filePath      String
+  fileName     String
+  originalName String
+  fileSize     Int
+  fileType     String
+  filePath     String
 
-  senderName  String?
-  senderEmail String?
-  senderPhone String?
+  senderName      String?
+  senderMobile    String?
+  senderEmail     String?
+  senderNote      String? @db.Text
+  referenceNumber String?
 
-  isProcessed Boolean @default(false) // هل تم نقلها لمعاملة؟
-  isSafe      Boolean @default(true) // نتيجة فحص الفيروسات
-  aiAnalysis  Json? // نتيجة تحليل الذكاء الاصطناعي للملف
+  isProcessed Boolean @default(false)
+  isSafe      Boolean @default(true)
+  aiAnalysis  Json?
 
   uploadedAt DateTime @default(now())
+}
+
+// 🟠 ج. حزم الإرسال (للإرسال للعملاء)
+model DocumentPackage {
+  id      String  @id @default(cuid())
+  title   String
+  message String? @db.Text
+
+  targetType String  @default("specific")
+  entityName String?
+  mobile     String?
+  email      String?
+
+  permissions String    @default("both") // view, download, both
+  linkType    String    @default("open") // open, pin, expire
+  pinCode     String?
+  expireDate  DateTime?
+
+  showDisclaimer     Boolean @default(true)
+  disclaimerText     String? @db.Text
+  directDownloadMode Boolean @default(false)
+
+  shortLink String @unique
+  status    String @default("بانتظار الفتح") // بانتظار الفتح، تم الاستلام، منتهي
+  viewCount Int    @default(0)
+
+  // تخزين الملفات المرسلة (كمصفوفة JSON لتوفير مساحة الجداول، تحتوي على اسم ومسار وحجم الملف)
+  filesData Json @default("[]")
+
+  createdBy String   @default("مدير النظام")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ⚙️ د. إعدادات مركز الإرسال والاستقبال (صفحات الهبوط)
+model TransferCenterSettings {
+  id               Int      @id @default(1)
+  uploadSettings   Json     @default("{}") // إعدادات صفحة الرفع
+  downloadSettings Json     @default("{}") // إعدادات صفحة التنزيل
+  updatedAt        DateTime @updatedAt
+}
+
+// 📜 هـ. سجل التدقيق للمركز (Audit Trail)
+model TransferAuditLog {
+  id        String   @id @default(cuid())
+  action    String // إنشاء رابط، رفع ملف، فتح رابط، الخ
+  user      String // اسم الموظف أو "عميل خارجي"
+  target    String // التفاصيل (اسم الملف، رقم الطلب)
+  meta      String? // بيانات إضافية للون الأيقونة
+  ipAddress String?
+  createdAt DateTime @default(now())
+}
+
+// ===============================================
+// 📇 دليل جهات الاتصال (للمركز والمراسلات الخارجية)
+// ===============================================
+model Contact {
+  id          String @id @default(cuid())
+  contactCode String @unique // كود مرجعي (مثال: CNT-1029)
+
+  displayName String // الاسم المعروض
+  nameAr      String? // الاسم بالعربية
+
+  mobile1 String // رقم الجوال الأساسي
+  email1  String? // البريد الإلكتروني
+
+  detailedType String  @default("client") // نوع الجهة: client, official, vendor, other
+  capacity     String? // المسمى / الصفة (مثال: مالك عقار، مدير مشروع)
+
+  // التصنيفات والحالة
+  isFavorite     Boolean @default(false)
+  isActualClient Boolean @default(false) // هل هو عميل فعلي في النظام أم مجرد جهة اتصال؟
+  status         String  @default("active") // active, inactive
+
+  // تفضيلات وقنوات التواصل المتاحة
+  acceptsEmail    Boolean @default(true)
+  acceptsWhatsApp Boolean @default(true)
+  acceptsSMS      Boolean @default(true)
+  acceptsTelegram Boolean @default(false)
+
+  tags String[] // مصفوفة نصوص لتصنيفات حرة (مثال: ["عميل VIP", "مشاريع الرياض"])
+
+  notes String? @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([mobile1])
+  @@index([email1])
+}
+
+// ===============================================
+// 📧 قوالب رسائل النظام (واتساب، إيميل، SMS)
+// ===============================================
+model NotificationTemplate {
+  id      String @id @default(cuid())
+  code    String @unique // مثال: REQ_FIRST_TIME, REQ_REMINDER, SEND_DOCS
+  title   String // اسم القالب (يظهر للموظف)
+  content String @db.Text // محتوى الرسالة (يحتوي على المتغيرات {targetName})
+  type    String // request (طلب) أو send (إرسال)
+  channel String @default("all") // القنوات المدعومة (all, whatsapp, email)
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
