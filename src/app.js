@@ -228,14 +228,16 @@ const officeTasksRoutes = require("./routes/officeTasksRoutes");
 app.use("/api/office-tasks", officeTasksRoutes);
 
 const deviceRoutes = require("./routes/deviceRoutes");
-app.use('/api/devices', deviceRoutes)
+app.use("/api/devices", deviceRoutes);
 
-// في ملف app.js أو server.js
-const fileRequestRoutes = require("./routes/fileRequestRoutes");
-app.use("/api/file-requests", fileRequestRoutes);
+const transferCenterRoutes = require("./routes/transferCenterRoutes");
+app.use("/api/transfer-center", transferCenterRoutes);
 
-app.use('/api/transfer-center', require('./routes/transferCenterRoutes'));
-app.use('/api/contacts', require('./routes/contactRoutes'));
+const contactRoutes = require("./routes/contactRoutes");
+app.use("/api/contacts", contactRoutes);
+
+const meetingMinutesRoutes = require('./routes/meetingMinutesRoutes');
+app.use('/api/meeting-minutes', meetingMinutesRoutes);
 // فحص صحة السيرفر
 app.get("/", (req, res) => {
   res.json({ status: "Online", message: "Engineering System API v1" });

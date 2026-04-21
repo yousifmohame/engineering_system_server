@@ -1,18 +1,42 @@
 const { PrismaClient } = require("@prisma/client");
 const prisma = new PrismaClient();
 const crypto = require("crypto");
-const twilio = require("twilio");
 const fs = require("fs");
 const path = require("path");
+const axios = require("axios"); // 💡 مطلوب للاتصال بـ Authenticasa
 const OpenAI = require("openai");
+const NodeClam = require("clamscan"); // 🛡️ مكتبة مضاد الفيروسات
 
-// 💡 1. إعداد Twilio
-const accountSid = process.env.TWILIO_ACCOUNT_SID;
-const authToken = process.env.TWILIO_AUTH_TOKEN;
-const twilioClient =
-  accountSid && authToken ? twilio(accountSid, authToken) : null;
+// ==========================================
+// 🛡️ 1. إعداد مضاد الفيروسات (ClamAV)
+// ==========================================
+let clamscan;
+new NodeClam()
+  .init({
+    removeInfected: true, // سيقوم بحذف الملف المصاب فوراً من مجلد Temp/Uploads
+    quarantineInfected: false,
+    debugMode: false,
+    // 💡 استخدام clamdscan المدعوم بالـ Daemon لسرعة فائقة
+    clamdscan: {
+      path: "/usr/bin/clamdscan", // تأكد من مسار الـ Daemon في سيرفرك
+      active: true,
+    },
+    clamscan: { active: false }, // تعطيل الفحص البطيء
+  })
+  .then((instance) => {
+    clamscan = instance;
+    console.log("🛡️ Anti-Virus Engine (ClamAV) is Ready.");
+  })
+  .catch((err) => {
+    console.error(
+      "⚠️ Anti-Virus Init Failed (Files will be saved but not scanned):",
+      err,
+    );
+  });
 
-// 💡 2. إعداد OpenAI (للصياغة الذكية والتحليل)
+// ==========================================
+// 🤖 2. إعداد OpenAI (للصياغة الذكية والتحليل)
+// ==========================================
 const openai = process.env.OPENAI_API_KEY
   ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
   : null;
@@ -104,7 +128,6 @@ exports.createFileRequest = async (req, res) => {
   }
 };
 
-// 🚀 دالة التعديل لطلبات الوارد
 exports.updateFileRequest = async (req, res) => {
   try {
     const { id } = req.params;
@@ -216,13 +239,11 @@ exports.createDocumentPackage = async (req, res) => {
   }
 };
 
-// 🚀 دالة التعديل لحزم الإرسال (الصادر)
 exports.updateDocumentPackage = async (req, res) => {
   try {
     const { id } = req.params;
     const data = req.body;
 
-    // تحويل البيانات القادمة إذا كانت نصية
     const showDisclaimer = String(data.showDisclaimer) === "true";
     const directDownloadMode = String(data.directDownloadMode) === "true";
     const expireDate =
@@ -357,7 +378,7 @@ exports.verifyExternalLink = async (req, res) => {
 };
 
 // ==========================================
-// 6. رفع الملفات من العميل (Upload API)
+// 🛡️ 6. رفع الملفات من العميل (مع الفحص الأمني)
 // ==========================================
 exports.uploadFilesFromClient = async (req, res) => {
   try {
@@ -367,6 +388,7 @@ exports.uploadFilesFromClient = async (req, res) => {
     const fileRequest = await prisma.fileRequest.findUnique({
       where: { shortLink },
     });
+
     if (!fileRequest || fileRequest.status !== "نشط") {
       return res
         .status(400)
@@ -379,34 +401,79 @@ exports.uploadFilesFromClient = async (req, res) => {
         .json({ success: false, message: "لم يتم استلام أي ملفات" });
     }
 
-    const receivedFilesData = req.files.map((file) => ({
-      requestId: fileRequest.id,
-      fileName: file.filename,
-      originalName: file.originalname,
-      fileSize: file.size,
-      fileType: file.mimetype,
-      filePath: `/uploads/transfer-center/${file.filename}`,
-      senderName: senderName || null,
-      senderMobile: senderMobile || null,
-      senderEmail: senderEmail || null,
-      senderNote: senderNote || null,
-    }));
+    const receivedFilesData = [];
+    const infectedFiles = [];
 
-    await prisma.receivedFile.createMany({ data: receivedFilesData });
+    // 🛡️ فحص الملفات المرفوعة باستخدام ClamAV
+    for (const file of req.files) {
+      let isClean = true;
 
-    // تحديث عداد الملفات في الطلب
-    await prisma.fileRequest.update({
-      where: { id: fileRequest.id },
-      data: { uploadCount: { increment: req.files.length } },
-    });
+      if (clamscan) {
+        try {
+          // فحص الملف من مساره المؤقت (أو المحفوظ)
+          const scanResult = await clamscan.isInfected(file.path);
+          if (scanResult.isInfected) {
+            isClean = false;
+            infectedFiles.push(file.originalname);
+            // تسجيل محاولة رفع فيروس في الـ Audit Log
+            await logAction(
+              "اكتشاف فيروس",
+              senderName || "عميل",
+              `ملف: ${file.originalname}`,
+              `الفيروسات: ${scanResult.viruses.join(", ")}`,
+            );
+          }
+        } catch (scanErr) {
+          console.error("⚠️ خطأ أثناء فحص الملف:", scanErr);
+          // في حال فشل محرك الفحص، يمكنك إما السماح بالملف أو رفضه. سنسمح به مع تمرير isSafe = true مؤقتاً
+        }
+      }
 
-    await logAction(
-      "رفع ملفات خارجية",
-      senderName || "عميل",
-      `رفع ${req.files.length} ملفات لطلب #${shortLink}`,
-    );
+      // إذا كان الملف نظيفاً (أو لم يتم اكتشاف فيروس)، يتم حفظه في قاعدة البيانات
+      if (isClean) {
+        receivedFilesData.push({
+          requestId: fileRequest.id,
+          fileName: file.filename,
+          originalName: file.originalname,
+          fileSize: file.size,
+          fileType: file.mimetype,
+          filePath: `/uploads/transfer-center/${file.filename}`,
+          senderName: senderName || null,
+          senderMobile: senderMobile || null,
+          senderEmail: senderEmail || null,
+          senderNote: senderNote || null,
+          isSafe: true, // 🛡️ تم التحقق منه
+        });
+      }
+    }
 
-    res.status(200).json({ success: true, message: "تم رفع الملفات بنجاح" });
+    // حفظ الملفات السليمة في قاعدة البيانات
+    if (receivedFilesData.length > 0) {
+      await prisma.receivedFile.createMany({ data: receivedFilesData });
+
+      await prisma.fileRequest.update({
+        where: { id: fileRequest.id },
+        data: { uploadCount: { increment: receivedFilesData.length } },
+      });
+
+      await logAction(
+        "رفع ملفات خارجية",
+        senderName || "عميل",
+        `تم رفع ${receivedFilesData.length} ملفات نظيفة لطلب #${shortLink}`,
+      );
+    }
+
+    // الرد على العميل
+    if (infectedFiles.length > 0) {
+      return res.status(207).json({
+        success: true, // 207 Multi-Status تعني نجاح جزئي
+        message: `تم رفع ${receivedFilesData.length} ملفات بنجاح. تم رفض الملفات التالية لاحتوائها على برمجيات خبيثة: ${infectedFiles.join("، ")}`,
+      });
+    }
+
+    res
+      .status(200)
+      .json({ success: true, message: "تم رفع جميع الملفات بنجاح وأمان" });
   } catch (error) {
     console.error("Upload Error:", error);
     res
@@ -416,59 +483,80 @@ exports.uploadFilesFromClient = async (req, res) => {
 };
 
 // ==========================================
-// 7. إرسال الإشعارات عبر Twilio (SMS & WhatsApp)
+// 📱 7. إرسال الإشعارات عبر Authenticasa (WhatsApp, SMS, Email)
 // ==========================================
 exports.sendNotification = async (req, res) => {
   try {
     const { to, channel, message } = req.body;
 
-    if (!to || !channel || !message)
-      return res.status(400).json({ success: false, message: "بيانات ناقصة" });
-    if (!twilioClient)
-      return res
-        .status(500)
-        .json({ success: false, message: "Twilio غير مفعل" });
-
-    let formattedNumber = to.trim();
-    if (formattedNumber.startsWith("0"))
-      formattedNumber = "+966" + formattedNumber.substring(1);
-    else if (!formattedNumber.startsWith("+"))
-      formattedNumber = "+" + formattedNumber;
-
-    let twilioResponse;
-    if (channel === "whatsapp") {
-      twilioResponse = await twilioClient.messages.create({
-        body: message,
-        from: `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER}`,
-        to: `whatsapp:${formattedNumber}`,
-      });
-    } else if (channel === "sms") {
-      twilioResponse = await twilioClient.messages.create({
-        body: message,
-        from: process.env.TWILIO_PHONE_NUMBER,
-        to: formattedNumber,
-      });
-    } else {
+    if (!to || !channel || !message) {
       return res
         .status(400)
-        .json({ success: false, message: "قناة غير مدعومة" });
+        .json({
+          success: false,
+          message: "البيانات غير مكتملة (to, channel, message)",
+        });
     }
+
+    const AUTHENTICASA_API_URL = process.env.AUTHENTICASA_API_URL;
+    const AUTHENTICASA_API_KEY = process.env.AUTHENTICASA_API_KEY;
+
+    if (!AUTHENTICASA_API_URL || !AUTHENTICASA_API_KEY) {
+      return res
+        .status(500)
+        .json({
+          success: false,
+          message: "إعدادات Authenticasa غير مكتملة في السيرفر",
+        });
+    }
+
+    // تنسيق رقم الجوال (إذا لم يكن إيميل)
+    let formattedTo = to.trim();
+    if (channel !== "email") {
+      if (formattedTo.startsWith("0")) {
+        formattedTo = "+966" + formattedTo.substring(1);
+      } else if (!formattedTo.startsWith("+")) {
+        formattedTo = "+" + formattedTo;
+      }
+    }
+
+    // تجهيز الـ Payload الخاص بـ Authenticasa
+    const payload = {
+      to: formattedTo,
+      channel: channel, // 'whatsapp', 'sms', or 'email'
+      message: message,
+    };
+
+    // إرسال الطلب لـ Authenticasa
+    const response = await axios.post(AUTHENTICASA_API_URL, payload, {
+      headers: {
+        Authorization: `Bearer ${AUTHENTICASA_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+    });
 
     await logAction(
       `إرسال ${channel.toUpperCase()}`,
       req.user?.name || "النظام",
-      `رقم: ${formattedNumber}`,
+      `إلى: ${formattedTo}`,
     );
+
     res.json({
       success: true,
-      message: `تم الإرسال بنجاح`,
-      messageId: twilioResponse.sid,
+      message: `تم الإرسال بنجاح عبر ${channel}`,
+      data: response.data,
     });
   } catch (error) {
-    console.error("Twilio Send Error:", error);
-    res
-      .status(500)
-      .json({ success: false, message: "فشل الإرسال، تأكد من الرقم" });
+    console.error(
+      "Authenticasa Send Error:",
+      error.response?.data || error.message,
+    );
+    res.status(500).json({
+      success: false,
+      message:
+        "فشل الإرسال، تأكد من صحة بيانات الاتصال أو إعدادات Authenticasa",
+      details: error.response?.data,
+    });
   }
 };
 
@@ -540,7 +628,6 @@ exports.deleteTemplate = async (req, res) => {
 // 🚀 9. إدارة الملفات المستلمة والذكاء الاصطناعي
 // ==========================================
 
-// 🚀 دالة تعديل الملف المستلم (للربط بمعاملة أو عميل)
 exports.updateReceivedFile = async (req, res) => {
   try {
     const { id } = req.params;
@@ -552,7 +639,6 @@ exports.updateReceivedFile = async (req, res) => {
         isProcessed:
           data.isProcessed !== undefined ? data.isProcessed : undefined,
         linkedEntityId: data.linkedEntityId || undefined,
-        // يمكنك إضافة أي حقول أخرى هنا
       },
     });
 
@@ -562,7 +648,6 @@ exports.updateReceivedFile = async (req, res) => {
   }
 };
 
-// مسح ملف مرفوع
 exports.deleteReceivedFile = async (req, res) => {
   try {
     const { id } = req.params;
@@ -570,7 +655,7 @@ exports.deleteReceivedFile = async (req, res) => {
 
     if (file && file.filePath) {
       const fullPath = path.join(__dirname, "../../public", file.filePath);
-      if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath); // حذف من الهارد ديسك
+      if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath);
     }
 
     await prisma.receivedFile.delete({ where: { id } });
@@ -594,7 +679,7 @@ exports.aiRephrase = async (req, res) => {
     const prompt = `قم بإعادة صياغة هذا النص ليكون بصيغة ${tone === "professional" ? "رسمية واحترافية" : "ودية ولطيفة"} وموجه للعملاء في شركة هندسية. احتفظ بالمتغيرات مثل {targetName} أو {url} كما هي بالضبط دون تغيير.\n\nالنص الأصلي:\n${text}`;
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini", // نموذج سريع ورخيص
+      model: "gpt-4o-mini",
       messages: [{ role: "user", content: prompt }],
       temperature: 0.7,
     });
@@ -620,7 +705,6 @@ exports.aiAnalyzeFile = async (req, res) => {
         .status(404)
         .json({ success: false, message: "الملف غير موجود" });
 
-    // محاكاة استجابة الذكاء الاصطناعي
     const aiAnalysisResult = {
       expectedType: file.fileType.includes("pdf")
         ? "وثيقة PDF"

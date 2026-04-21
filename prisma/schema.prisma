@@ -1544,8 +1544,9 @@ model PrivateTransaction {
   linkedParent   PrivateTransaction?  @relation("LinkedTransactions", fields: [linkedParentId], references: [id])
   linkedChildren PrivateTransaction[] @relation("LinkedTransactions")
 
-  ownersList TransactionOwner[]
-  OfficeTask OfficeTask[]
+  ownersList    TransactionOwner[]
+  OfficeTask    OfficeTask[]
+  MeetingMinute MeetingMinute[]
 
   @@index([clientId])
   @@index([districtId])
@@ -3150,4 +3151,73 @@ model NotificationTemplate {
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model MeetingMinute {
+  id              String  @id @default(uuid())
+  referenceNumber String  @unique
+  title           String
+  status          String  @default("مسودة")
+  meetingType     String?
+  meetingCapacity String?
+  isFollowUp      Boolean @default(false)
+  meetingDate     String?
+  startTime       String?
+  endTime         String?
+  preparationDate String?
+  location        String?
+  channel         String?
+  requester       String?
+
+  // ==========================================
+  // 🔗 1. الربط المرجعي بالجداول الأخرى (Relations)
+  // ==========================================
+  clientName String? // الاسم النصي كمرجع سريع
+  clientId   String? // الآي دي للربط الفعلي بجدول العملاء (Persons)
+
+  transactionId  String? // الآي دي للربط الفعلي بجدول المعاملات
+  transactionRef String? // 💡 حقل جديد: كود المعاملة المقروء للعرض (TRX)
+  transaction    PrivateTransaction? @relation(fields: [transactionId], references: [id])
+
+  linkedQuoteId    String?
+  linkedContractId String?
+
+  // ==========================================
+  // 📦 2. حقول التابات (تُحفظ كـ JSON)
+  // ==========================================
+  attendees                 Json  @default("[]")
+  axes                      Json  @default("[]")
+  steps                     Json  @default("[]")
+  verification              Json?
+  advancedSignatureSettings Json?
+  printSettings             Json?
+  attachments               Json  @default("[]")
+
+  // ==========================================
+  // 📝 3. الحقول النصية والملاحظات الداخلية
+  // ==========================================
+  internalNotes String? @db.Text // حقل الملاحظات الداخلية
+
+  // (حقول إضافية متوافقة مع الأنظمة القديمة أو المحاضر البسيطة)
+  objective         String? @db.Text
+  decisions         String? @db.Text
+  discussedPoints   String? @db.Text
+  actionItems       String? @db.Text
+  background        String? @db.Text
+  plannedPoints     String? @db.Text
+  clientRequests    String? @db.Text
+  companyResponses  String? @db.Text
+  postponedRequests String? @db.Text
+  recommendations   String? @db.Text
+  finalOutcomes     String? @db.Text
+  // 🔐 حقل التحقق المشفر
+  verificationToken String? @unique
+
+  // ==========================================
+  // ⏱️ 4. التتبع
+  // ==========================================
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  createdBy String?
+  updatedBy String?
 }
