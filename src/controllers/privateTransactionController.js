@@ -141,6 +141,8 @@ const createPrivateTransaction = async (req, res) => {
       designerOffice,
       supervisorOffice,
 
+      generalNotes,
+
       // 👇 1. إضافة الحقول الجديدة هنا لاستقبالها من الفرونت إند
       hasAgreement,
       sourcePersonId,
@@ -341,6 +343,9 @@ const createPrivateTransaction = async (req, res) => {
           mediatorFees: mediatorFees ? parseFloat(mediatorFees) : 0,
           agentFees: agentFees ? parseFloat(agentFees) : 0,
           transactionComments: extraNotes?.transactionComments || [],
+          generalNotes: generalNotes || null,
+          generalNotesUpdatedBy: generalNotes ? (addedBy || "مدير النظام") : null,
+          generalNotesUpdatedAt: generalNotes ? new Date() : null,
 
           agents: followUpAgentId
             ? [
@@ -1308,9 +1313,9 @@ const updatePrivateTransaction = async (req, res) => {
       dataToUpdate.designerOfficeId = designingOfficeId;
 
     if (generalNotes !== undefined) {
-      dataToUpdate.generalNotes = generalNotes;
-      dataToUpdate.generalNotesUpdatedBy = updatedBy || "موظف النظام";
-      dataToUpdate.generalNotesUpdatedAt = new Date();
+      currentNotes.generalNotes = generalNotes; // ✅ حفظ داخل JSON
+      currentNotes.generalNotesUpdatedBy = updatedBy || "موظف النظام"; // ✅
+      currentNotes.generalNotesUpdatedAt = new Date(); // ✅
     }
 
     if (requestData) {

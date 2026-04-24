@@ -1499,6 +1499,10 @@ model PrivateTransaction {
   surveyReportNumber  String?
   surveyReportDate    DateTime?
 
+  generalNotes          String?
+  generalNotesUpdatedBy String?
+  generalNotesUpdatedAt DateTime?
+
   // 💡 حقول التعاقد الإلكتروني/التفويض (Electronic Contract / Authorization)
   contractNumber       String?
   contractApprovalDate DateTime?
