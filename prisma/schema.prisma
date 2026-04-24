@@ -3221,3 +3221,124 @@ model MeetingMinute {
   createdBy String?
   updatedBy String?
 }
+
+// ==========================================
+// Enums for Documentation System
+// ==========================================
+enum SignatureType {
+  MANUAL
+  STAMP_ONLY
+  SIG_AND_STAMP
+  SECURE_PLACEHOLDER
+  SECURE_AND_MANUAL
+  NONE
+}
+
+enum SealType {
+  OFFICE_STAMP
+  INTERNAL_STAMP
+  VERIFIED_BADGE
+  NONE
+}
+
+enum DocPosition {
+  TOP_RIGHT
+  TOP_LEFT
+  BOTTOM_RIGHT
+  BOTTOM_LEFT
+  CENTER
+  ALL_PAGES_HEADER
+}
+
+enum ReferenceDocType {
+  CONTRACT
+  QUOTATION
+  INVOICE
+  EXTERNAL
+}
+
+enum DocumentStatus {
+  PENDING_SIGNATURE
+  VERIFIED
+  REVOKED
+}
+
+// ==========================================
+// Models for Documentation System
+// ==========================================
+
+// 1. قوالب الأختام (Seal Templates)
+model SealTemplate {
+  id                String  @id @default(uuid())
+  name              String
+  stampImage        String // مسار الصورة في السيرفر أو الرابط
+  serialPrefix      String  @default("SEC-")
+  backgroundText    String?
+  backgroundColor   String  @default("#eff6ff")
+  backgroundOpacity Float   @default(0.6)
+  serialPosition    String  @default("bottom") // top, bottom, inside, around
+  showTimestamp     Boolean @default(true)
+  securityHash      Boolean @default(true)
+  verificationCode  Boolean @default(true)
+  isDefault         Boolean @default(false)
+
+  documentedFiles DocumentedRecord[]
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+}
+
+// 2. إعدادات ربط المستندات (Linkage Mappings)
+model DocTypeLinkage {
+  id                         String        @id @default(uuid())
+  docTypeId                  String        @unique // مثلا: 'contract', 'invoice'
+  docTypeName                String
+  defaultSignatureType       SignatureType @default(SIG_AND_STAMP)
+  defaultSealType            SealType      @default(OFFICE_STAMP)
+  signerRoles                Json          @default("[\"Admin\"]") // Array of roles
+  showDocumentationStatement Boolean       @default(true)
+  signaturePosition          DocPosition   @default(BOTTOM_RIGHT)
+  sealPosition               DocPosition   @default(BOTTOM_LEFT)
+  statementTemplate          String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// 3. إعدادات النظام (System Settings - Singleton Model)
+model DocumentationSetting {
+  id                    Int     @id @default(1) // دائماً صف واحد
+  autoDocumentContracts Boolean @default(true)
+  autoDocumentInvoices  Boolean @default(true)
+  autoDocumentQuotes    Boolean @default(false)
+  verificationUrl       String  @default("https://verify.domain.com")
+  defaultFolderName     String  @default("Generated Documents")
+  privateKeyHash        String? // مفتاح التشفير (يُحفظ مشفراً)
+  requireOtp            Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// 4. سجل التوثيق (The Registry)
+model DocumentedRecord {
+  id          String           @id @default(uuid())
+  name        String // اسم الملف أو العقد
+  type        ReferenceDocType // نوع المستند الأصلي
+  referenceId String? // ID العقد أو الفاتورة المرتبطة (nullable للملفات الخارجية)
+  partyB      String? // اسم العميل أو الجهة
+
+  serialNumber String @unique
+  securityHash String @unique // الهاش المشفر لضمان عدم التلاعب
+  fileUrl      String // مسار ملف الـ PDF النهائي الموثق
+
+  status        DocumentStatus @default(VERIFIED)
+  signatureType SignatureType
+
+  // Relations
+  sealTemplateId String?
+  sealTemplate   SealTemplate? @relation(fields: [sealTemplateId], references: [id], onDelete: SetNull)
+
+  createdBy String // ID الموظف الذي قام بالتوثيق
+
+  createdAt DateTime @default(now()) // timestamp
+}

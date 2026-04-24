@@ -238,6 +238,8 @@ app.use("/api/contacts", contactRoutes);
 
 const meetingMinutesRoutes = require('./routes/meetingMinutesRoutes');
 app.use('/api/meeting-minutes', meetingMinutesRoutes);
+
+app.use('/api/documentation', require('./routes/documentationRoutes'));
 // فحص صحة السيرفر
 app.get("/", (req, res) => {
   res.json({ status: "Online", message: "Engineering System API v1" });
