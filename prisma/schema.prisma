@@ -806,6 +806,23 @@ model Quotation {
   expiryDate   DateTime
   isRenewable  Boolean  @default(false)
 
+  // 1. الربط الإضافي (من الخطوة 0)
+  transactionId String?
+  transaction   PrivateTransaction? @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+
+  meetingMinuteId String?
+  meetingMinute   MeetingMinute? @relation(fields: [meetingMinuteId], references: [id])
+
+  // 2. التشفير والأمان (من الخطوة 8)
+  stampType         StampType @default(NONE) // يضاف كـ Enum: NONE, SECURE_QR
+  qrVerificationUrl String?   @db.Text // الرابط الذي سيفتح عند مسح الـ QR
+  barcodeData       String? // رقم الباركود الفريد (مثال: 815-QT-X9)
+  securityHash      String?   @db.Text // تشفير لبيانات العرض لمنع التلاعب في قاعدة البيانات
+
+  // 3. إدارة الإصدارات (للاحترافية)
+  revisionNumber Int     @default(1)
+  parentQuoteId  String?
+
   // نموذج العرض
   templateType     TemplateType @default(SUMMARY)
   templateId       String?
@@ -1551,6 +1568,7 @@ model PrivateTransaction {
   ownersList    TransactionOwner[]
   OfficeTask    OfficeTask[]
   MeetingMinute MeetingMinute[]
+  Quotation     Quotation[]
 
   @@index([clientId])
   @@index([districtId])
@@ -3220,10 +3238,11 @@ model MeetingMinute {
   // ==========================================
   // ⏱️ 4. التتبع
   // ==========================================
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
   createdBy String?
   updatedBy String?
+  Quotation Quotation[]
 }
 
 // ==========================================
@@ -3345,4 +3364,10 @@ model DocumentedRecord {
   createdBy String // ID الموظف الذي قام بالتوثيق
 
   createdAt DateTime @default(now()) // timestamp
+}
+
+// أنواع الأختام والمصادقة لعروض الأسعار
+enum StampType {
+  NONE
+  SECURE_QR
 }
