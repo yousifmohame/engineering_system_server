@@ -483,6 +483,10 @@ const getPrivateTransactions = async (req, res) => {
         taxAmount: true,
         sourceName: true,
 
+        isOnAxis: true,
+        streetName: true,
+        officialMapLink: true,
+
         // 💡 مصدر المعاملة المرتبط بجدول الموظفين
         sourcePerson: {
           select: { id: true, name: true, role: true },
@@ -712,6 +716,9 @@ const getPrivateTransactions = async (req, res) => {
         settlements: tx.settlements,
         expenses: notes?.expenses || [],
         logs: notes?.logs || [],
+        isOnAxis: tx.isOnAxis || notes?.refs?.isOnAxis || "لا",
+        streetName: tx.streetName || notes?.refs?.streetName || "",
+        officialMapLink: tx.officialMapLink || notes?.refs?.officialMapLink || "",
       };
     });
 
@@ -1199,9 +1206,33 @@ const updateTransactionStatus = async (req, res) => {
 const updatePrivateTransaction = async (req, res) => {
   try {
     const { id } = req.params;
-    const data = req.body; // نجمع كل الطلب هنا بدل التفكيك العشوائي
+    const data = req.body;
 
-    // 1. جلب المعاملة الأصلية للتحقق والمقارنة
+    // 👇🔥 هذا هو الكود السحري الذي سيحل مشكلة عدم الحفظ 🔥👇
+    // فك تشفير البيانات التي تصل كنصوص (Strings) بسبب الـ FormData
+    if (typeof data.notes === "string") {
+      try {
+        data.notes = JSON.parse(data.notes);
+      } catch (e) {}
+    }
+    if (typeof data.requestData === "string") {
+      try {
+        data.requestData = JSON.parse(data.requestData);
+      } catch (e) {}
+    }
+    if (typeof data.detailedOwnersList === "string") {
+      try {
+        data.detailedOwnersList = JSON.parse(data.detailedOwnersList);
+      } catch (e) {}
+    }
+    if (typeof data.plots === "string" && data.plots.startsWith("[")) {
+      try {
+        data.plots = JSON.parse(data.plots);
+      } catch (e) {}
+    }
+    // 👆 ==================================================== 👆
+
+    // 1. جلب المعاملة الأصلية للتحقق
     const tx = await prisma.privateTransaction.findUnique({ where: { id } });
     if (!tx) {
       return res
@@ -1301,11 +1332,12 @@ const updatePrivateTransaction = async (req, res) => {
     if (data.designingOfficeId !== undefined)
       dataToUpdate.designerOfficeId = data.designingOfficeId;
 
-    // 6. الربط الذكي بالأحياء (لحل مشكلة تعديل الحي)
+    // 6. الربط الذكي بالأحياء (التصحيح هنا)
     if (data.districtId) {
       dataToUpdate.districtNode = { connect: { id: data.districtId } };
+      // 👈 السطر التالي كان مفقوداً، وهو يضمن مسح الاسم القديم واستبداله بالجديد
+      dataToUpdate.districtName = data.district || data.districtName;
     } else if (data.district !== undefined) {
-      // للرجوع للخلف إذا تم تمرير الاسم كنص فقط
       dataToUpdate.districtName = data.district;
     }
 

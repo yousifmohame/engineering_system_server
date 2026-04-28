@@ -94,7 +94,7 @@ router.delete("/brokers/:brokerRecordId", removeBrokerFromTransaction);
 router.post("/:id/agents", assignAgentToTransaction);
 
 router.post("/:id/status", uploadStatusNote.any(), updateTransactionStatus);
-router.put("/:id", updatePrivateTransaction);
+router.put("/:id", uploadTransaction.any(), updatePrivateTransaction);
 router.delete("/:id", deletePrivateTransaction);
 router.patch("/:id/toggle-freeze", toggleFreezeTransaction);
 router.post("/:id/expenses", addPrivateExpense);
