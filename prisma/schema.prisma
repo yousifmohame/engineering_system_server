@@ -1451,6 +1451,11 @@ model PrivateTransaction {
   landArea     Float? // مساحة الأرض (Float لتقبل الكسور)
   oldDeed      String? // رقم الصك القديم
 
+  isOnAxis        String? // هل يقع على محور (مثال: "نعم" أو "لا")
+  streetName      String? // اسم الشارع
+  officialMapLink String? @db.Text // رابط الخريطة المعتمدة (استخدمنا Text لأن الروابط قد تكون طويلة)
+  // 👆 ====================================================
+
   // 💡 [احترافي] فصل أرقام المنصات
   serviceNo String?
   requestNo String?

@@ -344,7 +344,7 @@ const createPrivateTransaction = async (req, res) => {
           agentFees: agentFees ? parseFloat(agentFees) : 0,
           transactionComments: extraNotes?.transactionComments || [],
           generalNotes: generalNotes || null,
-          generalNotesUpdatedBy: generalNotes ? (addedBy || "مدير النظام") : null,
+          generalNotesUpdatedBy: generalNotes ? addedBy || "مدير النظام" : null,
           generalNotesUpdatedAt: generalNotes ? new Date() : null,
 
           agents: followUpAgentId
@@ -1193,61 +1193,39 @@ const updateTransactionStatus = async (req, res) => {
 };
 
 // ==================================================
-// 2. التحديث الجذري للبيانات الأساسية والمالية (مُحدث لدعم كافة الحقول والمرفقات وتعدد الملاك)
+// 2. تحديث معاملة (تحديث شامل وقوي)
+// PUT /api/private-transactions/:id
 // ==================================================
 const updatePrivateTransaction = async (req, res) => {
   try {
     const { id } = req.params;
-    const {
-      year,
-      month,
-      client,
-      districtId,
-      sector,
-      type,
-      office,
-      sourceName,
-      totalFees,
-      mediatorFees,
-      agentCost,
-      notes,
-      internalName,
-      isInternalNameHidden,
-      plots,
-      plan,
-      area,
-      mapsLink,
-      updatedBy,
-      requestData,
-      isOnAxis,
-      streetName,
-      officialMapLink,
-      supervisingOfficeId,
-      designingOfficeId,
-      generalNotes,
-      ownerNames,
-    } = req.body;
+    const data = req.body; // نجمع كل الطلب هنا بدل التفكيك العشوائي
 
+    // 1. جلب المعاملة الأصلية للتحقق والمقارنة
     const tx = await prisma.privateTransaction.findUnique({ where: { id } });
-    if (!tx)
+    if (!tx) {
       return res
         .status(404)
         .json({ success: false, message: "المعاملة غير موجودة" });
+    }
 
     let newTransactionCode = tx.transactionCode;
     let newCreatedAt = tx.createdAt;
 
-    if (year && month) {
+    // 2. معالجة السنة والشهر (تحديث الكود إذا تغير التاريخ)
+    if (data.year && data.month) {
       const currentYear = tx.createdAt.getFullYear().toString();
       const currentMonth = (tx.createdAt.getMonth() + 1)
         .toString()
         .padStart(2, "0");
-      if (year !== currentYear || month !== currentMonth) {
-        const prefix = `${year}-${month}-`;
+
+      if (data.year !== currentYear || data.month !== currentMonth) {
+        const prefix = `${data.year}-${data.month}-`;
         const lastTx = await prisma.privateTransaction.findFirst({
           where: { transactionCode: { startsWith: prefix } },
           orderBy: { transactionCode: "desc" },
         });
+
         let nextNumber = 1;
         if (lastTx) {
           try {
@@ -1255,127 +1233,190 @@ const updatePrivateTransaction = async (req, res) => {
           } catch (e) {}
         }
         newTransactionCode = `${prefix}${String(nextNumber).padStart(5, "0")}`;
-        newCreatedAt = new Date(`${year}-${month}-01T10:00:00Z`);
+        newCreatedAt = new Date(`${data.year}-${data.month}-01T10:00:00Z`);
       }
     }
 
-    if (client && tx.clientId) {
+    // 3. تحديث اسم العميل في جدول العملاء إذا تم تمريره
+    if (data.client && tx.clientId) {
       await prisma.client.update({
         where: { id: tx.clientId },
-        data: { name: { ar: client, en: "", details: {} } },
+        data: { name: { ar: data.client, en: "", details: {} } },
       });
     }
 
+    // 4. معالجة الـ JSON Notes (الأهم في الكود)
+    // هنا يجب ألا نفقد الملاحظات القديمة!
     let currentNotes =
-      typeof tx.notes === "object" && tx.notes !== null ? tx.notes : {};
+      typeof tx.notes === "object" && tx.notes !== null ? { ...tx.notes } : {};
 
-    if (notes && notes.transactionComments !== undefined)
-      currentNotes.transactionComments = notes.transactionComments;
-    if (notes && notes.attachments !== undefined)
-      currentNotes.attachments = notes.attachments;
-    if (notes && notes.authorityNotesHistory !== undefined)
-      currentNotes.authorityNotesHistory = notes.authorityNotesHistory;
-    if (notes && notes.agents !== undefined) currentNotes.agents = notes.agents;
-    if (notes && notes.agentFees !== undefined)
-      currentNotes.agentFees = notes.agentFees;
+    // تحديث خصائص Notes فقط إذا تم إرسالها من الواجهة
+    if (data.notes) {
+      if (data.notes.transactionComments !== undefined)
+        currentNotes.transactionComments = data.notes.transactionComments;
+      if (data.notes.attachments !== undefined)
+        currentNotes.attachments = data.notes.attachments;
+      if (data.notes.authorityNotesHistory !== undefined)
+        currentNotes.authorityNotesHistory = data.notes.authorityNotesHistory;
+      if (data.notes.agents !== undefined)
+        currentNotes.agents = data.notes.agents;
+      if (data.notes.agentFees !== undefined)
+        currentNotes.agentFees = data.notes.agentFees;
+      if (data.notes.expenses !== undefined)
+        currentNotes.expenses = data.notes.expenses; // 👈 مهم جداً لتاب المصاريف
+      if (data.notes.logs !== undefined) currentNotes.logs = data.notes.logs;
+      if (data.notes.collectionDates !== undefined)
+        currentNotes.collectionDates = data.notes.collectionDates;
+    }
 
     if (!currentNotes.refs) currentNotes.refs = {};
-    if (mapsLink !== undefined) currentNotes.refs.mapsLink = mapsLink;
+    if (data.mapsLink !== undefined) currentNotes.refs.mapsLink = data.mapsLink;
 
+    // 5. تجهيز الكائن الأساسي للتحديث
     const dataToUpdate = {
       updatedAt: new Date(),
-      category: type || tx.category,
-      source: office || tx.source,
-      
-      status: req.body.status || tx.status,
+      createdAt: newCreatedAt,
+      transactionCode: newTransactionCode,
     };
 
-    if (districtId) {
-      dataToUpdate.districtNode = {
-        connect: { id: districtId }
-      };
+    // التحديث المشروط للحقول الأساسية (لا نُحدث الحقل إلا إذا كان موجوداً في الـ Request)
+    if (data.type !== undefined) dataToUpdate.category = data.type;
+    if (data.office !== undefined) dataToUpdate.source = data.office;
+    if (data.status !== undefined) dataToUpdate.status = data.status; // 👈 التحديث السليم للحالة
+    if (data.ownerNames !== undefined)
+      dataToUpdate.ownerNames = data.ownerNames;
+    if (data.area !== undefined)
+      dataToUpdate.landArea = parseFloat(data.area) || 0;
+    if (data.plan !== undefined) dataToUpdate.planNumber = data.plan;
+    if (data.sector !== undefined) dataToUpdate.sector = data.sector;
+    if (data.sourceName !== undefined)
+      dataToUpdate.sourceName = data.sourceName;
+    if (data.isOnAxis !== undefined) dataToUpdate.isOnAxis = data.isOnAxis;
+    if (data.streetName !== undefined)
+      dataToUpdate.streetName = data.streetName;
+    if (data.officialMapLink !== undefined)
+      dataToUpdate.officialMapLink = data.officialMapLink;
+    if (data.supervisingOfficeId !== undefined)
+      dataToUpdate.supervisorOfficeId = data.supervisingOfficeId;
+    if (data.designingOfficeId !== undefined)
+      dataToUpdate.designerOfficeId = data.designingOfficeId;
+
+    // 6. الربط الذكي بالأحياء (لحل مشكلة تعديل الحي)
+    if (data.districtId) {
+      dataToUpdate.districtNode = { connect: { id: data.districtId } };
+    } else if (data.district !== undefined) {
+      // للرجوع للخلف إذا تم تمرير الاسم كنص فقط
+      dataToUpdate.districtName = data.district;
     }
 
-    if (ownerNames !== undefined) dataToUpdate.ownerNames = ownerNames;
-    if (area !== undefined) dataToUpdate.landArea = parseFloat(area);
-    if (plan !== undefined) dataToUpdate.planNumber = plan;
-    if (sector !== undefined) dataToUpdate.sector = sector;
-    if (sourceName !== undefined) dataToUpdate.sourceName = sourceName;
-    if (isOnAxis !== undefined) dataToUpdate.isOnAxis = isOnAxis;
-    if (streetName !== undefined) dataToUpdate.streetName = streetName;
-    if (officialMapLink !== undefined)
-      dataToUpdate.officialMapLink = officialMapLink;
-    // 💡 تصحيح أسماء الحقول لتتطابق مع Prisma Schema
-    if (supervisingOfficeId !== undefined)
-      dataToUpdate.supervisorOfficeId = supervisingOfficeId;
-      
-    if (designingOfficeId !== undefined)
-      dataToUpdate.designerOfficeId = designingOfficeId;
-
-    if (generalNotes !== undefined) {
-      currentNotes.generalNotes = generalNotes; // ✅ حفظ داخل JSON
-      currentNotes.generalNotesUpdatedBy = updatedBy || "موظف النظام"; // ✅
-      currentNotes.generalNotesUpdatedAt = new Date(); // ✅
+    // 7. معالجة البلوكات والمخططات
+    if (data.plots !== undefined) {
+      if (typeof data.plots === "string") {
+        dataToUpdate.plots = data.plots
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
+      } else if (Array.isArray(data.plots)) {
+        dataToUpdate.plots = data.plots;
+      }
     }
 
-    if (requestData) {
-      dataToUpdate.designerOfficeId = requestData.designerOffice || null;
-      dataToUpdate.supervisorOfficeId = requestData.supervisorOffice || null;
-
-      // 💡 تحديث الاتفاقية ومصدر المعاملة
-      if (requestData.hasAgreement !== undefined)
-        dataToUpdate.hasAgreement = requestData.hasAgreement;
-      if (requestData.sourcePersonId !== undefined)
-        dataToUpdate.sourcePersonId = requestData.sourcePersonId || null;
-
-      dataToUpdate.electronicLicenseNumber =
-        requestData.electronicLicenseNumber || null;
-      dataToUpdate.electronicLicenseHijriYear =
-        requestData.electronicLicenseHijriYear || null;
-      dataToUpdate.electronicLicenseDate = requestData.electronicLicenseDate
-        ? new Date(requestData.electronicLicenseDate)
-        : null;
-
-      dataToUpdate.oldLicenseNumber = requestData.oldLicenseNumber || null;
-      dataToUpdate.oldLicenseHijriYear =
-        requestData.oldLicenseHijriYear || null;
-      dataToUpdate.oldLicenseDate = requestData.oldLicenseDate
-        ? new Date(requestData.oldLicenseDate)
-        : null;
-
-      // 💡 تواريخ الطلب والخدمة الجديدة
-      dataToUpdate.requestNumber = requestData.requestNumber || null;
-      dataToUpdate.requestYear = requestData.requestYear || null;
-      dataToUpdate.requestDate = requestData.requestDate
-        ? new Date(requestData.requestDate)
-        : null;
-
-      dataToUpdate.serviceNumber = requestData.serviceNumber || null;
-      dataToUpdate.serviceYear = requestData.serviceYear || null;
-      dataToUpdate.serviceDate = requestData.serviceDate
-        ? new Date(requestData.serviceDate)
-        : null;
-
-      dataToUpdate.responsibleEmployee =
-        requestData.responsibleEmployee || null;
-      dataToUpdate.surveyRequestNumber =
-        requestData.surveyRequestNumber || null;
-      dataToUpdate.surveyRequestYear = requestData.surveyRequestYear || null;
-      dataToUpdate.surveyServiceNumber =
-        requestData.surveyServiceNumber || null;
-      dataToUpdate.surveyServiceYear = requestData.surveyServiceYear || null;
-      dataToUpdate.surveyReportNumber = requestData.surveyReportNumber || null;
-      dataToUpdate.surveyReportDate = requestData.surveyReportDate
-        ? new Date(requestData.surveyReportDate)
-        : null;
-
-      dataToUpdate.contractNumber = requestData.contractNumber || null;
-      dataToUpdate.contractApprovalDate = requestData.contractApprovalDate
-        ? new Date(requestData.contractApprovalDate)
-        : null;
-      dataToUpdate.contractApprovedBy = requestData.contractApprovedBy || null;
+    // 8. الملاحظات العامة
+    if (data.generalNotes !== undefined) {
+      currentNotes.generalNotes = data.generalNotes;
+      currentNotes.generalNotesUpdatedBy = data.updatedBy || "موظف النظام";
+      currentNotes.generalNotesUpdatedAt = new Date();
     }
 
+    // 9. بيانات الطلب (Request Data)
+    if (data.requestData) {
+      if (data.requestData.designerOffice !== undefined)
+        dataToUpdate.designerOfficeId = data.requestData.designerOffice || null;
+      if (data.requestData.supervisorOffice !== undefined)
+        dataToUpdate.supervisorOfficeId =
+          data.requestData.supervisorOffice || null;
+      if (data.requestData.hasAgreement !== undefined)
+        dataToUpdate.hasAgreement = data.requestData.hasAgreement;
+      if (data.requestData.sourcePersonId !== undefined)
+        dataToUpdate.sourcePersonId = data.requestData.sourcePersonId || null;
+
+      if (data.requestData.electronicLicenseNumber !== undefined)
+        dataToUpdate.electronicLicenseNumber =
+          data.requestData.electronicLicenseNumber || null;
+      if (data.requestData.electronicLicenseHijriYear !== undefined)
+        dataToUpdate.electronicLicenseHijriYear =
+          data.requestData.electronicLicenseHijriYear || null;
+      if (data.requestData.electronicLicenseDate !== undefined)
+        dataToUpdate.electronicLicenseDate = data.requestData
+          .electronicLicenseDate
+          ? new Date(data.requestData.electronicLicenseDate)
+          : null;
+
+      if (data.requestData.oldLicenseNumber !== undefined)
+        dataToUpdate.oldLicenseNumber =
+          data.requestData.oldLicenseNumber || null;
+      if (data.requestData.oldLicenseHijriYear !== undefined)
+        dataToUpdate.oldLicenseHijriYear =
+          data.requestData.oldLicenseHijriYear || null;
+      if (data.requestData.oldLicenseDate !== undefined)
+        dataToUpdate.oldLicenseDate = data.requestData.oldLicenseDate
+          ? new Date(data.requestData.oldLicenseDate)
+          : null;
+
+      if (data.requestData.requestNumber !== undefined)
+        dataToUpdate.requestNumber = data.requestData.requestNumber || null;
+      if (data.requestData.requestYear !== undefined)
+        dataToUpdate.requestYear = data.requestData.requestYear || null;
+      if (data.requestData.requestDate !== undefined)
+        dataToUpdate.requestDate = data.requestData.requestDate
+          ? new Date(data.requestData.requestDate)
+          : null;
+
+      if (data.requestData.serviceNumber !== undefined)
+        dataToUpdate.serviceNumber = data.requestData.serviceNumber || null;
+      if (data.requestData.serviceYear !== undefined)
+        dataToUpdate.serviceYear = data.requestData.serviceYear || null;
+      if (data.requestData.serviceDate !== undefined)
+        dataToUpdate.serviceDate = data.requestData.serviceDate
+          ? new Date(data.requestData.serviceDate)
+          : null;
+
+      if (data.requestData.responsibleEmployee !== undefined)
+        dataToUpdate.responsibleEmployee =
+          data.requestData.responsibleEmployee || null;
+      if (data.requestData.surveyRequestNumber !== undefined)
+        dataToUpdate.surveyRequestNumber =
+          data.requestData.surveyRequestNumber || null;
+      if (data.requestData.surveyRequestYear !== undefined)
+        dataToUpdate.surveyRequestYear =
+          data.requestData.surveyRequestYear || null;
+      if (data.requestData.surveyServiceNumber !== undefined)
+        dataToUpdate.surveyServiceNumber =
+          data.requestData.surveyServiceNumber || null;
+      if (data.requestData.surveyServiceYear !== undefined)
+        dataToUpdate.surveyServiceYear =
+          data.requestData.surveyServiceYear || null;
+      if (data.requestData.surveyReportNumber !== undefined)
+        dataToUpdate.surveyReportNumber =
+          data.requestData.surveyReportNumber || null;
+      if (data.requestData.surveyReportDate !== undefined)
+        dataToUpdate.surveyReportDate = data.requestData.surveyReportDate
+          ? new Date(data.requestData.surveyReportDate)
+          : null;
+
+      if (data.requestData.contractNumber !== undefined)
+        dataToUpdate.contractNumber = data.requestData.contractNumber || null;
+      if (data.requestData.contractApprovalDate !== undefined)
+        dataToUpdate.contractApprovalDate = data.requestData
+          .contractApprovalDate
+          ? new Date(data.requestData.contractApprovalDate)
+          : null;
+      if (data.requestData.contractApprovedBy !== undefined)
+        dataToUpdate.contractApprovedBy =
+          data.requestData.contractApprovedBy || null;
+    }
+
+    // 10. معالجة الصور المرفوعة مباشرة
     if (req.files) {
       if (req.files.newSiteImage && req.files.newSiteImage[0]) {
         dataToUpdate.siteImage = `/uploads/transactions/${req.files.newSiteImage[0].filename}`;
@@ -1385,54 +1426,55 @@ const updatePrivateTransaction = async (req, res) => {
       }
     }
 
-    if (plots !== undefined) {
-      if (typeof plots === "string") {
-        dataToUpdate.plots = plots
-          .split(",")
-          .map((s) => s.trim())
-          .filter(Boolean);
-      } else if (Array.isArray(plots)) {
-        dataToUpdate.plots = plots;
-      }
+    // 11. تحديث الأمور المالية
+    if (data.totalFees !== undefined) {
+      dataToUpdate.totalFees = parseFloat(data.totalFees) || 0;
+      dataToUpdate.remainingAmount = Math.max(
+        0,
+        dataToUpdate.totalFees - (tx.paidAmount || 0),
+      );
     }
 
-    const parsedTotalFees =
-      totalFees !== undefined ? parseFloat(totalFees) : tx.totalFees;
-    dataToUpdate.totalFees = parsedTotalFees;
-    dataToUpdate.remainingAmount = Math.max(
-      0,
-      parsedTotalFees - (tx.paidAmount || 0),
-    );
+    // إذا كان هناك تعديل للضرائب
+    if (data.taxType !== undefined || data.taxData !== undefined) {
+      dataToUpdate.taxType =
+        data.taxType || data.taxData?.taxType || tx.taxType;
+      dataToUpdate.taxAmount = parseFloat(
+        data.taxAmount || data.taxData?.taxAmount || tx.taxAmount || 0,
+      );
+      dataToUpdate.netAmount = parseFloat(
+        data.netAmount || data.taxData?.netAmount || tx.netAmount || 0,
+      );
+    }
 
-    if (internalName !== undefined) {
-      currentNotes.internalName = internalName;
+    // 12. تحديث اسم المعاملة الداخلي (الاسم الشائع)
+    if (data.internalName !== undefined) {
+      currentNotes.internalName = data.internalName;
       currentNotes.isInternalNameHidden =
-        isInternalNameHidden === "true" || isInternalNameHidden === true;
+        data.isInternalNameHidden === "true" ||
+        data.isInternalNameHidden === true;
+      const typeLabel = data.type || tx.category || "معاملة";
       dataToUpdate.title =
-        !currentNotes.isInternalNameHidden && internalName
-          ? `${internalName} - ${newTransactionCode}`
-          : `${type || tx.category || "معاملة"} - ${newTransactionCode}`;
+        !currentNotes.isInternalNameHidden && data.internalName
+          ? `${data.internalName} - ${newTransactionCode}`
+          : `${typeLabel} - ${newTransactionCode}`;
     }
 
-    dataToUpdate.notes = currentNotes;
-
-    // 💡 👈 تحديث قائمة الملاك في الجدول الوسيط إذا توفرت في الـ notes
-    const detailedOwnersList = notes?.detailedOwnersList;
+    // 13. قائمة الملاك المعقدة
+    const detailedOwnersList =
+      data.notes?.detailedOwnersList || data.detailedOwnersList;
     if (detailedOwnersList !== undefined && Array.isArray(detailedOwnersList)) {
       dataToUpdate.ownersList = {
-        deleteMany: {}, // 1. حذف الروابط القديمة
+        deleteMany: {},
         create: detailedOwnersList
           .filter((o) => o.clientId)
           .map((owner) => ({
-            // 2. إنشاء الروابط الجديدة بالعملاء
             clientId: owner.clientId,
-            // ownerName: owner.ownerName,
             idNumber: owner.idNumber || null,
             isPrimary: owner.isPrimary || false,
           })),
       };
 
-      // تحديث העمّل الرئيسي للتوافق القديم
       const primaryOwner =
         detailedOwnersList.find((o) => o.isPrimary) || detailedOwnersList[0];
       if (primaryOwner && primaryOwner.clientId) {
@@ -1440,6 +1482,10 @@ const updatePrivateTransaction = async (req, res) => {
       }
     }
 
+    // الدمج النهائي للـ JSON
+    dataToUpdate.notes = currentNotes;
+
+    // التنفيذ في قاعدة البيانات
     const updatedTx = await prisma.privateTransaction.update({
       where: { id },
       data: dataToUpdate,
@@ -1448,10 +1494,10 @@ const updatePrivateTransaction = async (req, res) => {
     await logTransactionEvent(
       prisma,
       id,
-      "بيانات أساسية/مالية",
-      "تحديث شامل",
-      "تم تعديل البيانات الأساسية، التعليقات، أو الموقع للمعاملة",
-      updatedBy,
+      "تحديث النظام",
+      "تعديل معاملة",
+      "تم تعديل بيانات المعاملة أو ملفاتها من خلال النظام",
+      data.updatedBy || req.user?.id,
     );
 
     res.json({ success: true, message: "تم التحديث بنجاح", data: updatedTx });
@@ -1460,6 +1506,7 @@ const updatePrivateTransaction = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+
 // ==================================================
 // 11. إضافة مصروف تشغيلي
 // ==================================================
