@@ -11,9 +11,11 @@ const {
   getRoleChanges,
   getAssignmentLists,
   getRoleNotifications,
-  getRoleById,            // ✅ إضافة
-  updateRolePermissions ,  // ✅ إضافة
-  assignPermissionToRole
+  getRoleById,
+  updateRolePermissions,
+  assignPermissionToRole,
+  updateRole, // ✅ استيراد
+  deleteRole  // ✅ استيراد
 } = require('../controllers/roleController');
 
 // حماية جميع المسارات التالية
@@ -24,29 +26,25 @@ router.route('/')
   .post(createRole)
   .get(getAllRoles);
 
-// المسارات الجديدة
+// المسارات الإضافية
 router.route('/changes').get(getRoleChanges);
 router.route('/assignment-lists').get(getAssignmentLists);
 router.route('/notifications').get(getRoleNotifications);
 
-// مسارات إسناد الموظفين
-router.route('/assign-employee')
-  .post(assignEmployeeToRole);
+// مسارات إسناد وإزالة الموظفين
+router.route('/assign-employee').post(assignEmployeeToRole);
+router.route('/remove-employee').post(removeEmployeeFromRole);
 
-router.route('/remove-employee')
-  .post(removeEmployeeFromRole);
-
-// --- ✅ إضافة مسارات التفاصيل والتحديث ---
-// (يجب أن يكون هذا المسار قبل :id لمنع التعارض)
-// (لا يوجد تعارض حالياً، لكنه جيد للتنظيم)
-
-// مسار لجلب دور واحد وتحديث صلاحياته
+// ===============================================
+// ✅ مسارات العمليات على دور واحد (تحديث، حذف، جلب)
+// ===============================================
 router.route('/:id')
-  .get(getRoleById); // GET /api/roles/ROLE_ID_HERE
+  .get(getRoleById)    // جلب تفاصيل الدور
+  .put(updateRole)     // تحديث البيانات الأساسية
+  .delete(deleteRole); // حذف الدور
 
-router.route('/:id/permissions')
-  .put(updateRolePermissions); // PUT /api/roles/ROLE_ID_HERE/permissions
-
-router.post('/:id/assign-permission', assignPermissionToRole);
+// مسارات الصلاحيات الخاصة بالدور
+router.route('/:id/permissions').put(updateRolePermissions);
+router.route('/:id/assign-permission').post(assignPermissionToRole);
   
 module.exports = router;

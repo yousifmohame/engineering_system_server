@@ -33,7 +33,7 @@ const generateSecurityData = (quoteNumber) => {
 };
 
 // ===============================================
-// 1. إنشاء عرض سعر (محدث ومصحح لخطأ Prisma)
+// 1. إنشاء عرض سعر (محدث ومصحح لخطأ Prisma + زيادة عداد النموذج)
 // ===============================================
 const createQuotation = async (req, res) => {
   try {
@@ -166,16 +166,43 @@ const createQuotation = async (req, res) => {
       },
     });
 
+    // =========================================================
+    // 🔥 تحديث عداد مرات استخدام النموذج (usesCount)
+    // =========================================================
+    if (data.templateId) {
+      try {
+        // ابحث باستخدام code لأن الـ templateId القادم من الواجهة غالباً يكون هو الـ code
+        const templateExists = await prisma.quotationTemplate.findUnique({
+          where: { code: data.templateId },
+        });
+
+        // إذا كان النموذج موجوداً، قم بزيادة العداد بمقدار 1
+        if (templateExists) {
+          await prisma.quotationTemplate.update({
+            where: { code: data.templateId },
+            data: { usesCount: { increment: 1 } },
+          });
+        } else {
+          // في حال كانت الواجهة ترسل الـ CUID الأصلي بدلاً من الـ code
+          await prisma.quotationTemplate.update({
+            where: { id: data.templateId },
+            data: { usesCount: { increment: 1 } },
+          });
+        }
+      } catch (templateError) {
+        console.error("Failed to increment template usesCount:", templateError);
+        // الخطأ هنا لا يوقف عملية إنشاء عرض السعر (Non-blocking)
+      }
+    }
+
     res.status(201).json({ success: true, data: newQuotation });
   } catch (error) {
     console.error("Create Quotation Error:", error);
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "فشل حفظ عرض السعر",
-        error: error.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "فشل حفظ عرض السعر",
+      error: error.message,
+    });
   }
 };
 
@@ -418,8 +445,8 @@ const getQuotationById = async (req, res) => {
       include: {
         client: true,
         ownership: true,
-        transaction: true,     // 👈 إضافة استباقية لمعلومات المعاملة المرتبطة
-        meetingMinute: true,   // 👈 إضافة استباقية لمعلومات المحضر المرتبط
+        transaction: true, // 👈 إضافة استباقية لمعلومات المعاملة المرتبطة
+        meetingMinute: true, // 👈 إضافة استباقية لمعلومات المحضر المرتبط
         items: { orderBy: { order: "asc" } },
         payments: { orderBy: { installmentNumber: "asc" } },
         contract: true,

@@ -19,14 +19,12 @@ const createRole = async (req, res) => {
       permissionsData,
     } = req.body;
 
-    // نستلم الـ code من الفرونت إند، وإذا لم يوجد، نقوم بتوليده تلقائياً (مثال: ROLE_1709845321654)
     const code = req.body.code || `ROLE_${Date.now()}`;
 
     if (!nameAr) {
       return res.status(400).json({ message: "اسم الدور (عربي) مطلوب" });
     }
 
-    // تجهيز الصلاحيات الديناميكية (من الفرونت إند الجديد)
     let permissionOps = [];
     if (permissionsData && Array.isArray(permissionsData)) {
       permissionOps = permissionsData.map((p) => ({
@@ -44,26 +42,24 @@ const createRole = async (req, res) => {
 
     const newRole = await prisma.jobRole.create({
       data: {
-        code, // سيتم إدخال الكود سواء تم إرساله أو توليده
+        code,
         nameAr,
         nameEn,
         description,
-        // معالجة الـ level لأنه قد يكون undefined
         level: level ? level.toString() : "1",
         department,
         responsibilities: responsibilities || [],
-        canAssignTasks: true, // افتراضي
-        allowMultiple: true, // افتراضي
-        allowMultiRole: true, // افتراضي
-        modifiedBy: req.user ? req.user.name : "System", // حماية في حال عدم وجود user
-        // 👈 ربط الصلاحيات الديناميكية
+        canAssignTasks: true,
+        allowMultiple: true,
+        allowMultiRole: true,
+        modifiedBy: req.user ? req.user.name : "System",
         ...(permissionOps.length > 0 && {
           permissions: {
             connectOrCreate: permissionOps,
           },
         }),
       },
-      include: { permissions: true }, // نرجع الصلاحيات ليتعرف عليها الفرونت إند
+      include: { permissions: true },
     });
 
     res.status(201).json({ success: true, data: newRole });
@@ -86,9 +82,9 @@ const getAllRoles = async (req, res) => {
   try {
     const roles = await prisma.jobRole.findMany({
       include: {
-        permissions: true, // 👈 هذا هو السطر السحري المفقود! يجلب تفاصيل الصلاحيات
+        permissions: true,
         _count: {
-          select: { employees: true }, // جلب عدد الموظفين فقط
+          select: { employees: true },
         },
       },
       orderBy: {
@@ -103,7 +99,7 @@ const getAllRoles = async (req, res) => {
 };
 
 // ===============================================
-// 3. إسناد موظف إلى دور (شاشة 903 - تاب 04)
+// 3. إسناد موظف إلى دور
 // POST /api/roles/assign-employee
 // ===============================================
 const assignEmployeeToRole = async (req, res) => {
@@ -114,19 +110,16 @@ const assignEmployeeToRole = async (req, res) => {
       return res.status(400).json({ message: "employeeId و roleId مطلوبان" });
     }
 
-    // 1. ربط الموظف بالدور
     await prisma.jobRole.update({
       where: { id: roleId },
       data: {
         employees: {
-          connect: { id: employeeId }, // "connect" تضيف الربط
+          connect: { id: employeeId },
         },
       },
     });
 
-    // --- 2. إرسال إيميل إشعار (الخطوة الجديدة) ---
     try {
-      // جلب بيانات الموظف والدور
       const employee = await prisma.employee.findUnique({
         where: { id: employeeId },
         select: { email: true, name: true },
@@ -148,15 +141,11 @@ const assignEmployeeToRole = async (req, res) => {
             <p>مع تحيات،<br>إدارة النظام</p>
           </div>
         `;
-
-        // إرسال الإيميل في الخلفية (لا ننتظر الرد)
         sendEmail(employee.email, subject, htmlBody);
       }
     } catch (emailError) {
-      // نسجل الخطأ فقط ولا نوقف العملية الأساسية
       console.error("Failed to send assignment email:", emailError);
     }
-    // ----------------------------------------
 
     res.status(200).json({ message: "تم إسناد الموظف للدور بنجاح" });
   } catch (error) {
@@ -166,7 +155,7 @@ const assignEmployeeToRole = async (req, res) => {
 };
 
 // ===============================================
-// 4. إزالة موظف من دور (شاشة 903)
+// 4. إزالة موظف من دور
 // POST /api/roles/remove-employee
 // ===============================================
 const removeEmployeeFromRole = async (req, res) => {
@@ -177,12 +166,11 @@ const removeEmployeeFromRole = async (req, res) => {
       return res.status(400).json({ message: "employeeId و roleId مطلوبان" });
     }
 
-    // هذه هي طريقة Prisma لفك ربط علاقة Many-to-Many
     const updatedRole = await prisma.jobRole.update({
       where: { id: roleId },
       data: {
         employees: {
-          disconnect: { id: employeeId }, // "disconnect" تزيل الربط
+          disconnect: { id: employeeId },
         },
       },
     });
@@ -193,33 +181,30 @@ const removeEmployeeFromRole = async (req, res) => {
   }
 };
 
-// --- ✅ 5. إضافة الدوال الجديدة (مؤقتاً) ---
-
-// GET /api/roles/changes
+// ===============================================
+// الدوال الإضافية (Placeholder)
+// ===============================================
 const getRoleChanges = async (req, res) => {
   try {
-    // (منطق جلب البيانات الحقيقي يوضع هنا لاحقاً)
-    res.status(200).json([]); // إرجاع مصفوفة فارغة حالياً
+    res.status(200).json([]);
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "خطأ في الخادم" });
   }
 };
 
-// GET /api/roles/assignment-lists
 const getAssignmentLists = async (req, res) => {
   try {
-    res.status(200).json([]); // إرجاع مصفوفة فارغة حالياً
+    res.status(200).json([]);
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "خطأ في الخادم" });
   }
 };
 
-// GET /api/roles/notifications
 const getRoleNotifications = async (req, res) => {
   try {
-    res.status(200).json([]); // إرجاع مصفوفة فارغة حالياً
+    res.status(200).json([]);
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "خطأ في الخادم" });
@@ -227,7 +212,7 @@ const getRoleNotifications = async (req, res) => {
 };
 
 // ===============================================
-// 5. ✅ جلب دور واحد مع تفاصيله (للتبويبات 6-14)
+// 5. جلب دور واحد مع تفاصيله
 // GET /api/roles/:id
 // ===============================================
 const getRoleById = async (req, res) => {
@@ -236,10 +221,10 @@ const getRoleById = async (req, res) => {
     const role = await prisma.jobRole.findUnique({
       where: { id: id },
       include: {
-        permissions: true, // لجلب الصلاحيات المرتبطة (لتاب 903-06)
-        employees: true, // لجلب الموظفين المرتبطين (لتاب 903-09)
-        parentRole: true, // لتاب التسلسل الهرمي (903-08)
-        childRoles: true, // لتاب التسلسل الهرمي (903-08)
+        permissions: true,
+        employees: true,
+        parentRole: true,
+        childRoles: true,
       },
     });
 
@@ -254,7 +239,7 @@ const getRoleById = async (req, res) => {
 };
 
 // ===============================================
-// 6. ✅ تحديث صلاحيات دور معين
+// 6. تحديث صلاحيات دور معين
 // PUT /api/roles/:id/permissions
 // ===============================================
 const updateRolePermissions = async (req, res) => {
@@ -262,7 +247,6 @@ const updateRolePermissions = async (req, res) => {
     const { id } = req.params;
     const { permissionsData } = req.body;
 
-    // إذا لم تكن المصفوفة موجودة، نفرغ الصلاحيات
     if (!permissionsData || !Array.isArray(permissionsData)) {
       await prisma.jobRole.update({
         where: { id },
@@ -273,7 +257,6 @@ const updateRolePermissions = async (req, res) => {
         .json({ success: true, message: "تم تفريغ الصلاحيات" });
     }
 
-    // 1. ضمان وجود كل الصلاحيات في قاعدة البيانات أولاً
     for (const p of permissionsData) {
       await prisma.permission.upsert({
         where: { code: p.code },
@@ -289,7 +272,6 @@ const updateRolePermissions = async (req, res) => {
       });
     }
 
-    // 2. تحديث الدور وربطه بالأكواد المحددة فقط وحذف القديم
     const updatedRole = await prisma.jobRole.update({
       where: { id: id },
       data: {
@@ -308,7 +290,7 @@ const updateRolePermissions = async (req, res) => {
 };
 
 // ===============================================
-// إضافة/إزالة صلاحية ديناميكية لدور وظيفي (Visual Builder Toggle)
+// 7. إضافة/إزالة صلاحية ديناميكية لدور وظيفي
 // POST /api/roles/:id/assign-permission
 // ===============================================
 const assignPermissionToRole = async (req, res) => {
@@ -320,7 +302,6 @@ const assignPermissionToRole = async (req, res) => {
       return res.status(400).json({ message: "بيانات الصلاحية غير مكتملة" });
     }
 
-    // جلب الدور مع صلاحياته الحالية
     const role = await prisma.jobRole.findUnique({
       where: { id },
       include: { permissions: true },
@@ -328,15 +309,12 @@ const assignPermissionToRole = async (req, res) => {
 
     if (!role) return res.status(404).json({ message: "الدور غير موجود" });
 
-    // التحقق هل الصلاحية موجودة بالفعل لدى هذا الدور؟
     const hasPermission = role.permissions.some(
       (p) => p.code === permission.code,
     );
-
     let updatedRole;
 
     if (hasPermission) {
-      // 🔴 الصلاحية موجودة -> إذن نقوم بحذفها (Disconnect)
       updatedRole = await prisma.jobRole.update({
         where: { id },
         data: {
@@ -353,7 +331,6 @@ const assignPermissionToRole = async (req, res) => {
           role: updatedRole,
         });
     } else {
-      // 🟢 الصلاحية غير موجودة -> نقوم بإنشائها وربطها (ConnectOrCreate)
       updatedRole = await prisma.jobRole.update({
         where: { id },
         data: {
@@ -388,15 +365,101 @@ const assignPermissionToRole = async (req, res) => {
   }
 };
 
+// ===============================================
+// 8. ✅ [جديد] تحديث البيانات الأساسية للدور
+// PUT /api/roles/:id
+// ===============================================
+const updateRole = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const data = req.body;
+
+    const existingRole = await prisma.jobRole.findUnique({ where: { id } });
+    if (!existingRole) {
+      return res
+        .status(404)
+        .json({ success: false, message: "الدور الوظيفي غير موجود" });
+    }
+
+    const updatedRole = await prisma.jobRole.update({
+      where: { id },
+      data: {
+        nameAr: data.nameAr || existingRole.nameAr,
+        nameEn: data.nameEn || existingRole.nameEn,
+        description:
+          data.description !== undefined
+            ? data.description
+            : existingRole.description,
+        level: data.level ? data.level.toString() : existingRole.level,
+        department:
+          data.department !== undefined
+            ? data.department
+            : existingRole.department,
+        responsibilities:
+          data.responsibilities || existingRole.responsibilities,
+        modifiedBy: req.user ? req.user.name : "System",
+      },
+    });
+
+    res.status(200).json({ success: true, data: updatedRole });
+  } catch (error) {
+    console.error("Update Role Error:", error);
+    res.status(500).json({ success: false, message: "حدث خطأ أثناء التحديث" });
+  }
+};
+
+// ===============================================
+// 9. ✅ [جديد] حذف الدور الوظيفي
+// DELETE /api/roles/:id
+// ===============================================
+const deleteRole = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const existingRole = await prisma.jobRole.findUnique({ where: { id } });
+    if (!existingRole) {
+      return res
+        .status(404)
+        .json({ success: false, message: "الدور الوظيفي غير موجود" });
+    }
+
+    await prisma.jobRole.delete({
+      where: { id },
+    });
+
+    res
+      .status(200)
+      .json({ success: true, message: "تم حذف الدور الوظيفي بنجاح" });
+  } catch (error) {
+    console.error("Delete Role Error:", error);
+
+    // الحل السحري لمشكلة "مرتبط بموظفين محذوفين مؤقتاً"
+    // P2003 هو كود الخطأ في بريسما عند محاولة حذف شيء له ارتباطات (Foreign Key Constraint)
+    if (error.code === "P2003") {
+      return res.status(400).json({
+        success: false,
+        message:
+          "لا يمكن الحذف. هذا الدور مرتبط بموظفين (حتى وإن كانوا محذوفين أو موقوفين). يرجى إزالة الدور منهم أولاً.",
+      });
+    }
+
+    res
+      .status(500)
+      .json({ success: false, message: "حدث خطأ أثناء محاولة الحذف" });
+  }
+};
+
 module.exports = {
   createRole,
   getAllRoles,
   assignEmployeeToRole,
   removeEmployeeFromRole,
-  getRoleChanges, // ✅ إضافة
-  getAssignmentLists, // ✅ إضافة
-  getRoleNotifications, // ✅ إضافة
-  getRoleById, // ✅ إضافة
+  getRoleChanges,
+  getAssignmentLists,
+  getRoleNotifications,
+  getRoleById,
   updateRolePermissions,
   assignPermissionToRole,
+  updateRole, // ✅ تم التصدير
+  deleteRole, // ✅ تم التصدير
 };

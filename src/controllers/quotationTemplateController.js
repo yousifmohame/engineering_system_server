@@ -1,7 +1,6 @@
 // server/src/controllers/quotationTemplateController.js
 const prisma = require("../utils/prisma");
 
-// توليد كود النموذج (مثال: TPL-001)
 const generateTemplateCode = async () => {
   const lastTemplate = await prisma.quotationTemplate.findFirst({
     where: { code: { startsWith: "TPL-" } },
@@ -16,10 +15,12 @@ const generateTemplateCode = async () => {
   return `TPL-${nextSeq.toString().padStart(3, "0")}`;
 };
 
-// 1. إنشاء نموذج جديد (POST)
+// 1. إنشاء نموذج جديد
 const createTemplate = async (req, res) => {
   try {
-    const { title, type, desc, sections, options, defaultTerms } = req.body;
+    const { title, type, desc, sections, options, defaultTerms, employeeId } =
+      req.body;
+    const currentUserId = req.user?.id || req.employee?.id || employeeId;
 
     const newCode = await generateTemplateCode();
     const newTemplate = await prisma.quotationTemplate.create({
@@ -31,6 +32,7 @@ const createTemplate = async (req, res) => {
         sectionsConfig: sections,
         displayOptions: options,
         defaultTerms,
+        employeeId: currentUserId, // تسجيل المنشئ
       },
     });
     return res.status(201).json({ success: true, data: newTemplate });
@@ -40,11 +42,13 @@ const createTemplate = async (req, res) => {
   }
 };
 
-// 2. تحديث نموذج موجود (PUT)
+// 2. تحديث نموذج موجود
 const updateTemplate = async (req, res) => {
   try {
-    const { id } = req.params; // ID هنا هو الـ code مثل TPL-001
-    const { title, type, desc, sections, options, defaultTerms } = req.body;
+    const { id } = req.params;
+    const { title, type, desc, sections, options, defaultTerms, employeeId } =
+      req.body;
+    const currentUserId = req.user?.id || req.employee?.id || employeeId;
 
     const updatedTemplate = await prisma.quotationTemplate.update({
       where: { code: id },
@@ -55,6 +59,7 @@ const updateTemplate = async (req, res) => {
         sectionsConfig: sections,
         displayOptions: options,
         defaultTerms,
+        employeeId: currentUserId, // تسجيل من قام بآخر تعديل
       },
     });
 
@@ -65,47 +70,47 @@ const updateTemplate = async (req, res) => {
   }
 };
 
-// 3. حذف نموذج (DELETE)
+// 3. حذف نموذج
 const deleteTemplate = async (req, res) => {
   try {
     const { id } = req.params;
-
-    await prisma.quotationTemplate.delete({
-      where: { code: id },
-    });
-
+    await prisma.quotationTemplate.delete({ where: { code: id } });
     res.status(200).json({ success: true, message: "تم حذف النموذج بنجاح" });
   } catch (error) {
     console.error("Delete Template Error:", error);
-    // قد يحدث خطأ إذا كان النموذج مرتبطاً بعروض أسعار سابقة (Foreign Key Constraint)
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "فشل حذف النموذج، قد يكون مرتبطاً بعروض أسعار سابقة",
-      });
+    res.status(500).json({ success: false, message: "فشل حذف النموذج" });
   }
 };
 
-// 4. جلب جميع النماذج (GET)
+// 4. جلب جميع النماذج
 const getTemplates = async (req, res) => {
   try {
     const templates = await prisma.quotationTemplate.findMany({
       orderBy: { createdAt: "desc" },
+      include: {
+        creator: {
+          select: { id: true, name: true }, // جلب اسم الموظف من جدول Employee
+        },
+      },
     });
 
     const mappedTemplates = templates.map((t) => ({
       id: t.code,
+      code: t.code,
       title: t.title,
       type: t.type,
       desc: t.description || "",
       isDefault: t.isDefault,
+      status: t.status,
+      isFrozen: t.isFrozen,
       uses: t.usesCount,
       sections: t.sectionsConfig || {},
       options: t.displayOptions || {},
       defaultTerms: t.defaultTerms || "",
-      date: t.createdAt.toISOString().split("T")[0],
-      status: t.status,
+      userId: t.employeeId,
+      creator: t.creator, // معلومات المنشئ/المعدل لتظهر بالجدول
+      createdAt: t.createdAt,
+      updatedAt: t.updatedAt,
     }));
 
     res.status(200).json({ success: true, data: mappedTemplates });
@@ -114,7 +119,7 @@ const getTemplates = async (req, res) => {
   }
 };
 
-// 5. جلب نموذج واحد بالتحديد (GET /:id) - ضروري لعملية التعديل
+// 5. جلب نموذج واحد
 const getTemplateById = async (req, res) => {
   try {
     const { id } = req.params;
@@ -122,13 +127,9 @@ const getTemplateById = async (req, res) => {
       where: { code: id },
     });
 
-    if (!template) {
-      return res
-        .status(404)
-        .json({ success: false, message: "النموذج غير موجود" });
-    }
+    if (!template)
+      return res.status(404).json({ success: false, message: "غير موجود" });
 
-    // تجهيز البيانات لتتطابق مع ما تتوقعه الواجهة الأمامية
     const mappedTemplate = {
       id: template.code,
       title: template.title,
@@ -137,16 +138,72 @@ const getTemplateById = async (req, res) => {
       sections: template.sectionsConfig || {},
       options: template.displayOptions || {},
       defaultTerms: template.defaultTerms || "",
+      isFrozen: template.isFrozen,
     };
 
     res.status(200).json({ success: true, data: mappedTemplate });
   } catch (error) {
-    console.error("Get Template By ID Error:", error);
-    res.status(500).json({ success: false, message: "فشل جلب تفاصيل النموذج" });
+    res.status(500).json({ success: false, message: "فشل جلب التفاصيل" });
   }
 };
 
-// 6. تغيير حالة النموذج (تفعيل/تعطيل)
+// 6. التجميد / فك التجميد
+const toggleFreezeTemplate = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { isFrozen, employeeId } = req.body;
+    const currentUserId = req.user?.id || req.employee?.id || employeeId;
+
+    const updatedTemplate = await prisma.quotationTemplate.update({
+      where: { code: id },
+      data: {
+        isFrozen,
+        employeeId: currentUserId, // تسجيل من قام بالتجميد
+      },
+    });
+    res.status(200).json({ success: true, data: updatedTemplate });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "فشل تحديث التجميد" });
+  }
+};
+
+// 7. النسخ (Duplicate)
+const duplicateTemplate = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { employeeId } = req.body;
+    const currentUserId = req.user?.id || req.employee?.id || employeeId;
+
+    const originalTemplate = await prisma.quotationTemplate.findUnique({
+      where: { code: id },
+    });
+
+    if (!originalTemplate)
+      return res.status(404).json({ success: false, message: "غير موجود" });
+
+    const newCode = await generateTemplateCode();
+
+    const duplicatedTemplate = await prisma.quotationTemplate.create({
+      data: {
+        code: newCode,
+        title: `${originalTemplate.title} (نسخة)`,
+        type: originalTemplate.type,
+        description: originalTemplate.description,
+        sectionsConfig: originalTemplate.sectionsConfig,
+        displayOptions: originalTemplate.displayOptions,
+        defaultTerms: originalTemplate.defaultTerms,
+        isFrozen: false,
+        usesCount: 0,
+        employeeId: currentUserId, // تسجيل من قام بالنسخ
+      },
+    });
+
+    res.status(201).json({ success: true, data: duplicatedTemplate });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "فشل النسخ" });
+  }
+};
+
 const toggleTemplateStatus = async (req, res) => {
   try {
     const { id } = req.params;
@@ -196,4 +253,6 @@ module.exports = {
   getTemplateById,
   toggleTemplateStatus,
   setAsDefault,
+  toggleFreezeTemplate,
+  duplicateTemplate,
 };

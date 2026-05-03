@@ -117,6 +117,7 @@ model Employee {
 
   // --- المعاملات ---
   transactionAssignments TransactionEmployee[]
+  quotationTemplates     QuotationTemplate[]
 }
 
 // نموذج لسجل الحضور
@@ -929,6 +930,9 @@ model QuotationTemplate {
   isDefault Boolean @default(false)
   status    String  @default("active") // "active", "disabled"
 
+  // حقل التجميد الجديد
+  isFrozen Boolean @default(false)
+
   // JSON لتخزين خيارات الأقسام (cover, header, items...)
   sectionsConfig Json @default("{}")
   // JSON لتخزين خيارات العرض الإضافية (showClientCode...)
@@ -938,6 +942,10 @@ model QuotationTemplate {
 
   // عداد الاستخدام
   usesCount Int @default(0)
+
+  // علاقة المستخدم الذي أنشأ النموذج
+  employeeId String?
+  creator    Employee? @relation(fields: [employeeId], references: [id])
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
