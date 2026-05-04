@@ -56,6 +56,7 @@ router.post(
 // 2. مسار جلب قائمة جميع المشاريع المؤرشفة (لعرضها في شاشة الأرشيف)
 router.get("/", archivedProjectController.getAllArchivedProjects);
 
+router.post('/manual', archivedProjectController.createManualArchive);
 // 3. مسار جلب تفاصيل مشروع مؤرشف محدد (لعرضه في شاشة التفاصيل أو الخطوة 3)
 router.get("/:id", archivedProjectController.getArchivedProjectDetails);
 

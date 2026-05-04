@@ -244,6 +244,10 @@ app.use('/api/documentation', require('./routes/documentationRoutes'));
 // استيراد مسار الأرشيف الجديد
 const archivedProjectRoutes = require('./routes/archivedProjectRoutes');
 app.use('/api/archived-projects', archivedProjectRoutes);
+
+const notificationRoutes = require('./routes/notificationRoutes');
+app.use('/api/notifications', notificationRoutes);
+
 // فحص صحة السيرفر
 app.get("/", (req, res) => {
   res.json({ status: "Online", message: "Engineering System API v1" });

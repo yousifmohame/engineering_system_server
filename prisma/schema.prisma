@@ -119,7 +119,9 @@ model Employee {
   transactionAssignments TransactionEmployee[]
   quotationTemplates     QuotationTemplate[]
 
-  archivedProjects ArchivedProject[] @relation("EmployeeArchivedProjects")
+  archivedProjects   ArchivedProject[]    @relation("EmployeeArchivedProjects")
+  approvedProjects   ArchivedProject[]    @relation("ProjectApprover")
+  SystemNotification SystemNotification[]
 }
 
 // نموذج لسجل الحضور
@@ -3402,10 +3404,11 @@ model ArchivedProject {
   projectType     String // نوع المشروع (سكني، تجاري، متعدد الاستخدامات)
   transactionType String? // نوع المعاملة
 
-  // --- 1. بيانات المالك (الارتباط بجدول العملاء الحالي) ---
+  // --- 1. بيانات المالك ---
   clientId      String?
   client        Client? @relation(fields: [clientId], references: [id])
   ownerType     String? // اعتباري (شركة) / طبيعي (أفراد)
+  ownerName     String? // 👈 حقل جديد: لحفظ اسم المالك المستخرج من الذكاء الاصطناعي قبل الربط
   contactMobile String?
   poBox         String?
 
@@ -3417,44 +3420,50 @@ model ArchivedProject {
   deedDate          DateTime? @db.Date
 
   // --- 3. الموقع والمحددات المكانية ---
-  city       String          @default("الرياض")
-  districtId String?
-  district   RiyadhDistrict? @relation(fields: [districtId], references: [id]) // الارتباط بجدول أحياء الرياض
-  planNumber String?
-  plots      String[] // أرقام القطع
-  mainStreet String?
+  city         String          @default("الرياض")
+  districtId   String?
+  district     RiyadhDistrict? @relation(fields: [districtId], references: [id])
+  districtName String? // 👈 حقل جديد: لحفظ اسم الحي المستخرج من الذكاء الاصطناعي قبل الربط
+  planNumber   String?
+  plots        String[] // أرقام القطع
+  mainStreet   String?
+  sectorName   String?
 
-  // تم استخدام Json للجداول المعقدة في الواجهة لسهولة التخزين والاسترجاع
-  boundaries Json? @default("[]") // الحدود الجغرافية [{ direction: "شمالاً", desc: "...", length: 45.2 }]
+  boundaries Json? @default("[]")
 
   // --- 4. المواصفات الهندسية والمساحات ---
   totalArea        Float?
   coverageRatio    Float?
-  far              Float? // معامل البناء F.A.R
+  far              Float?
   floorsAbove      Int?
   floorsBelow      Int?
   parkingRequired  Int?
   parkingAvailable Int?
 
-  floorAreas Json? @default("[]") // مساحات الأدوار [{ floor: "الأرضي", area: 14100 }]
-  setbacks   Json? @default("[]") // الارتدادات [{ direction: "شمال", required: 6, implemented: 6, status: "مطابق" }]
+  floorAreas Json? @default("[]")
+  setbacks   Json? @default("[]")
 
   // --- 5. الأطراف المهنية والملاحظات ---
-  designerOfficeId String?
-  designerOffice   IntermediaryOffice? @relation("ArchivedDesigner", fields: [designerOfficeId], references: [id])
+  designerOfficeId   String?
+  designerOffice     IntermediaryOffice? @relation("ArchivedDesigner", fields: [designerOfficeId], references: [id])
+  designerOfficeName String? // 👈 حقل جديد: لحفظ اسم المكتب المصمم المستخرج من الذكاء الاصطناعي قبل الربط
 
-  supervisorOfficeId String?
-  supervisorOffice   IntermediaryOffice? @relation("ArchivedSupervisor", fields: [supervisorOfficeId], references: [id])
+  supervisorOfficeId   String?
+  supervisorOffice     IntermediaryOffice? @relation("ArchivedSupervisor", fields: [supervisorOfficeId], references: [id])
+  supervisorOfficeName String? // 👈 حقل جديد: لحفظ اسم المكتب المشرف المستخرج من الذكاء الاصطناعي قبل الربط
 
   archiveNotes String? @db.Text
 
   // --- 6. حالة تحليل الذكاء الاصطناعي (Gemini) ---
-  aiConfidence Float? // نسبة التعبئة (مثال: 92.0)
-  aiStatus     String @default("pending") // pending, completed, needs_review, merged
+  aiConfidence Float?
+  aiStatus     String @default("pending")
 
   // --- التتبع والعلاقات الإدارية ---
   archivedById String?
   archivedBy   Employee? @relation("EmployeeArchivedProjects", fields: [archivedById], references: [id])
+
+  approvedById String?
+  approvedBy   Employee? @relation("ProjectApprover", fields: [approvedById], references: [id])
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -3479,4 +3488,20 @@ model ArchivedProjectFile {
 
   isAiAnalyzed Boolean  @default(false)
   uploadedAt   DateTime @default(now())
+}
+
+model SystemNotification {
+  id      String  @id @default(cuid())
+  title   String // عنوان الإشعار
+  message String  @db.Text // تفاصيل الإشعار
+  type    String  @default("info") // أنواع: success, warning, error, info
+  isRead  Boolean @default(false) // حالة القراءة
+
+  // ربط الإشعار بالموظف المعني
+  userId String
+  user   Employee @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
 }
