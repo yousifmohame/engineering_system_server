@@ -118,6 +118,8 @@ model Employee {
   // --- المعاملات ---
   transactionAssignments TransactionEmployee[]
   quotationTemplates     QuotationTemplate[]
+
+  archivedProjects ArchivedProject[] @relation("EmployeeArchivedProjects")
 }
 
 // نموذج لسجل الحضور
@@ -341,6 +343,7 @@ model Client {
   TransactionFolder     TransactionFolder[]
   transactionOwnerships TransactionOwner[]
   OfficeTask            OfficeTask[]
+  archivedProjects      ArchivedProject[]
 }
 
 model ClientClassification {
@@ -1350,6 +1353,7 @@ model RiyadhDistrict {
   auditLogs           Json?                @default("[]") // لتخزين سجل التعديلات
   attachments         Attachment[] // ربط المرفقات
   privateTransactions PrivateTransaction[] @relation("DistrictPrivateTransactions")
+  archivedProjects    ArchivedProject[]
 }
 
 model RiyadhStreet {
@@ -2229,9 +2233,11 @@ model IntermediaryOffice {
   // علاقة مع المعاملات (يجب أن يكون لديك حقل officeId في جدول PrivateTransaction)
   // transactions    PrivateTransaction[] 
 
-  createdAt          DateTime             @default(now())
-  updatedAt          DateTime             @updatedAt
-  PrivateTransaction PrivateTransaction[]
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+  PrivateTransaction   PrivateTransaction[]
+  archivedAsDesigner   ArchivedProject[]    @relation("ArchivedDesigner")
+  archivedAsSupervisor ArchivedProject[]    @relation("ArchivedSupervisor")
 }
 
 model OfficeContact {
@@ -3383,4 +3389,94 @@ model DocumentedRecord {
 enum StampType {
   NONE
   SECURE_QR
+}
+
+// ===============================================
+// 📁 نظام أرشفة المشاريع والمشاريع المرجعية
+// ===============================================
+
+model ArchivedProject {
+  id              String  @id @default(cuid())
+  archiveCode     String  @unique // الترقيم الموحد (مثال: ARC-2023-001)
+  title           String // اسم المشروع
+  projectType     String // نوع المشروع (سكني، تجاري، متعدد الاستخدامات)
+  transactionType String? // نوع المعاملة
+
+  // --- 1. بيانات المالك (الارتباط بجدول العملاء الحالي) ---
+  clientId      String?
+  client        Client? @relation(fields: [clientId], references: [id])
+  ownerType     String? // اعتباري (شركة) / طبيعي (أفراد)
+  contactMobile String?
+  poBox         String?
+
+  // --- 2. الرخص والصكوك القانونية ---
+  licenseNumber     String?
+  licenseIssueDate  DateTime? @db.Date
+  licenseExpiryDate DateTime? @db.Date
+  deedNumber        String?
+  deedDate          DateTime? @db.Date
+
+  // --- 3. الموقع والمحددات المكانية ---
+  city       String          @default("الرياض")
+  districtId String?
+  district   RiyadhDistrict? @relation(fields: [districtId], references: [id]) // الارتباط بجدول أحياء الرياض
+  planNumber String?
+  plots      String[] // أرقام القطع
+  mainStreet String?
+
+  // تم استخدام Json للجداول المعقدة في الواجهة لسهولة التخزين والاسترجاع
+  boundaries Json? @default("[]") // الحدود الجغرافية [{ direction: "شمالاً", desc: "...", length: 45.2 }]
+
+  // --- 4. المواصفات الهندسية والمساحات ---
+  totalArea        Float?
+  coverageRatio    Float?
+  far              Float? // معامل البناء F.A.R
+  floorsAbove      Int?
+  floorsBelow      Int?
+  parkingRequired  Int?
+  parkingAvailable Int?
+
+  floorAreas Json? @default("[]") // مساحات الأدوار [{ floor: "الأرضي", area: 14100 }]
+  setbacks   Json? @default("[]") // الارتدادات [{ direction: "شمال", required: 6, implemented: 6, status: "مطابق" }]
+
+  // --- 5. الأطراف المهنية والملاحظات ---
+  designerOfficeId String?
+  designerOffice   IntermediaryOffice? @relation("ArchivedDesigner", fields: [designerOfficeId], references: [id])
+
+  supervisorOfficeId String?
+  supervisorOffice   IntermediaryOffice? @relation("ArchivedSupervisor", fields: [supervisorOfficeId], references: [id])
+
+  archiveNotes String? @db.Text
+
+  // --- 6. حالة تحليل الذكاء الاصطناعي (Gemini) ---
+  aiConfidence Float? // نسبة التعبئة (مثال: 92.0)
+  aiStatus     String @default("pending") // pending, completed, needs_review, merged
+
+  // --- التتبع والعلاقات الإدارية ---
+  archivedById String?
+  archivedBy   Employee? @relation("EmployeeArchivedProjects", fields: [archivedById], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  files ArchivedProjectFile[]
+
+  @@index([clientId])
+  @@index([districtId])
+  @@index([archiveCode])
+}
+
+model ArchivedProjectFile {
+  id                String          @id @default(cuid())
+  archivedProjectId String
+  archivedProject   ArchivedProject @relation(fields: [archivedProjectId], references: [id], onDelete: Cascade)
+
+  fileName     String
+  originalName String
+  fileUrl      String
+  fileType     String // pdf, dwg, png
+  fileSize     Int // الحجم بالبايت
+
+  isAiAnalyzed Boolean  @default(false)
+  uploadedAt   DateTime @default(now())
 }
