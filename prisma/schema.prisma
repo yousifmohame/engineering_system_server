@@ -3419,6 +3419,8 @@ model ArchivedProject {
   deedNumber        String?
   deedDate          DateTime? @db.Date
 
+  licenseHijriYear String?
+
   // --- 3. الموقع والمحددات المكانية ---
   city         String          @default("الرياض")
   districtId   String?
