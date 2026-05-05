@@ -1,7 +1,7 @@
 const { PrismaClient } = require("@prisma/client");
 const fs = require("fs");
 const { GoogleGenAI } = require("@google/genai");
-
+const path = require("path");
 // 👈 1. استيراد دالة الإشعارات (تأكد من صحة المسار حسب هيكل مشروعك)
 const { createSystemNotification } = require("./notificationController");
 
@@ -470,10 +470,17 @@ exports.getAllArchivedProjects = async (req, res) => {
     const projects = await prisma.archivedProject.findMany({
       orderBy: { createdAt: "desc" },
       include: {
+        // 1. جلب اسم العميل
         client: { select: { name: true } },
+        // 👉 2. (هنا كان النقص) جلب اسم الموظف الذي قام بالأرشفة
+        archivedBy: { select: { name: true } },
+        // 👉 3. (إضافة مفيدة) جلب اسم الموظف الذي قام بالاعتماد إذا احتجت عرضه
+        approvedBy: { select: { name: true } },
+        // 4. جلب عدد الملفات
         _count: { select: { files: true } },
       },
     });
+    
     return res.status(200).json({ success: true, data: projects });
   } catch (error) {
     console.error("Error fetching projects:", error);
@@ -495,5 +502,128 @@ exports.deleteArchivedProject = async (req, res) => {
     return res
       .status(500)
       .json({ success: false, message: "حدث خطأ أثناء الحذف" });
+  }
+};
+
+// ============================================================================
+// 4. مسارات إدارة المرفقات (الملفات)
+// ============================================================================
+
+// 1. رفع ملف جديد لمشروع موجود
+exports.uploadArchiveFile = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const file = req.file; // نفترض أنك تستخدم مكتبة مثل Multer لرفع ملف واحد
+
+    if (!file) {
+      return res.status(400).json({ success: false, message: "لم يتم إرفاق أي ملف." });
+    }
+
+    // التأكد من أن المشروع موجود
+    const projectExists = await prisma.archivedProject.findUnique({
+      where: { id: projectId }
+    });
+
+    if (!projectExists) {
+      return res.status(404).json({ success: false, message: "المشروع غير موجود." });
+    }
+
+    // إنشاء سجل للملف الجديد في قاعدة البيانات
+    // ملاحظة: تأكد أن اسم الجدول `archivedProjectFile` يطابق الموجود في schema.prisma لديك
+    const newFile = await prisma.archivedProjectFile.create({
+      data: {
+        archivedProjectId: projectId,
+        fileName: file.filename,
+        originalName: file.originalname,
+        fileUrl: `/uploads/archived_projects/${file.filename}`,
+        fileType: file.mimetype,
+        fileSize: file.size,
+      }
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: "تم رفع الملف بنجاح",
+      data: newFile
+    });
+
+  } catch (error) {
+    console.error("Error uploading file:", error);
+    return res.status(500).json({ success: false, message: "حدث خطأ أثناء رفع الملف." });
+  }
+};
+
+// 2. تعديل اسم ملف
+exports.renameArchiveFile = async (req, res) => {
+  try {
+    const { fileId } = req.params;
+    const { originalName } = req.body;
+
+    if (!originalName || originalName.trim() === "") {
+      return res.status(400).json({ success: false, message: "اسم الملف الجديد مطلوب." });
+    }
+
+    // تحديث الاسم في قاعدة البيانات
+    const updatedFile = await prisma.archivedProjectFile.update({
+      where: { id: fileId },
+      data: { originalName: originalName.trim() }
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "تم تغيير اسم الملف بنجاح",
+      data: updatedFile
+    });
+
+  } catch (error) {
+    console.error("Error renaming file:", error);
+    if (error.code === 'P2025') {
+      return res.status(404).json({ success: false, message: "الملف غير موجود." });
+    }
+    return res.status(500).json({ success: false, message: "حدث خطأ أثناء تعديل اسم الملف." });
+  }
+};
+
+// 3. حذف ملف (من قاعدة البيانات ومن القرص الصلب)
+exports.deleteArchiveFile = async (req, res) => {
+  try {
+    const { fileId } = req.params;
+
+    // 1. البحث عن الملف للحصول على مساره الفيزيائي
+    const fileRecord = await prisma.archivedProjectFile.findUnique({
+      where: { id: fileId }
+    });
+
+    if (!fileRecord) {
+      return res.status(404).json({ success: false, message: "الملف غير موجود." });
+    }
+
+    // 2. حذفه من قاعدة البيانات
+    await prisma.archivedProjectFile.delete({
+      where: { id: fileId }
+    });
+
+    // 3. حذفه من القرص الصلب (Server Storage) لتوفير المساحة
+    // يتم بناء المسار بناءً على مسار مجلد uploads لديك
+    // افترضنا أن مجلد المرفقات موجود في المسار الرئيسي للمشروع داخل مجلد public أو uploads
+    try {
+      const physicalPath = path.join(__dirname, "../../", fileRecord.fileUrl); 
+      if (fs.existsSync(physicalPath)) {
+        fs.unlinkSync(physicalPath); // أمر الحذف الفعلي
+        console.log(`تم حذف الملف الفيزيائي: ${fileRecord.fileName}`);
+      }
+    } catch (fsError) {
+      console.error("خطأ أثناء حذف الملف فيزيائياً (تم حذفه من الداتا بيز فقط):", fsError);
+      // لا نوقف العملية إذا فشل الحذف الفيزيائي فقط
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "تم حذف الملف بنجاح"
+    });
+
+  } catch (error) {
+    console.error("Error deleting file:", error);
+    return res.status(500).json({ success: false, message: "حدث خطأ أثناء حذف الملف." });
   }
 };
