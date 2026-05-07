@@ -33,10 +33,10 @@ const storage = multer.diskStorage({
   },
 });
 
-// ج) تهيئة Multer مع إضافة حد أقصى لحجم الملف (50 ميجا للملف الواحد)
+// ج) تهيئة Multer مع إضافة حد أقصى لحجم الملف (300 ميجا للملف الواحد)
 const upload = multer({ 
   storage: storage,
-  limits: { fileSize: 50 * 1024 * 1024 } // 50MB
+  limits: { fileSize: 300 * 1024 * 1024 } // 300MB
 });
 
 // ==========================================
@@ -68,7 +68,9 @@ router.put("/:id", archivedProjectController.updateArchivedProject);
 // مسار حذف مشروع مؤرشف بالكامل (مع ملفاته)
 router.delete("/:id", archivedProjectController.deleteArchivedProject);
 
+router.post("/:id/reanalyze", archivedProjectController.reanalyzeProject);
 
+router.post("/:currentProjectId/merge", archivedProjectController.mergeProjects);
 // ==========================================
 // 🔗 5. مسارات إدارة المرفقات الفردية (Files Routes)
 // ==========================================

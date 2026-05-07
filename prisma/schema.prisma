@@ -3419,6 +3419,11 @@ model ArchivedProject {
   deedNumber        String?
   deedDate          DateTime? @db.Date
 
+  requestNumber String?
+  requestYear   String?
+  serviceNumber String?
+  serviceYear   String?
+
   licenseHijriYear String?
 
   // --- 3. الموقع والمحددات المكانية ---
