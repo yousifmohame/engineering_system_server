@@ -76,8 +76,13 @@ router.post("/:currentProjectId/merge", archivedProjectController.mergeProjects)
 // ==========================================
 
 // مسار رفع ملف إضافي جديد لمشروع موجود (نستخدم upload.single لاستقبال ملف واحد)
-router.post("/:projectId/files", upload.single("file"), archivedProjectController.uploadArchiveFile);
-
+router.post(
+  "/:projectId/files",
+  // 💡 هنا السر: يجب استخدام array('files') وليس single('file') 
+  // ليطابق formData.append("files", file) في الفرونت إند
+  upload.array("files", 20),
+  archivedProjectController.uploadArchiveFile
+);
 // مسار تعديل اسم ملف موجود في الأرشيف
 router.put("/files/:fileId", archivedProjectController.renameArchiveFile);
 

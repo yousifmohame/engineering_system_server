@@ -521,16 +521,35 @@ const createPlan = async (req, res) => {
   try {
     const data = req.body;
 
-    // 1. توليد كود داخلي (مثال: PLAN-001)
-    const count = await prisma.riyadhPlan.count();
-    const internalCode = `PLAN-${String(count + 1).padStart(3, "0")}`;
-
+    // 1. تحديد رقم المخطط النهائي للبحث عنه
     const finalPlanNumber = data.isWithout
       ? "بدون"
       : data.planNumber ||
         data.name ||
         `مؤقت-${Math.floor(Math.random() * 1000)}`;
 
+    // ==========================================
+    // 🛡️ بوابة التفتيش: البحث أولاً لحل مشكلة P2002 والربط التلقائي
+    // ==========================================
+    const existingPlan = await prisma.riyadhPlan.findUnique({
+      where: { planNumber: finalPlanNumber }
+    });
+
+    // إذا كان المخطط مسجلاً مسبقاً، نرجعه فوراً بنجاح لكي تكتمل عملية الربط بالواجهة
+    if (existingPlan) {
+      return res.status(200).json({
+        success: true,
+        message: "المخطط موجود مسبقاً وتم جلبه بنجاح",
+        data: existingPlan 
+      });
+    }
+    // ==========================================
+
+    // 2. توليد كود داخلي للمخطط الجديد (مثال: PLAN-001)
+    const count = await prisma.riyadhPlan.count();
+    const internalCode = `PLAN-${String(count + 1).padStart(3, "0")}`;
+
+    // 3. إنشاء المخطط الجديد بالبيانات المرسلة
     const newPlan = await prisma.riyadhPlan.create({
       data: {
         planNumber: finalPlanNumber,
@@ -579,7 +598,7 @@ const createPlan = async (req, res) => {
         files: {
           create:
             data.files?.map((f) => ({
-              url: f.url, // حالياً نخزن الرابط المؤقت أو الـ Base64
+              url: f.url,
               name: f.name,
               desc: f.desc,
               type: f.type,
@@ -589,17 +608,20 @@ const createPlan = async (req, res) => {
       include: { districts: true, streets: true, files: true },
     });
 
-    res.status(201).json(newPlan);
+    // إرجاع النتيجة متوافقة مع الفرونت إند (مغلفة بـ data)
+    res.status(201).json({ success: true, data: newPlan });
+
   } catch (error) {
     console.error("🔥 Create Plan Error:", error);
     if (error.code === "P2002") {
       return res
         .status(400)
-        .json({ message: "رقم المخطط مسجل مسبقاً بالنظام!" });
+        .json({ success: false, message: "رقم المخطط مسجل مسبقاً بالنظام!" });
     }
-    res.status(500).json({ message: "فشل إنشاء المخطط", error: error.message });
+    res.status(500).json({ success: false, message: "فشل إنشاء المخطط", error: error.message });
   }
 };
+
 
 // تحديث مخطط
 const updatePlan = async (req, res) => {

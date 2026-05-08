@@ -44,6 +44,10 @@ function ensureUploadsDirectory() {
   });
 }
 
+// استدعاء عامل الذكاء الاصطناعي ليعمل في الخلفية
+require('./src/queue/aiWorker');
+require('./src/queue/optimizationWorker');
+
 async function startServer() {
   try {
     // 1. التأكد من المجلدات

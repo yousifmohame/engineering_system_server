@@ -1296,8 +1296,9 @@ model RiyadhPlan {
   specialRegulations Json?            @default("[]")
 
   // 🚀 --- العلاقات الجديدة ---
-  streets RiyadhPlanStreet[]
-  files   RiyadhPlanFile[]
+  streets  RiyadhPlanStreet[]
+  files    RiyadhPlanFile[]
+  projects ArchivedProject[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -2083,6 +2084,9 @@ model SystemSettings {
   // الحسابات الخاصة
   specialAccounts Json? @default("[{\"id\":1,\"systemName\":\"حسابات العبودي\",\"reportName\":\"العبودي\"},{\"id\":2,\"systemName\":\"حسابات إبراهيم الراجحي\",\"reportName\":\"إبراهيم الراجحي\"},{\"id\":3,\"systemName\":\"حسابات أحمد طلعت\",\"reportName\":\"أحمد طلعت\"},{\"id\":4,\"systemName\":\"حسابات محمد فؤاد\",\"reportName\":\"محمد فؤاد\"}]")
 
+  geminiApiKey  String? @db.Text
+  aiConcurrency Int?    @default(3)
+
   updatedAt DateTime @updatedAt
 }
 
@@ -2295,15 +2299,15 @@ model IntermediaryLink {
 model Permit {
   id           String  @id @default(cuid())
   permitNumber String
-  year         Int
-  type         String
-  form         String
+  year         Int? // 👈 جعلناه اختيارياً
+  hijriYear    String? // 👈 تمت الإضافة (مهم جداً لمنع التكرار)
+  type         String? // 👈 جعلناه اختيارياً
+  form         String? // 👈 جعلناه اختيارياً
   ownerName    String
   idNumber     String?
 
-  // 💡 [احترافي] تواريخ الرخصة
-  issueDate  String? // تاريخ الإصدار
-  expiryDate String? // تاريخ الانتهاء الهجري
+  issueDate  String?
+  expiryDate String?
 
   district          String?
   sector            String?
@@ -2312,7 +2316,7 @@ model Permit {
   usage             String?
   landArea          Float?
   engineeringOffice String?
-  source            String
+  source            String? // 👈 جعلناه اختيارياً
   qrStatus          String  @default("غير متوفر")
   aiStatus          String  @default("غير مطبق")
   copies            Int     @default(1)
@@ -3431,10 +3435,15 @@ model ArchivedProject {
   districtId   String?
   district     RiyadhDistrict? @relation(fields: [districtId], references: [id])
   districtName String? // 👈 حقل جديد: لحفظ اسم الحي المستخرج من الذكاء الاصطناعي قبل الربط
-  planNumber   String?
-  plots        String[] // أرقام القطع
-  mainStreet   String?
-  sectorName   String?
+  mapUrl       String?         @db.Text
+
+  planNumber String?
+  planId     String?
+  plan       RiyadhPlan? @relation(fields: [planId], references: [id])
+
+  plots      String[] // أرقام القطع
+  mainStreet String?
+  sectorName String?
 
   boundaries Json? @default("[]")
 
@@ -3511,4 +3520,53 @@ model SystemNotification {
   createdAt DateTime @default(now())
 
   @@index([userId])
+}
+
+// ============================================================================
+// 🤖 جداول إدارة الذكاء الاصطناعي والطوابير (AI & Queue Management)
+// ============================================================================
+
+// 2. جدول مهام الذكاء الاصطناعي (لتتبع كل ملف يدخل السيرفر)
+model AiJob {
+  id        String  @id @default(uuid())
+  bullJobId String? @unique // رقم المهمة الفعلي في مكتبة BullMQ
+
+  // نوع المهمة (مثال: ANALYZE_ARCHIVE أو MATCH_CONTRACT)
+  jobType String
+
+  // حالة المهمة: PENDING, PROCESSING, COMPLETED, FAILED
+  status String @default("PENDING")
+
+  // نسبة الإنجاز (لتشغيل شريط التحميل في الواجهة الأمامية)
+  progress Int @default(0)
+
+  // معرف العنصر المستهدف (مثلاً: ID الخاص بالمشروع المؤرشف)
+  targetId   String?
+  targetType String? // نوع المستهدف (مثال: ARCHIVED_PROJECT)
+
+  // حفظ الأخطاء إن وجدت لكي يقرأها المبرمج أو تظهر في لوحة التحكم
+  errorMessage String? @db.Text
+
+  // من هو الموظف الذي طلب هذا التحليل؟ (لإرسال إشعار له عند الانتهاء)
+  requestedBy String?
+
+  // توقيتات لقياس سرعة الذكاء الاصطناعي
+  startedAt   DateTime?
+  completedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// 3. جدول الإحصائيات اليومية للذكاء الاصطناعي (اختياري ولكنه ممتاز للـ Dashboard)
+model AiDailyStat {
+  id            String   @id @default(uuid())
+  date          DateTime @unique @default(now()) @db.Date // تاريخ اليوم
+  totalJobs     Int      @default(0) // إجمالي الملفات التي دخلت اليوم
+  successJobs   Int      @default(0) // ما تم بنجاح
+  failedJobs    Int      @default(0) // ما فشل
+  totalApiCalls Int      @default(0) // عدد الطلبات المرسلة لجوجل (لمراقبة الاستهلاك)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }

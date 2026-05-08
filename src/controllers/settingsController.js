@@ -1,6 +1,6 @@
 const { PrismaClient } = require("@prisma/client");
 const prisma = new PrismaClient();
-
+const { encrypt, decrypt } = require("../utils/cryptoUtils");
 
 // جلب الإعدادات
 const getSettings = async (req, res) => {
@@ -9,6 +9,16 @@ const getSettings = async (req, res) => {
     if (!settings) {
       settings = await prisma.systemSettings.create({ data: { id: 1 } });
     }
+
+    if (settings.geminiApiKey) {
+      const decryptedKey = decrypt(settings.geminiApiKey);
+      // إرسال أول 6 حروف فقط والباقي نجوم لحمايته من المتطفلين
+      settings.geminiApiKey =
+        decryptedKey && decryptedKey.length > 10
+          ? decryptedKey.substring(0, 6) + "************************"
+          : "";
+    }
+
     res.json({ success: true, data: settings });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -19,6 +29,17 @@ const getSettings = async (req, res) => {
 const updateSettings = async (req, res) => {
   try {
     const data = req.body;
+
+    let finalApiKey = undefined;
+    if (data.geminiApiKey) {
+      // إذا كان المفتاح المرسل يحتوي على نجوم (***)، فهذا يعني أن المستخدم لم يغيره، فلا نحفظه حتى لا يتدمر
+      if (data.geminiApiKey.includes("***")) {
+        delete data.geminiApiKey;
+      } else {
+        // إذا كتب المستخدم مفتاحاً جديداً، نقوم بتشفيره!
+        finalApiKey = encrypt(data.geminiApiKey);
+      }
+    }
 
     const settings = await prisma.systemSettings.upsert({
       where: { id: 1 },
@@ -46,14 +67,27 @@ const updateSettings = async (req, res) => {
           ? parseFloat(data.officeShareManualVal)
           : undefined,
         specialAccounts: data.specialAccounts, // Json
+        aiConcurrency: data.aiConcurrency
+          ? parseInt(data.aiConcurrency)
+          : undefined,
+
+        ...(finalApiKey !== undefined && { geminiApiKey: finalApiKey }),
       },
-      create: { id: 1, ...data },
+      create: {
+        id: 1,
+        ...data,
+        aiConcurrency: data.aiConcurrency ? parseInt(data.aiConcurrency) : 1,
+        geminiApiKey: finalApiKey,
+      },
     });
 
     res.json({
       success: true,
       message: "تم تحديث الإعدادات بنجاح",
-      data: settings,
+      data: {
+        ...settings,
+        geminiApiKey: settings.geminiApiKey ? "AIzaSy***" : null,
+      },
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -63,13 +97,13 @@ const updateSettings = async (req, res) => {
 const getSidebarSettings = async (req, res) => {
   try {
     let settings = await prisma.sidebarSettings.findUnique({
-      where: { id: 1 }
+      where: { id: 1 },
     });
 
     // إذا لم يكن هناك إعدادات مسبقة، قم بإنشاء الإعدادات الافتراضية
     if (!settings) {
       settings = await prisma.sidebarSettings.create({
-        data: { id: 1 }
+        data: { id: 1 },
       });
     }
 
@@ -84,8 +118,17 @@ const getSidebarSettings = async (req, res) => {
 const updateSidebarSettings = async (req, res) => {
   try {
     // 💡 استخراج الحقول بدقة لمنع بريسما من محاولة تحديث الـ id
-    const { bgColor, textColor, activeColor, width, logoUrl, categoryOrder, customLabels, itemOrder } = req.body;
-    
+    const {
+      bgColor,
+      textColor,
+      activeColor,
+      width,
+      logoUrl,
+      categoryOrder,
+      customLabels,
+      itemOrder,
+    } = req.body;
+
     const updatedSettings = await prisma.sidebarSettings.upsert({
       where: { id: 1 },
       update: {
@@ -96,26 +139,34 @@ const updateSidebarSettings = async (req, res) => {
         logoUrl,
         categoryOrder: categoryOrder || [],
         customLabels: customLabels || {},
-        itemOrder: itemOrder || {}
+        itemOrder: itemOrder || {},
       },
-      create: { 
-        id: 1, 
-        bgColor: bgColor || "#293241", 
-        textColor: textColor || "#cbd5e1", 
-        activeColor: activeColor || "#2563eb", 
-        width: parseInt(width) || 280, 
+      create: {
+        id: 1,
+        bgColor: bgColor || "#293241",
+        textColor: textColor || "#cbd5e1",
+        activeColor: activeColor || "#2563eb",
+        width: parseInt(width) || 280,
         logoUrl: logoUrl || "/logo.jpeg",
         categoryOrder: categoryOrder || [],
         customLabels: customLabels || {},
-        itemOrder: itemOrder || {}
-      }
+        itemOrder: itemOrder || {},
+      },
     });
 
     res.json(updatedSettings);
   } catch (error) {
     console.error("خطأ في حفظ إعدادات المظهر:", error);
-    res.status(500).json({ error: "فشل تحديث إعدادات القائمة الجانبية", details: error.message });
+    res.status(500).json({
+      error: "فشل تحديث إعدادات القائمة الجانبية",
+      details: error.message,
+    });
   }
 };
 
-module.exports = { getSettings, updateSettings, getSidebarSettings, updateSidebarSettings };
+module.exports = {
+  getSettings,
+  updateSettings,
+  getSidebarSettings,
+  updateSidebarSettings,
+};
