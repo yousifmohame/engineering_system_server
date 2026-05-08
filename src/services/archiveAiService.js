@@ -296,7 +296,7 @@ exports.processArchiveJob = async (jobData, updateProgress) => {
         deedDate: extractedData.deedDate
           ? new Date(extractedData.deedDate)
           : null,
-        city: extractedData.city,
+        city: extractedData.city || "الرياض",
         planNumber: extractedData.planNumber,
         plots: extractedData.plots || [],
         mainStreet: extractedData.mainStreet,
