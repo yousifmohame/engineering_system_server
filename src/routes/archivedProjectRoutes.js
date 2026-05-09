@@ -70,7 +70,7 @@ router.delete("/:id", archivedProjectController.deleteArchivedProject);
 
 router.post("/:id/reanalyze", archivedProjectController.reanalyzeProject);
 
-router.post("/:currentProjectId/merge", archivedProjectController.mergeProjects);
+router.post("/:id/merge", archivedProjectController.mergeProjects);
 // ==========================================
 // 🔗 5. مسارات إدارة المرفقات الفردية (Files Routes)
 // ==========================================

@@ -163,12 +163,10 @@ exports.initiateProjectArchive = async (req, res) => {
     }
 
     if (error.code === "P2002") {
-      return res
-        .status(409)
-        .json({
-          success: false,
-          message: "حدث تعارض في النظام، يرجى المحاولة مرة أخرى.",
-        });
+      return res.status(409).json({
+        success: false,
+        message: "حدث تعارض في النظام، يرجى المحاولة مرة أخرى.",
+      });
     }
     return res
       .status(500)
@@ -193,21 +191,17 @@ exports.reanalyzeProject = async (req, res) => {
         .status(404)
         .json({ success: false, message: "المشروع المطلوب غير موجود." });
     if (!project.files || project.files.length === 0)
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "المشروع لا يحتوي على ملفات قابلة للتحليل.",
-        });
+      return res.status(400).json({
+        success: false,
+        message: "المشروع لا يحتوي على ملفات قابلة للتحليل.",
+      });
 
     // التحقق مما إذا كان المشروع قيد التحليل بالفعل لتجنب تكرار المهام
     if (project.aiStatus === "pending" || project.aiStatus === "processing") {
-      return res
-        .status(429)
-        .json({
-          success: false,
-          message: "المشروع قيد التحليل بالفعل، يرجى الانتظار.",
-        });
+      return res.status(429).json({
+        success: false,
+        message: "المشروع قيد التحليل بالفعل، يرجى الانتظار.",
+      });
     }
 
     await prisma.archivedProject.update({
@@ -237,27 +231,24 @@ exports.reanalyzeProject = async (req, res) => {
       { attempts: 3, backoff: { type: "exponential", delay: 5000 } },
     );
 
-    return res
-      .status(200)
-      .json({
-        success: true,
-        message: "تم إدراج المشروع في طابور إعادة التحليل بنجاح.",
-      });
+    return res.status(200).json({
+      success: true,
+      message: "تم إدراج المشروع في طابور إعادة التحليل بنجاح.",
+    });
   } catch (error) {
     console.error("🔥 Error reanalyzing project:", error);
-    return res
-      .status(500)
-      .json({
-        success: false,
-        message: "تعذر بدء عملية إعادة التحليل بسبب خطأ في السيرفر.",
-      });
+    return res.status(500).json({
+      success: false,
+      message: "تعذر بدء عملية إعادة التحليل بسبب خطأ في السيرفر.",
+    });
   }
 };
 
 // 3. دمج المشاريع (آمن بالكامل باستخدام Prisma Transaction)
 exports.mergeProjects = async (req, res) => {
   try {
-    const { currentProjectId } = req.params;
+    // 💡 التعديل هنا: استخدمنا id ليتطابق مع الـ Route
+    const { id } = req.params;
     const { targetArchiveCode } = req.body;
     const employeeId = req.user?.id;
     const compressionLevel = req.body?.compressionLevel || "medium";
@@ -272,7 +263,7 @@ exports.mergeProjects = async (req, res) => {
     }
 
     const currentProject = await prisma.archivedProject.findUnique({
-      where: { id: currentProjectId },
+      where: { id },
       include: { files: true },
     });
 
@@ -289,23 +280,24 @@ exports.mergeProjects = async (req, res) => {
       return res
         .status(404)
         .json({ success: false, message: "المشروع المستهدف غير موجود." });
-    if (currentProjectId === targetProject.id)
+
+    if (id === targetProject.id)
       return res
         .status(400)
         .json({ success: false, message: "لا يمكن دمج المشروع مع نفسه." });
 
     // 🛡️ استخدام Transaction لضمان سلامة البيانات أثناء النقل والحذف
     await prisma.$transaction(async (tx) => {
-      // نقل الملفات
+      // نقل الملفات من المشروع المكرر للقديم
       if (currentProject.files && currentProject.files.length > 0) {
         await tx.archivedProjectFile.updateMany({
-          where: { archivedProjectId: currentProjectId },
+          where: { archivedProjectId: id },
           data: { archivedProjectId: targetProject.id },
         });
       }
 
-      // حذف المشروع القديم
-      await tx.archivedProject.delete({ where: { id: currentProjectId } });
+      // حذف المشروع المكرر
+      await tx.archivedProject.delete({ where: { id } });
 
       // تحديث حالة المشروع الهدف
       await tx.archivedProject.update({
@@ -317,7 +309,7 @@ exports.mergeProjects = async (req, res) => {
       });
     });
 
-    // تسجيل مهمة الذكاء الاصطناعي خارج الـ Transaction
+    // تسجيل مهمة الذكاء الاصطناعي لإعادة تحليل المشروع بعد الدمج
     const aiJob = await prisma.aiJob.create({
       data: {
         jobType: "MERGE_AND_ANALYZE",
@@ -497,12 +489,10 @@ exports.createManualArchive = async (req, res) => {
     });
   } catch (error) {
     console.error("🔥 Error creating manual archive:", error);
-    return res
-      .status(500)
-      .json({
-        success: false,
-        message: "فشل إنشاء السجل اليدوي، حاول مجدداً.",
-      });
+    return res.status(500).json({
+      success: false,
+      message: "فشل إنشاء السجل اليدوي، حاول مجدداً.",
+    });
   }
 };
 
@@ -555,7 +545,7 @@ exports.updateArchivedProject = async (req, res) => {
       "archivedBy",
       "approvedBy",
       "files",
-      "plan"
+      "plan",
     ];
     protectedFields.forEach((field) => delete updateData[field]);
 
@@ -615,6 +605,7 @@ exports.getAllArchivedProjects = async (req, res) => {
       orderBy: { createdAt: "desc" },
       include: {
         client: { select: { name: true } },
+        district: { select: { name: true } },
         archivedBy: { select: { name: true } },
         approvedBy: { select: { name: true } },
         _count: { select: { files: true } },
@@ -680,13 +671,11 @@ exports.renameArchiveFile = async (req, res) => {
       data: { originalName: originalName.trim() },
     });
 
-    return res
-      .status(200)
-      .json({
-        success: true,
-        message: "تم إعادة التسمية بنجاح.",
-        data: updatedFile,
-      });
+    return res.status(200).json({
+      success: true,
+      message: "تم إعادة التسمية بنجاح.",
+      data: updatedFile,
+    });
   } catch (error) {
     console.error("🔥 Error renaming file:", error);
     return res

@@ -535,12 +535,37 @@ const createPlan = async (req, res) => {
       where: { planNumber: finalPlanNumber }
     });
 
-    // إذا كان المخطط مسجلاً مسبقاً، نرجعه فوراً بنجاح لكي تكتمل عملية الربط بالواجهة
+    // إذا كان المخطط مسجلاً مسبقاً (ربما أنشأه الذكاء الاصطناعي بشكل مبدئي)
     if (existingPlan) {
+      // نقوم بتحديثه بالبيانات الجديدة (الخرائط، الشوارع، إلخ)
+      const updatedPlan = await prisma.riyadhPlan.update({
+        where: { id: existingPlan.id },
+        data: {
+          oldNumber: data.oldNumber || existingPlan.oldNumber,
+          status: data.status || existingPlan.status,
+          properties: data.properties ? parseInt(data.properties) : existingPlan.properties,
+          plots: data.plots ? parseInt(data.plots) : existingPlan.plots,
+          hijriYear: data.hijriYear || existingPlan.hijriYear,
+          areaKm: data.areaKm?.toString() || existingPlan.areaKm,
+          areaM: data.areaM?.toString() || existingPlan.areaM,
+          mainUsages: data.mainUsages || existingPlan.mainUsages,
+          subUsages: data.subUsages || existingPlan.subUsages,
+          totalPlots: data.totalPlots ? parseInt(data.totalPlots) : existingPlan.totalPlots,
+          neighborhoods: data.neighborhoods || existingPlan.neighborhoods,
+          officialMapUrl: data.officialMapUrl || existingPlan.officialMapUrl,
+          googleMapUrl: data.googleMapUrl || existingPlan.googleMapUrl,
+          officialMapImage: data.officialMapImage || existingPlan.officialMapImage,
+          googleMapImage: data.googleMapImage || existingPlan.googleMapImage,
+          notes: data.notes || existingPlan.notes,
+          specialRegulations: data.specialRegulations || existingPlan.specialRegulations,
+        },
+        include: { districts: true, streets: true, files: true },
+      });
+
       return res.status(200).json({
         success: true,
-        message: "المخطط موجود مسبقاً وتم جلبه بنجاح",
-        data: existingPlan 
+        message: "المخطط موجود مسبقاً وتم تحديث بياناته بنجاح",
+        data: updatedPlan 
       });
     }
     // ==========================================

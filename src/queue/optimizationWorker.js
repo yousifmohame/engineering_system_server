@@ -20,15 +20,27 @@ const optimizationWorker = new Worker('FILE_OPTIMIZATION_QUEUE', async (job) => 
       // 2. قراءة الحجم الجديد للملف بعد الضغط
       const newSize = fs.statSync(filePath).size;
 
-      // 3. تحديث الحجم في قاعدة البيانات لكي يظهر بشكل صحيح في الواجهة
-      await prisma.archivedProjectFile.update({
-        where: { id: fileId },
-        data: { fileSize: newSize }
-      });
-
-      console.log(`[Optimization Worker] ✅ تم ضغط الملف بنجاح.`);
+      // 3. تحديث الحجم في قاعدة البيانات (مع درع الحماية ضد الحذف المفاجئ)
+      try {
+        await prisma.archivedProjectFile.update({
+          where: { id: fileId },
+          data: { fileSize: newSize }
+        });
+        console.log(`[Optimization Worker] ✅ تم ضغط الملف وتحديث حجمه بنجاح.`);
+      } catch (dbError) {
+        // 🛡️ حماية P2025: إذا لم يجد الملف (تم حذفه أو دمجه)، يتجاهل الخطأ بهدوء
+        if (dbError.code === 'P2025') {
+          console.warn(`[Optimization Worker] ⚠️ تم تجاهل التحديث: الملف (ID: ${fileId}) غير موجود في قاعدة البيانات (ربما تم حذفه مسبقاً).`);
+        } else {
+          // إذا كان خطأ آخر في قاعدة البيانات، نقوم برميه ليتم تسجيله
+          throw dbError;
+        }
+      }
     }
+    
+    // إرجاع نجاح المهمة لكي يقوم BullMQ بإزالتها من الطابور
     return { success: true, fileId };
+    
   } catch (error) {
     console.error(`[Optimization Worker] 🔥 فشل ضغط الملف:`, error);
     throw error;
