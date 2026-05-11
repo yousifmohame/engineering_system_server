@@ -505,11 +505,6 @@ const createStreetQuick = async (req, res) => {
   }
 };
 
-// ===================================================
-// 10. إدارة المخططات التنظيمية (Plans)
-// ===================================================
-
-// جلب جميع المخططات
 // ==========================================
 // جلب جميع المخططات مع كافة تفاصيلها
 // ==========================================
@@ -524,19 +519,31 @@ const getPlans = async (req, res) => {
         files: true, 
         
         // 🚀 3. جلب عدد المشاريع والقطع كإحصائية سريعة
+        RiyadhPlanPlot: { select: { plotNumber: true } },
         _count: {
           select: { 
-            projects: true, 
-            projectPlots: true 
+            projects: true, // عدد المشاريع المرتبطة
+            
+            // 💡 التعديل هنا: نعد القطع من الجدول الرئيسي الجديد للقطع
+            // ملاحظة: إذا كان اسم العلاقة في schema مختلفاً (مثل riyadhPlanPlots)، استخدمه هنا
+            RiyadhPlanPlot: true 
           }
         }
       },
       orderBy: { updatedAt: "desc" },
     });
     
-    // 💡 ملاحظة: حقل specialRegulations هو من نوع JSON، لذا سيتم جلبه تلقائياً بدون include
+    // إعادة تهيئة البيانات ليتعرف عليها الفرونت إند بسهولة (تغيير الاسم من RiyadhPlanPlot إلى projectPlots مؤقتاً لتجنب كسر الواجهة)
+    const formattedPlans = plans.map(plan => ({
+      ...plan,
+      _count: {
+        projects: plan._count?.projects || 0,
+        // نمرر العدد للفرونت إند بنفس الاسم القديم حتى لا تضطر لتعديل الواجهة
+        projectPlots: plan._count?.RiyadhPlanPlot || plan._count?.riyadhPlanPlots || 0 
+      }
+    }));
     
-    res.json(plans);
+    res.json(formattedPlans);
   } catch (error) {
     console.error("Get Plans Error:", error);
     res.status(500).json({ message: "فشل جلب المخططات", error: error.message });
@@ -1577,65 +1584,67 @@ const getPlanPlotsDetails = async (req, res) => {
   }
 };
 
-// ---------------------------------------------------
-// 📊 تطوير جلب الإحصائيات (Stats Overview)
-// ---------------------------------------------------
+// ==========================================
+// 🚀 جلب إحصائيات المخطط (Overview Stats)
+// ==========================================
 const getPlanStats = async (req, res) => {
   try {
     const { planNumber } = req.query;
 
     if (!planNumber) {
-      return res.status(400).json({ message: "رقم المخطط مطلوب" });
+      return res.status(400).json({ success: false, message: "رقم المخطط مطلوب." });
     }
 
-    // جلب البيانات من 3 مصادر مختلفة لتعطي صورة كاملة
-    const [properties, transactions, aiProjects] = await Promise.all([
-      // 1. الملكيات
-      prisma.ownershipFile.count({ where: { planNumber } }),
-      // 2. المعاملات الخاصة
-      prisma.privateTransaction.findMany({
-        where: { planNumber },
-        select: { status: true, plots: true },
-      }),
-      // 3. مشاريع الأرشيف (الذكاء الاصطناعي)
-      prisma.archivedProject.findMany({
-        where: { planNumber },
-        select: { projectPlots: { select: { plotNumber: true } } },
-      }),
-    ]);
-
-    // حساب حالات المعاملات
-    let statusCounts = { completed: 0, pending: 0, draft: 0, cancelled: 0 };
-    let uniquePlots = new Set();
-
-    transactions.forEach((tx) => {
-      const st = (tx.status || "").toLowerCase();
-      if (st.includes("مكتمل") || st.includes("completed"))
-        statusCounts.completed++;
-      else if (st.includes("جديد") || st.includes("draft"))
-        statusCounts.draft++;
-      else if (st.includes("ملغ") || st.includes("cancelled"))
-        statusCounts.cancelled++;
-      else statusCounts.pending++;
-
-      if (Array.isArray(tx.plots)) tx.plots.forEach((p) => uniquePlots.add(p));
+    // 1. البحث عن المخطط وجلب أعداد العلاقات الصحيحة من الجداول الجديدة
+    const plan = await prisma.riyadhPlan.findFirst({
+      where: { planNumber: planNumber },
+      include: {
+        _count: {
+          select: {
+            RiyadhPlanPlot: true, // 👈 جلب عدد القطع من الجدول الرئيسي الجديد للقطع
+            projects: true,       // 👈 جلب عدد المشاريع (الرخص) المرتبطة بالمخطط
+          }
+        }
+      }
     });
 
-    // إضافة القطع المستخرجة من الأرشيف لمجموعة القطع الفريدة
-    aiProjects.forEach((proj) => {
-      proj.projectPlots.forEach((p) => uniquePlots.add(p.plotNumber));
+    if (!plan) {
+      return res.status(404).json({ success: false, message: "المخطط غير موجود." });
+    }
+
+    // 2. جلب المشاريع المرتبطة بهذا المخطط لحساب تفاصيل إضافية (مثل نوع المشاريع)
+    const projects = await prisma.archivedProject.findMany({
+      where: { planId: plan.id },
+      select: { projectType: true, totalArea: true }
     });
 
-    res.json({
-      propertiesCount: properties,
-      plotsWithTransactions: uniquePlots.size,
-      statusCounts,
-      // يمكن إضافة قوائم كاملة إذا لزم الأمر
+    // 3. حساب بعض الإحصائيات الذكية
+    let residentialCount = 0;
+    let commercialCount = 0;
+    let totalProjectsArea = 0;
+
+    projects.forEach(p => {
+      if (p.projectType && p.projectType.includes("سكني")) residentialCount++;
+      if (p.projectType && p.projectType.includes("تجاري")) commercialCount++;
+      totalProjectsArea += Number(p.totalArea) || 0;
     });
+
+    // 4. بناء كائن الإحصائيات النهائي
+    const stats = {
+      planAreaM: plan.areaM || 0, // مساحة المخطط الإجمالية
+      totalPlotsExpected: plan.totalPlots || 0, // عدد القطع المدخل يدوياً في معلومات المخطط
+      registeredPlots: plan._count?.RiyadhPlanPlot || 0, // القطع المسجلة فعلياً في النظام
+      totalProjects: plan._count?.projects || 0, // المعاملات المؤرشفة
+      residentialCount,
+      commercialCount,
+      totalProjectsArea,
+    };
+
+    return res.status(200).json({ success: true, data: stats });
+
   } catch (error) {
-    res
-      .status(500)
-      .json({ message: "خطأ في الإحصائيات", error: error.message });
+    console.error("🔥 Stats Overview Error:", error);
+    return res.status(500).json({ success: false, message: "حدث خطأ داخلي أثناء حساب الإحصائيات." });
   }
 };
 
