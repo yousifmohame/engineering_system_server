@@ -71,6 +71,8 @@ router.delete("/:id", archivedProjectController.deleteArchivedProject);
 router.post("/:id/reanalyze", archivedProjectController.reanalyzeProject);
 
 router.post("/:id/merge", archivedProjectController.mergeProjects);
+// مسار الربط الآلي (يجب أن يكون قبل المسارات التي تحتوي على :id عامة لتجنب التداخل إن وجد)
+router.post('/:id/auto-link', archivedProjectController.autoLinkEntity);
 // ==========================================
 // 🔗 5. مسارات إدارة المرفقات الفردية (Files Routes)
 // ==========================================

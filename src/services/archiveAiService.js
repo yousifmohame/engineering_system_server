@@ -17,6 +17,58 @@ const normalizeArabic = (text) => {
     .trim();
 };
 
+// ============================================================================
+// 🚀 دالة الإدخال التسلسلي الآمن (Concurrency-Safe Sequential Insert)
+// تحل مشكلة الـ Race Conditions عند محاولة الذكاء الاصطناعي إدخال بيانات متزامنة
+// وتضمن تسلسل احترافي لأكواد العملاء والمخططات والقطع
+// ============================================================================
+const createWithSequentialCode = async (
+  modelName,
+  codeField,
+  prefix,
+  dataObj,
+  digits = 3,
+) => {
+  let retries = 5; // عدد محاولات إعادة الإدخال في حال التصادم
+
+  while (retries > 0) {
+    try {
+      // 1. جلب آخر سجل تم إنشاؤه لمعرفة آخر رقم
+      const lastRecord = await prisma[modelName].findFirst({
+        where: { [codeField]: { startsWith: prefix } },
+        orderBy: { createdAt: "desc" },
+      });
+
+      let nextNum = 1;
+      if (lastRecord && lastRecord[codeField]) {
+        // استخراج الرقم من نهاية الكود
+        const parts = lastRecord[codeField].split("-");
+        nextNum = parseInt(parts[parts.length - 1], 10) + 1;
+      }
+
+      // 2. بناء الكود الجديد المنسق
+      const newCode = `${prefix}${String(nextNum).padStart(digits, "0")}`;
+
+      // 3. المحاولة بإدخال السجل في قاعدة البيانات
+      const insertData = { ...dataObj, [codeField]: newCode };
+      const result = await prisma[modelName].create({ data: insertData });
+
+      return result; // نجحت العملية، نخرج من الحلقة
+    } catch (error) {
+      if (error.code === "P2002") {
+        // حدث تصادم (عامل آخر حجز الرقم في نفس اللحظة)، ننتظر وقتاً عشوائياً صغيراً ونحاول مجدداً
+        retries--;
+        await new Promise((res) => setTimeout(res, Math.random() * 150));
+      } else {
+        throw error; // خطأ آخر غير التكرار، نوقفه
+      }
+    }
+  }
+  throw new Error(
+    `فشل إنشاء كود تسلسلي لجدول ${modelName} بسبب الضغط المتزامن الكثيف.`,
+  );
+};
+
 exports.processArchiveJob = async (jobData, updateProgress) => {
   const { projectId } = jobData;
   const uploadedGeminiFiles = [];
@@ -267,13 +319,16 @@ exports.processArchiveJob = async (jobData, updateProgress) => {
           );
         });
 
-        if (matchedClient) autoClientId = matchedClient.id;
-        else {
-          const clientCount = await prisma.client.count();
-          const autoClientCode = `CLT-${new Date().getFullYear()}-${String(clientCount + 1).padStart(3, "0")}`;
-          const newClient = await prisma.client.create({
-            data: {
-              clientCode: autoClientCode,
+        if (matchedClient) {
+          autoClientId = matchedClient.id;
+        } else {
+          // 🚀 التعديل الهام للعميل: استخدام الدالة التسلسلية الآمنة بدلاً من count()
+          const currentYear = new Date().getFullYear();
+          const newClient = await createWithSequentialCode(
+            "client",
+            "clientCode",
+            `CLT-${currentYear}-`,
+            {
               name: { ar: finalOwnerName, en: finalOwnerName },
               type: finalOwnerType,
               mobile:
@@ -292,7 +347,8 @@ exports.processArchiveJob = async (jobData, updateProgress) => {
                 gregorianDate: "",
               },
             },
-          });
+            3,
+          );
           autoClientId = newClient.id;
         }
       }
@@ -316,30 +372,29 @@ exports.processArchiveJob = async (jobData, updateProgress) => {
         }
       }
 
-      // -- 🚀 التعديل 3: المعالجة الذكية للمخطط (لا ننشئ مخطط "بدون" عشوائياً) --
+      // -- 🚀 التعديل 3: المعالجة الذكية للمخطط باستخدام الدالة التسلسلية --
       if (planNumStr) {
         if (isWithoutPlan) {
-          // إذا كان بدون، سنحاول البحث عن مخطط مسبق تم تسجيله كـ "بدون" لربطه به مؤقتاً، أو نتركه فارغاً ليقوم المهندس بإجباره
           const existingWithoutPlan = await prisma.riyadhPlan.findFirst({
             where: { isWithout: true },
           });
           if (existingWithoutPlan) autoPlanId = existingWithoutPlan.id;
         } else {
-          // مخطط عادي مرقم
           let plan = await prisma.riyadhPlan.findFirst({
             where: { planNumber: planNumStr },
           });
           if (!plan) {
-            // 🚀 التصحيح: استخدام طابع زمني ورقم عشوائي لضمان عدم التكرار نهائياً
-            const uniqueInternalCode = `PLAN-${Date.now().toString().slice(-5)}${Math.floor(Math.random() * 1000)}`;
-
-            plan = await prisma.riyadhPlan.create({
-              data: {
+            // 🚀 استخدام الدالة التسلسلية للمخطط
+            plan = await createWithSequentialCode(
+              "riyadhPlan",
+              "internalCode",
+              "PLAN-",
+              {
                 planNumber: planNumStr,
-                internalCode: uniqueInternalCode,
                 status: "معتمد",
               },
-            });
+              4,
+            );
           }
           autoPlanId = plan.id;
         }
@@ -382,11 +437,10 @@ exports.processArchiveJob = async (jobData, updateProgress) => {
     await updateProgress(95);
 
     // =========================================================
-    // 🚀 التعديل 4: إنشاء القطع الحقيقية (Master Plots) والربط
+    // 🚀 التعديل 4: إنشاء القطع الحقيقية (Master Plots) والربط باستخدام الدالة التسلسلية
     // =========================================================
     const validPlots = (extractedData.plots || []).filter((plotVal) => {
       const cleanVal = String(plotVal).trim();
-      // استبعاد أي قطعة فارغة أو تحتوي على كلمات تدل على عدم وجودها
       return (
         cleanVal !== "" &&
         cleanVal !== "0" &&
@@ -399,37 +453,35 @@ exports.processArchiveJob = async (jobData, updateProgress) => {
 
     let projectPlotsData = undefined;
 
-    // إذا كان لدينا مخطط معتمد، وقطع حقيقية صالحة
     if (autoPlanId && validPlots.length > 0 && !isWithoutPlan) {
       const plotIdsToConnect = [];
 
       for (const plotNum of validPlots) {
         const cleanPlotNum = String(plotNum).trim();
 
-        // 1. نبحث: هل القطعة موجودة مسبقاً في هذا المخطط؟
         let plotRecord = await prisma.riyadhPlanPlot.findUnique({
           where: {
             plotNumber_planId: { plotNumber: cleanPlotNum, planId: autoPlanId },
           },
         });
 
-        // 2. إذا لم تكن موجودة: ننشئها ونعطيها كوداً مميزاً
         if (!plotRecord) {
-          const autoCode = `PLT-${Date.now().toString().slice(-5)}${Math.floor(Math.random() * 1000)}`;
-          plotRecord = await prisma.riyadhPlanPlot.create({
-            data: {
+          // 🚀 استخدام الدالة التسلسلية للقطع
+          plotRecord = await createWithSequentialCode(
+            "riyadhPlanPlot",
+            "plotCode",
+            "PLT-",
+            {
               plotNumber: cleanPlotNum,
-              plotCode: autoCode,
               planId: autoPlanId,
             },
-          });
+            5,
+          );
         }
 
-        // 3. نجهز ID القطعة الحقيقي لربطه بالمعاملة
         plotIdsToConnect.push({ plotId: plotRecord.id });
       }
 
-      // 4. بناء هيكل الربط لقاعدة البيانات
       projectPlotsData = {
         deleteMany: {},
         create: plotIdsToConnect,
@@ -478,7 +530,7 @@ exports.processArchiveJob = async (jobData, updateProgress) => {
           : null,
         city: extractedData.city || "الرياض",
         planNumber: extractedData.planNumber,
-        plots: extractedData.plots || [], // نحتفظ بالنص كنسخة بسيطة دائماً
+        plots: extractedData.plots || [],
         mainStreet: extractedData.mainStreet,
         boundaries: extractedData.boundaries || [],
         totalArea: extractedData.totalArea,
@@ -490,10 +542,10 @@ exports.processArchiveJob = async (jobData, updateProgress) => {
         parkingAvailable: extractedData.parkingAvailable,
         floorAreas: extractedData.floorAreas || [],
         setbacks: extractedData.setbacks || [],
-        archiveNotes: finalArchiveNotes, // 👈 هنا سيظهر التحذير الصارخ
+        archiveNotes: finalArchiveNotes,
         aiConfidence: extractedData.aiConfidence || 0,
 
-        // 🚀 التعديل 5: تغيير الحالة إلى "معلق" (Pending) بدلاً من مكتمل إذا كان المخطط بدون لنجبر المستخدم على مراجعته
+        // تغيير الحالة إلى "معلق" (Pending) بدلاً من مكتمل إذا كان المخطط بدون لنجبر المستخدم على مراجعته
         aiStatus: isWithoutPlan ? "pending_review" : "completed",
 
         clientId: autoClientId || undefined,

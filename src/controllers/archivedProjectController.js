@@ -785,3 +785,121 @@ exports.deleteArchiveFile = async (req, res) => {
     return res.status(500).json({ success: false, message: "فشل حذف الملف." });
   }
 };
+
+// ============================================================================
+// 🚀 دالة الربط الذكي للكيانات (Auto-Linker)
+// ============================================================================
+const normalizeArabicText = (text) => {
+  if (!text) return "";
+  return text
+    .replace(/[أإآ]/g, "ا")
+    .replace(/ة/g, "ه")
+    .replace(/ال/g, "")
+    .replace(/(شركة|مؤسسة|مكتب|للاستشارات|الهندسية|حي|مخطط)/g, "")
+    .replace(/\s+/g, "")
+    .trim();
+};
+
+exports.autoLinkEntity = async (req, res) => {
+  try {
+    const { type, name } = req.body;
+    
+    if (!type || !name) {
+      return res.status(400).json({ success: false, message: "بيانات الربط ناقصة." });
+    }
+
+    const cleanTarget = normalizeArabicText(name);
+    let matchedId = null;
+
+    switch (type) {
+      case "client":
+        const clients = await prisma.client.findMany();
+        let matchedClient = clients.find((c) => {
+          const cName = typeof c.name === "object" ? c.name?.ar : c.name;
+          const cleanDb = normalizeArabicText(cName);
+          return cleanDb === cleanTarget || (cleanDb.length > 4 && cleanTarget.includes(cleanDb));
+        });
+
+        // 🚀 السحر هنا: إذا لم يجد العميل، سيقوم بإنشائه فوراً!
+        if (!matchedClient) {
+          const currentYear = new Date().getFullYear();
+          const uniqueCode = `CLT-${currentYear}-${Date.now().toString().slice(-4)}${Math.floor(Math.random() * 100)}`;
+          
+          // ذكاء إضافي: تحديد هل هو فرد أم شركة بناءً على اسمه
+          const isCompany = ["شركة", "مؤسسة", "م مكتب", "بنك", "وزارة", "هيئة", "اوقاف"].some((kw) => name.includes(kw));
+          const ownerType = isCompany ? "اعتباري (شركة)" : "طبيعي (أفراد)";
+
+          matchedClient = await prisma.client.create({
+            data: {
+              clientCode: uniqueCode,
+              name: { ar: String(name).trim(), en: String(name).trim() },
+              type: ownerType,
+              // أرقام افتراضية مؤقتة ليقبلها النظام حتى يقوم الموظف بتحديثها لاحقاً
+              mobile: `05000${Math.floor(1000 + Math.random() * 9000)}`,
+              idNumber: `10000${Math.floor(10000 + Math.random() * 90000)}`,
+              contact: { email: "", phone: "", address: "الرياض" },
+              identification: { age: null, birthPlace: "", hijriDate: "", gregorianDate: "" },
+            },
+          });
+        }
+        
+        matchedId = matchedClient.id;
+        break;
+
+      case "district":
+        const districts = await prisma.riyadhDistrict.findMany();
+        const matchedDist = districts.find((d) => {
+          const cleanDb = normalizeArabicText(d.name);
+          return cleanDb === cleanTarget || cleanDb.includes(cleanTarget) || cleanTarget.includes(cleanDb);
+        });
+        if (matchedDist) matchedId = matchedDist.id;
+        break;
+
+      case "plan":
+        let plan = await prisma.riyadhPlan.findFirst({
+          where: { planNumber: String(name).trim() },
+        });
+        
+        // 🚀 السحر هنا: إذا لم يجد المخطط في النظام، سيقوم بإنشائه فوراً!
+        if (!plan) {
+          const uniqueInternalCode = `PLAN-${Date.now().toString().slice(-5)}${Math.floor(Math.random() * 1000)}`;
+          plan = await prisma.riyadhPlan.create({
+            data: {
+              planNumber: String(name).trim(),
+              internalCode: uniqueInternalCode,
+              status: "معتمد", // حالة افتراضية
+            }
+          });
+        }
+        
+        matchedId = plan.id;
+        break;
+
+      case "designer":
+      case "supervisor":
+        const offices = await prisma.intermediaryOffice.findMany();
+        const matchedOffice = offices.find((o) => {
+          const oName = o.nameAr || (typeof o.name === "object" ? o.name?.ar : o.name) || "";
+          const cleanDb = normalizeArabicText(oName);
+          return cleanDb === cleanTarget || (cleanDb.length > 4 && cleanTarget.includes(cleanDb));
+        });
+        if (matchedOffice) matchedId = matchedOffice.id;
+        break;
+
+      default:
+        return res.status(400).json({ success: false, message: "نوع الربط غير مدعوم." });
+    }
+
+    if (matchedId) {
+      return res.status(200).json({ success: true, id: matchedId });
+    } else {
+      // 🚀 التعديل هنا: نرجع 200 بدلاً من 404 حتى لا يعتبره Axios خطأ برمجي (Exception)
+      // وبهذا الشكل سيدخل الفرونت إند في الـ (else) ويطبع رسالة عدم العثور بشكل أنيق
+      return res.status(200).json({ success: false, message: "لم يتم العثور على تطابق في النظام." });
+    }
+
+  } catch (error) {
+    console.error("🔥 Auto-Link Error:", error);
+    return res.status(500).json({ success: false, message: "حدث خطأ في السيرفر أثناء محاولة الربط." });
+  }
+};
