@@ -16,6 +16,7 @@ const {
   reanalyzeReference,
   updateReference,
   updateReferenceStatus,
+  analyzeReferenceAsync, // 👈 1. استيراد الدالة الجديدة الخاصة بالطابور
 } = require("../controllers/referenceController");
 
 // إعدادات Multer لرفع الملفات بأمان
@@ -40,6 +41,12 @@ const upload = multer({
 
 // حماية المسارات
 router.use(protect);
+
+// ==========================================
+// 💡 المسار الجديد للرفع السريع والتحليل في الخلفية
+// (تم وضعه هنا لكي لا يتعارض مع مسار /:id أسفله)
+// ==========================================
+router.post("/analyze-async", upload.single("file"), analyzeReferenceAsync);
 
 // مسارات المكتبة المرجعية
 router

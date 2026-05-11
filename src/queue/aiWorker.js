@@ -7,6 +7,7 @@ const { createSystemNotification } = require("../controllers/notificationControl
 // 💡 استيراد خدمات الذكاء الاصطناعي المختلفة (Services)
 const archiveAiService = require('../services/archiveAiService');
 const permitAiService = require('../services/permitAiService'); // 👈 1. تمت إضافة خدمة الرخص هنا
+const referenceAiService = require('../services/referenceAiService');
 // const contractAiService = require('../services/contractAiService'); // مستقبلاً
 // const aiMatchingService = require('../services/aiMatchingService'); // مستقبلاً
 
@@ -62,6 +63,13 @@ const aiWorker = new Worker('AI_PROCESSING_QUEUE', async (job) => {
       case 'MATCH_DOCUMENTS':
         // result = await aiMatchingService.processMatchingJob(job.data, updateProgress);
         break;
+
+      case "ANALYZE_REFERENCE":
+          result = await referenceAiService.processReferenceJob(
+            job.data,
+            updateProgress
+          );
+          break;
 
       default:
         throw new Error(`نوع المهمة غير معروف: ${jobType}`);
