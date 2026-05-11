@@ -6,7 +6,6 @@ const { decrypt } = require("../utils/cryptoUtils");
 
 const prisma = new PrismaClient();
 
-// 💡 دالة لتنظيف وتوحيد النصوص العربية لزيادة دقة المطابقة كخطة بديلة (Fallback)
 const normalizeArabic = (text) => {
   if (!text) return "";
   return text
@@ -37,7 +36,7 @@ exports.processArchiveJob = async (jobData, updateProgress) => {
 
     ai = new GoogleGenAI({
       apiKey,
-      httpOptions: { timeout: 120000 }, // مهلة رفع واسعة للمخططات الكبيرة
+      httpOptions: { timeout: 600000 },
     });
 
     const project = await prisma.archivedProject.findUnique({
@@ -63,23 +62,18 @@ exports.processArchiveJob = async (jobData, updateProgress) => {
 
     await updateProgress(15);
 
-    // =========================================================
-    // 🧠 1. تجهيز عقل الذكاء الاصطناعي (Dynamic Context Injection)
-    // =========================================================
-    // نجلب أسماء الأحياء المعتمدة من قاعدة البيانات ونرسلها كدليل إرشادي لـ Gemini
-    let validDistrictsList = "الرياض، العليا، الملقا، الياسمين"; // قيم افتراضية
+    let validDistrictsList = "الرياض، العليا، الملقا، الياسمين";
     try {
       const allDistricts = await prisma.riyadhDistrict.findMany({
         select: { name: true },
       });
-      if (allDistricts.length > 0) {
+      if (allDistricts.length > 0)
         validDistrictsList = allDistricts.map((d) => d.name).join("، ");
-      }
     } catch (e) {
       console.warn("Could not load districts for AI prompt, using defaults.");
     }
 
-    // بناء الـ Prompt الديناميكي
+    // 🚀 التعديل 1: السماح بأرقام القطع النصية والمخططات "بدون" في الـ Prompt
     const DYNAMIC_SYSTEM_PROMPT = `
 أنت مهندس استشاري وخبير قانوني عقاري في المملكة العربية السعودية، تعمل كنظام استخراج بيانات (Data Extractor) عالي الدقة.
 مهمتك هي تحليل المستندات المرفقة للمشروع واستخراج البيانات المعمارية والقانونية المطلوبة بدقة متناهية.
@@ -87,39 +81,39 @@ exports.processArchiveJob = async (jobData, updateProgress) => {
 ⚠️ قائمة الأحياء المعتمدة بالنظام:
 [${validDistrictsList}]
 
-القواعد الأساسية الصارمة:
-1. استخراج الحي (districtName): ابحث في المستند، ثم اختر الاسم المطابق من "قائمة الأحياء المعتمدة" المرفقة أعلاه. (مثال: إذا قرأت "مخطط الملقى"، اكتب "الملقا" لتطابق القائمة).
-2. استخرج البيانات بناءً على الهيكل المطلوب أدناه فقط. وإذا لم تكن المعلومة موجودة، قم بإرجاع القيمة null للنصوص و 0 للأرقام.
-3. الأرقام: حول أي رقم هندي (١،٢،٣) إلى إنجليزي (1,2,3).
-4. المساحات والأطوال: استخرج الرقم فقط (Float).
+القواعد الأساسية:
+1. إذا كان المخطط مسجل باسم "بدون"، فاكتب "بدون" صراحة في الحقل planNumber. وإذا كان هناك "رمز" أو "بلك" مرافق له، اكتبه (مثال: "بدون - بلك أ").
+2. أرقام القطع قد تكون أرقاماً (15, 16) أو نصوصاً وصفية (القطعة الشمالية، الجزء الغربي). استخرجها كما هي وضعها كمصفوفة نصوص في الحقل plots.
+3. استخرج الحي (districtName) بما يطابق القائمة المرفقة.
+4. إذا لم تكن المعلومة موجودة، أرجع null للنصوص و 0 للأرقام. حول الأرقام الهندية (١،٢) إلى إنجليزية (1,2).
 
 يجب أن يكون الناتج حصرياً بصيغة JSON متوافق تماماً مع هذا الهيكل:
 {
-  "title": "اسم المشروع أو وصفه العام المستنتج",
-  "projectType": "سكني أو تجاري أو متعدد الاستخدامات أو صناعي",
-  "transactionType": "إصدار رخصة، أو تعديل مكونات، أو إضافة ملحق، أو فرز...",
+  "title": "اسم المشروع",
+  "projectType": "سكني أو تجاري...",
+  "transactionType": "إصدار رخصة...",
   "ownerNames": ["اسم المالك الأول"],
-  "ownerType": "اعتباري (إذا كان شركة/مؤسسة) أو طبيعي (إذا كان أفراد)",
-  "contactMobile": "أي رقم جوال مسجل للمالك",
-  "poBox": "صندوق البريد أو الرمز البريدي إن وجد",
-  "requestNumber": "رقم الطلب (إن وجد)",
-  "requestYear": "سنة الطلب (إن وجدت)",
-  "serviceNumber": "رقم الخدمة (إن وجد)",
-  "serviceYear": "سنة الخدمة (إن وجدت)",
+  "ownerType": "اعتباري أو طبيعي",
+  "contactMobile": "رقم الجوال",
+  "poBox": "صندوق البريد",
+  "requestNumber": "رقم الطلب",
+  "requestYear": "سنة الطلب",
+  "serviceNumber": "رقم الخدمة",
+  "serviceYear": "سنة الخدمة",
   "licenseNumber": "رقم رخصة البناء",
-  "licenseHijriYear": "سنة إصدار الرخصة بالهجري",
-  "licenseIssueDate": "تاريخ إصدار الرخصة (YYYY-MM-DD)",
-  "licenseExpiryDate": "تاريخ انتهاء الرخصة (YYYY-MM-DD)",
-  "deedNumber": "رقم صك الملكية",
-  "deedDate": "تاريخ الصك (YYYY-MM-DD)",
-  "city": "المدينة (غالباً الرياض)",
-  "sectorName": "القطاع الإداري",
-  "districtName": "اسم الحي المستخرج والمطابق للقائمة المعتمدة",
-  "planNumber": "رقم المخطط المعتمد",
-  "plots": ["رقم القطعة الأولى"],
-  "mainStreet": "اسم الشارع الرئيسي وعرضه",
-  "designerOfficeNames": ["المكتب المصمم الأول"],
-  "supervisorOfficeNames": ["المكتب المشرف الأول"],
+  "licenseHijriYear": "سنة الإصدار بالهجري",
+  "licenseIssueDate": "تاريخ إصدار الرخصة",
+  "licenseExpiryDate": "تاريخ انتهاء الرخصة",
+  "deedNumber": "رقم الصك",
+  "deedDate": "تاريخ الصك",
+  "city": "المدينة",
+  "sectorName": "القطاع",
+  "districtName": "اسم الحي",
+  "planNumber": "رقم المخطط أو كلمة 'بدون'",
+  "plots": ["رقم القطعة 1", "القطعة الشمالية"],
+  "mainStreet": "الشارع الرئيسي",
+  "designerOfficeNames": ["المصمم"],
+  "supervisorOfficeNames": ["المشرف"],
   "totalArea": 0,
   "coverageRatio": 0,
   "far": 0,
@@ -129,13 +123,12 @@ exports.processArchiveJob = async (jobData, updateProgress) => {
   "parkingAvailable": 0,
   "boundaries": [{ "direction": "شمالاً", "desc": "وصف الجار", "length": 0 }],
   "floorAreas": [{ "floor": "اسم الدور", "area": 0 }],
-  "setbacks": [{ "direction": "الجهة", "required": 0, "implemented": 0, "status": "مطابق أو مخالف" }],
-  "archiveNotes": "ملاحظات عامة واحترافية",
+  "setbacks": [{ "direction": "الجهة", "required": 0, "implemented": 0, "status": "مطابق" }],
+  "archiveNotes": "ملاحظات",
   "aiConfidence": 0
 }
 `;
 
-    // 2. رفع الملفات لجوجل
     for (const file of analyzableFiles) {
       const filePath = path.join(__dirname, "../../", file.fileUrl);
       if (fs.existsSync(filePath)) {
@@ -152,11 +145,9 @@ exports.processArchiveJob = async (jobData, updateProgress) => {
       throw new Error("فشل رفع الملفات لجيميناي.");
     await updateProgress(45);
 
-    // 3. التحدث مع جيميناي باستخدام الـ Prompt الديناميكي
     const fileParts = uploadedGeminiFiles.map((f) => ({
       fileData: { fileUri: f.uri, mimeType: f.mimeType },
     }));
-
     const response = await ai.models.generateContent({
       model: "gemini-2.5-pro",
       contents: [
@@ -164,7 +155,7 @@ exports.processArchiveJob = async (jobData, updateProgress) => {
         ...fileParts,
       ],
       config: {
-        systemInstruction: DYNAMIC_SYSTEM_PROMPT, // 👈 استخدام الـ Prompt الجديد
+        systemInstruction: DYNAMIC_SYSTEM_PROMPT,
         temperature: 0.1,
         responseMimeType: "application/json",
       },
@@ -172,7 +163,6 @@ exports.processArchiveJob = async (jobData, updateProgress) => {
 
     await updateProgress(70);
 
-    // 4. معالجة البيانات وتنظيفها
     let responseText = response.text || "";
     responseText = responseText
       .replace(/```json/gi, "")
@@ -187,7 +177,7 @@ exports.processArchiveJob = async (jobData, updateProgress) => {
       extractedData.ownerNames.length > 0
         ? extractedData.ownerNames.join(" - ")
         : extractedData.ownerName || "غير محدد";
-    const isCompany = ["شركة", "مؤسسة", "مكتب", "بنك", "وزارة", "هيئة"].some(
+    const isCompany = ["شركة", "مؤسسة", "م مكتب", "بنك", "وزارة", "هيئة"].some(
       (kw) => finalOwnerName.includes(kw),
     );
     const finalOwnerType = isCompany ? "اعتباري (شركة)" : "طبيعي (أفراد)";
@@ -222,7 +212,6 @@ exports.processArchiveJob = async (jobData, updateProgress) => {
       }
     }
 
-    // رادار التكرار
     let duplicateWarning = "";
     if (
       extractedData.licenseNumber &&
@@ -234,51 +223,38 @@ exports.processArchiveJob = async (jobData, updateProgress) => {
           licenseNumber: String(extractedData.licenseNumber).trim(),
         },
       });
-      if (existingByLicense) {
+      if (existingByLicense)
         duplicateWarning += `⚠️ تنبيه تكرار قوي: مشروع مسبق برمز (${existingByLicense.archiveCode}) برقم الرخصة ذاته!\n\n`;
-      }
     }
+
+    // 🚀 التعديل 2: تحديد ما إذا كان المخطط "بدون" وإضافة رسالة تخزق العين في الملاحظات!
+    let isWithoutPlan = false;
+    let planNumStr = extractedData.planNumber
+      ? String(extractedData.planNumber).trim()
+      : null;
+
     if (
-      extractedData.planNumber &&
-      Array.isArray(extractedData.plots) &&
-      extractedData.plots.length > 0
+      planNumStr &&
+      (planNumStr === "بدون" || planNumStr.includes("بدون مخطط"))
     ) {
-      const projectsWithSamePlan = await prisma.archivedProject.findMany({
-        where: {
-          id: { not: projectId },
-          planNumber: String(extractedData.planNumber).trim(),
-        },
-      });
-      const extractedPlotsStr = extractedData.plots.map((p) =>
-        String(p).trim(),
-      );
-      for (const proj of projectsWithSamePlan) {
-        const dbPlots = Array.isArray(proj.plots)
-          ? proj.plots.map((p) => String(p).trim())
-          : [];
-        if (extractedPlotsStr.some((plot) => dbPlots.includes(plot))) {
-          duplicateWarning += `⚠️ تنبيه تكرار موقع: مشروع برمز (${proj.archiveCode}) يتقاطع في أرقام القطع!\n\n`;
-          break;
-        }
-      }
+      isWithoutPlan = true;
+      duplicateWarning += `🛑 تنبيه هام وعاجل: هذا المخطط مصنف كـ "بدون". يتطلب النظام إدخال رمز المخطط من الخرائط الرسمية أو كود البلك لضمان عدم ضياع المعاملة!\n\n`;
     }
+
     const finalArchiveNotes =
       duplicateWarning + (extractedData.archiveNotes || "");
 
-    // =========================================================
-    // 🤖 5. الأتمتة العميقة للمطابقة والربط الآلي (Fuzzy Match Fallback)
-    // =========================================================
     await updateProgress(85);
 
-    let autoClientId = null;
-    let autoDistrictId = null;
-    let autoSectorId = null;
-    let autoPlanId = null;
-    let autoDesignerId = null;
-    let autoSupervisorId = null;
+    let autoClientId = null,
+      autoDistrictId = null,
+      autoSectorId = null,
+      autoPlanId = null,
+      autoDesignerId = null,
+      autoSupervisorId = null;
 
     try {
-      // -- ربط أو إنشاء المالك (العميل) --
+      // -- ربط المالك --
       if (finalOwnerName && finalOwnerName !== "غير محدد") {
         const cleanOwner = normalizeArabic(finalOwnerName);
         const allClients = await prisma.client.findMany();
@@ -291,14 +267,10 @@ exports.processArchiveJob = async (jobData, updateProgress) => {
           );
         });
 
-        if (matchedClient) {
-          autoClientId = matchedClient.id;
-        } else {
+        if (matchedClient) autoClientId = matchedClient.id;
+        else {
           const clientCount = await prisma.client.count();
-          const currentYear = new Date().getFullYear();
-          const sequentialNumber = String(clientCount + 1).padStart(3, "0");
-          const autoClientCode = `CLT-${currentYear}-${sequentialNumber}`;
-
+          const autoClientCode = `CLT-${new Date().getFullYear()}-${String(clientCount + 1).padStart(3, "0")}`;
           const newClient = await prisma.client.create({
             data: {
               clientCode: autoClientCode,
@@ -318,59 +290,62 @@ exports.processArchiveJob = async (jobData, updateProgress) => {
                 birthPlace: "",
                 hijriDate: "",
                 gregorianDate: "",
-              }, // 👈 إرضاء Prisma الصارم
+              },
             },
           });
           autoClientId = newClient.id;
         }
       }
 
-      // -- ربط الحي وتحديد القطاع --
+      // -- ربط الحي --
       if (extractedData.districtName) {
         const cleanDist = normalizeArabic(extractedData.districtName);
         const allDistricts = await prisma.riyadhDistrict.findMany();
-
         const matchedDist = allDistricts.find((d) => {
           const dNameClean = normalizeArabic(d.name);
-
-          // 🛡️ درع الحماية: إذا كان الحي في الداتابيز فارغاً أو حرفاً واحداً، تجاهله تماماً!
           if (!dNameClean || dNameClean.length < 2) return false;
-
           return (
             dNameClean === cleanDist ||
             dNameClean.includes(cleanDist) ||
             cleanDist.includes(dNameClean)
           );
         });
-
         if (matchedDist) {
           autoDistrictId = matchedDist.id;
           autoSectorId = matchedDist.sectorId;
         }
       }
-      // -- ربط أو إنشاء المخطط (بأرقام القطع) --
-      if (extractedData.planNumber) {
-        const planNumStr = String(extractedData.planNumber).trim();
-        let plan = await prisma.riyadhPlan.findFirst({
-          where: { planNumber: planNumStr },
-        });
 
-        if (!plan) {
-          const count = await prisma.riyadhPlan.count();
-          plan = await prisma.riyadhPlan.create({
-            data: {
-              planNumber: planNumStr,
-              name: planNumStr,
-              internalCode: `PLAN-${String(count + 1).padStart(3, "0")}`,
-              status: "معتمد",
-              city: extractedData.city || "الرياض",
-            },
+      // -- 🚀 التعديل 3: المعالجة الذكية للمخطط (لا ننشئ مخطط "بدون" عشوائياً) --
+      if (planNumStr) {
+        if (isWithoutPlan) {
+          // إذا كان بدون، سنحاول البحث عن مخطط مسبق تم تسجيله كـ "بدون" لربطه به مؤقتاً، أو نتركه فارغاً ليقوم المهندس بإجباره
+          const existingWithoutPlan = await prisma.riyadhPlan.findFirst({
+            where: { isWithout: true },
           });
+          if (existingWithoutPlan) autoPlanId = existingWithoutPlan.id;
+        } else {
+          // مخطط عادي مرقم
+          let plan = await prisma.riyadhPlan.findFirst({
+            where: { planNumber: planNumStr },
+          });
+          if (!plan) {
+            // 🚀 التصحيح: استخدام طابع زمني ورقم عشوائي لضمان عدم التكرار نهائياً
+            const uniqueInternalCode = `PLAN-${Date.now().toString().slice(-5)}${Math.floor(Math.random() * 1000)}`;
+
+            plan = await prisma.riyadhPlan.create({
+              data: {
+                planNumber: planNumStr,
+                internalCode: uniqueInternalCode,
+                status: "معتمد",
+              },
+            });
+          }
+          autoPlanId = plan.id;
         }
-        autoPlanId = plan.id;
       }
 
-      // -- ربط المكاتب الهندسية --
+      // -- ربط المكاتب --
       const linkOffice = async (officeName) => {
         if (!officeName) return null;
         const cleanOffice = normalizeArabic(officeName);
@@ -386,30 +361,80 @@ exports.processArchiveJob = async (jobData, updateProgress) => {
             (cleanDb.length > 4 && cleanOffice.includes(cleanDb))
           );
         });
-
         if (matched) return matched.id;
-
         const newOffice = await prisma.intermediaryOffice.create({
           data: {
             nameAr: officeName,
             nameEn: officeName,
             commercialRegister: "0000000000",
             code: "TMP-" + Date.now() + Math.floor(Math.random() * 100),
+            city: extractedData.city || "الرياض",
           },
         });
         return newOffice.id;
       };
-
       autoDesignerId = await linkOffice(finalDesignerOffice);
       autoSupervisorId = await linkOffice(finalSupervisorOffice);
     } catch (autoLinkError) {
       console.error("Auto Linking Warning (Non-Fatal):", autoLinkError.message);
     }
 
-    // =========================================================
-    // 6. حفظ البيانات النهائية في المشروع
-    // =========================================================
     await updateProgress(95);
+
+    // =========================================================
+    // 🚀 التعديل 4: إنشاء القطع الحقيقية (Master Plots) والربط
+    // =========================================================
+    const validPlots = (extractedData.plots || []).filter((plotVal) => {
+      const cleanVal = String(plotVal).trim();
+      // استبعاد أي قطعة فارغة أو تحتوي على كلمات تدل على عدم وجودها
+      return (
+        cleanVal !== "" &&
+        cleanVal !== "0" &&
+        cleanVal.toLowerCase() !== "null" &&
+        !cleanVal.includes("بدون") &&
+        !cleanVal.includes("لا يوجد") &&
+        !cleanVal.includes("غير محدد")
+      );
+    });
+
+    let projectPlotsData = undefined;
+
+    // إذا كان لدينا مخطط معتمد، وقطع حقيقية صالحة
+    if (autoPlanId && validPlots.length > 0 && !isWithoutPlan) {
+      const plotIdsToConnect = [];
+
+      for (const plotNum of validPlots) {
+        const cleanPlotNum = String(plotNum).trim();
+
+        // 1. نبحث: هل القطعة موجودة مسبقاً في هذا المخطط؟
+        let plotRecord = await prisma.riyadhPlanPlot.findUnique({
+          where: {
+            plotNumber_planId: { plotNumber: cleanPlotNum, planId: autoPlanId },
+          },
+        });
+
+        // 2. إذا لم تكن موجودة: ننشئها ونعطيها كوداً مميزاً
+        if (!plotRecord) {
+          const autoCode = `PLT-${Date.now().toString().slice(-5)}${Math.floor(Math.random() * 1000)}`;
+          plotRecord = await prisma.riyadhPlanPlot.create({
+            data: {
+              plotNumber: cleanPlotNum,
+              plotCode: autoCode,
+              planId: autoPlanId,
+            },
+          });
+        }
+
+        // 3. نجهز ID القطعة الحقيقي لربطه بالمعاملة
+        plotIdsToConnect.push({ plotId: plotRecord.id });
+      }
+
+      // 4. بناء هيكل الربط لقاعدة البيانات
+      projectPlotsData = {
+        deleteMany: {},
+        create: plotIdsToConnect,
+      };
+    }
 
     await prisma.archivedProject.update({
       where: { id: projectId },
@@ -451,9 +476,9 @@ exports.processArchiveJob = async (jobData, updateProgress) => {
         deedDate: extractedData.deedDate
           ? new Date(extractedData.deedDate)
           : null,
-        city: extractedData.city || "الرياض", // 👈 حماية الحقل الإجباري
+        city: extractedData.city || "الرياض",
         planNumber: extractedData.planNumber,
-        plots: extractedData.plots || [],
+        plots: extractedData.plots || [], // نحتفظ بالنص كنسخة بسيطة دائماً
         mainStreet: extractedData.mainStreet,
         boundaries: extractedData.boundaries || [],
         totalArea: extractedData.totalArea,
@@ -465,20 +490,22 @@ exports.processArchiveJob = async (jobData, updateProgress) => {
         parkingAvailable: extractedData.parkingAvailable,
         floorAreas: extractedData.floorAreas || [],
         setbacks: extractedData.setbacks || [],
-        archiveNotes: finalArchiveNotes,
+        archiveNotes: finalArchiveNotes, // 👈 هنا سيظهر التحذير الصارخ
         aiConfidence: extractedData.aiConfidence || 0,
-        aiStatus: "completed",
 
-        // 🚀 المعرفات التي ربطها الذكاء الاصطناعي بنجاح
-        clientId: autoClientId,
-        districtId: autoDistrictId,
-        planId: autoPlanId,
-        designerOfficeId: autoDesignerId,
-        supervisorOfficeId: autoSupervisorId,
+        // 🚀 التعديل 5: تغيير الحالة إلى "معلق" (Pending) بدلاً من مكتمل إذا كان المخطط بدون لنجبر المستخدم على مراجعته
+        aiStatus: isWithoutPlan ? "pending_review" : "completed",
+
+        clientId: autoClientId || undefined,
+        districtId: autoDistrictId || undefined,
+        planId: autoPlanId || undefined,
+        designerOfficeId: autoDesignerId || undefined,
+        supervisorOfficeId: autoSupervisorId || undefined,
+
+        projectPlots: projectPlotsData,
       },
     });
 
-    // 7. إنشاء الرخصة التلقائية
     if (
       extractedData.licenseNumber &&
       extractedData.licenseNumber.trim() !== ""

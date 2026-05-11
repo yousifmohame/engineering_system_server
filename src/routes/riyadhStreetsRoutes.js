@@ -62,6 +62,7 @@ router.get('/plans', controller.getPlans);
 router.post('/plans', controller.createPlan);
 router.put('/plans/:id', controller.updatePlan);
 router.delete('/plans/:id', controller.deletePlan);
+router.get("/plans/:id/plots-details", controller.getPlanPlotsDetails);
 
 // ==========================================
 // 5. التابات التفصيلية (Drill-down Details)

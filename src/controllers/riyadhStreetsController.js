@@ -4,26 +4,36 @@ const path = require("path");
 const { PrismaClient } = require("@prisma/client");
 const prisma = new PrismaClient();
 
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const dir = "uploads/streets";
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true }); // إنشاء المجلد تلقائياً إذا لم يكن موجوداً
-    }
-    cb(null, dir);
-  },
-  filename: (req, file, cb) => {
-    cb(
-      null,
-      Date.now() +
-        "-" +
-        Math.round(Math.random() * 1e9) +
-        path.extname(file.originalname),
-    );
-  },
-});
+// 🪄 دالة سحرية لتحويل Base64 إلى ملف حقيقي على السيرفر
+const saveBase64ToFile = (base64Data, fileName) => {
+  if (!base64Data || !base64Data.startsWith('data:')) return base64Data;
 
-const upload = multer({ storage });
+  try {
+    const matches = base64Data.match(/^data:([A-Za-z-+\/.]+);base64,(.+)$/);
+    if (!matches || matches.length !== 3) return base64Data;
+
+    const fileBuffer = Buffer.from(matches[2], 'base64');
+    const extension = path.extname(fileName) || '.jpg';
+    const uniqueFileName = `${Date.now()}-${Math.round(Math.random() * 1e9)}${extension}`;
+    
+    // 💡 استخدام path.resolve لضمان المسار الصحيح
+    const dir = path.resolve(process.cwd(), 'uploads', 'plans');
+    
+    if (!fs.existsSync(dir)) {
+      console.log("📂 إنشاء مجلد المخططات:", dir);
+      fs.mkdirSync(dir, { recursive: true });
+    }
+
+    const filePath = path.join(dir, uniqueFileName);
+    fs.writeFileSync(filePath, fileBuffer);
+    
+    console.log("✅ تم حفظ الملف بنجاح في:", filePath);
+    return `/uploads/plans/${uniqueFileName}`;
+  } catch (error) {
+    console.error("❌ خطأ فادح أثناء حفظ الملف على القرص:", error); // 👈 هذا السطر سيخبرنا بالسبب الحقيقي
+    return null;
+  }
+};
 
 // توليد كود الشارع تلقائياً
 const generateStreetCode = async () => {
@@ -500,81 +510,83 @@ const createStreetQuick = async (req, res) => {
 // ===================================================
 
 // جلب جميع المخططات
+// ==========================================
+// جلب جميع المخططات مع كافة تفاصيلها
+// ==========================================
 const getPlans = async (req, res) => {
   try {
     const plans = await prisma.riyadhPlan.findMany({
       include: {
-        districts: { select: { name: true } },
-        streets: true, // 👈 جلب الشوارع التابعة للمخطط
-        files: true, // 👈 جلب الملفات التابعة للمخطط
+        // 🚀 1. جلب الشوارع المرتبطة بالمخطط
+        streets: true, 
+        
+        // 🚀 2. جلب الملفات والمرفقات المرتبطة بالمخطط
+        files: true, 
+        
+        // 🚀 3. جلب عدد المشاريع والقطع كإحصائية سريعة
+        _count: {
+          select: { 
+            projects: true, 
+            projectPlots: true 
+          }
+        }
       },
       orderBy: { updatedAt: "desc" },
     });
+    
+    // 💡 ملاحظة: حقل specialRegulations هو من نوع JSON، لذا سيتم جلبه تلقائياً بدون include
+    
     res.json(plans);
   } catch (error) {
+    console.error("Get Plans Error:", error);
     res.status(500).json({ message: "فشل جلب المخططات", error: error.message });
   }
 };
 
 // إنشاء مخطط جديد
+// ==========================================
+// إنشاء مخطط جديد (مع حفظ الملفات الحقيقية)
+// ==========================================
 const createPlan = async (req, res) => {
   try {
+
     const data = req.body;
 
-    // 1. تحديد رقم المخطط النهائي للبحث عنه
     const finalPlanNumber = data.isWithout
       ? "بدون"
       : data.planNumber ||
         data.name ||
         `مؤقت-${Math.floor(Math.random() * 1000)}`;
 
-    // ==========================================
-    // 🛡️ بوابة التفتيش: البحث أولاً لحل مشكلة P2002 والربط التلقائي
-    // ==========================================
     const existingPlan = await prisma.riyadhPlan.findUnique({
-      where: { planNumber: finalPlanNumber }
+      where: { planNumber: finalPlanNumber },
     });
-
-    // إذا كان المخطط مسجلاً مسبقاً (ربما أنشأه الذكاء الاصطناعي بشكل مبدئي)
     if (existingPlan) {
-      // نقوم بتحديثه بالبيانات الجديدة (الخرائط، الشوارع، إلخ)
-      const updatedPlan = await prisma.riyadhPlan.update({
-        where: { id: existingPlan.id },
-        data: {
-          oldNumber: data.oldNumber || existingPlan.oldNumber,
-          status: data.status || existingPlan.status,
-          properties: data.properties ? parseInt(data.properties) : existingPlan.properties,
-          plots: data.plots ? parseInt(data.plots) : existingPlan.plots,
-          hijriYear: data.hijriYear || existingPlan.hijriYear,
-          areaKm: data.areaKm?.toString() || existingPlan.areaKm,
-          areaM: data.areaM?.toString() || existingPlan.areaM,
-          mainUsages: data.mainUsages || existingPlan.mainUsages,
-          subUsages: data.subUsages || existingPlan.subUsages,
-          totalPlots: data.totalPlots ? parseInt(data.totalPlots) : existingPlan.totalPlots,
-          neighborhoods: data.neighborhoods || existingPlan.neighborhoods,
-          officialMapUrl: data.officialMapUrl || existingPlan.officialMapUrl,
-          googleMapUrl: data.googleMapUrl || existingPlan.googleMapUrl,
-          officialMapImage: data.officialMapImage || existingPlan.officialMapImage,
-          googleMapImage: data.googleMapImage || existingPlan.googleMapImage,
-          notes: data.notes || existingPlan.notes,
-          specialRegulations: data.specialRegulations || existingPlan.specialRegulations,
-        },
-        include: { districts: true, streets: true, files: true },
-      });
-
-      return res.status(200).json({
-        success: true,
-        message: "المخطط موجود مسبقاً وتم تحديث بياناته بنجاح",
-        data: updatedPlan 
-      });
+      return res
+        .status(400)
+        .json({ success: false, message: "المخطط موجود مسبقاً." });
     }
-    // ==========================================
 
-    // 2. توليد كود داخلي للمخطط الجديد (مثال: PLAN-001)
-    const count = await prisma.riyadhPlan.count();
-    const internalCode = `PLAN-${String(count + 1).padStart(3, "0")}`;
+    const internalCode = `PLAN-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 100)}`;
 
-    // 3. إنشاء المخطط الجديد بالبيانات المرسلة
+    // 🚀 تحويل الصور والخرائط
+    const officialMapImagePath = saveBase64ToFile(
+      data.officialMapImage,
+      "official_map.jpg",
+    );
+    const googleMapImagePath = saveBase64ToFile(
+      data.googleMapImage,
+      "google_map.jpg",
+    );
+
+    // 🚀 تحويل ومعالجة ملفات المخطط المرفقة
+    const processedFiles = (data.files || []).map((f) => ({
+      url: saveBase64ToFile(f.url, f.name) || f.url, // تحويل للقرص الصلب
+      name: f.name,
+      desc: f.desc || "",
+      type: f.type || "FILE",
+    }));
+
     const newPlan = await prisma.riyadhPlan.create({
       data: {
         planNumber: finalPlanNumber,
@@ -584,8 +596,6 @@ const createPlan = async (req, res) => {
         isWithout: data.isWithout === true || data.isWithout === "true",
         properties: parseInt(data.properties || 0),
         plots: parseInt(data.plots || 0),
-
-        // 🚀 --- الحقول الجديدة ---
         hijriYear: data.hijriYear,
         areaKm: data.areaKm?.toString(),
         areaM: data.areaM?.toString(),
@@ -595,12 +605,14 @@ const createPlan = async (req, res) => {
         neighborhoods: data.neighborhoods,
         officialMapUrl: data.officialMapUrl,
         googleMapUrl: data.googleMapUrl,
-        officialMapImage: data.officialMapImage, // يخزن كـ Base64 طويل
-        googleMapImage: data.googleMapImage, // يخزن كـ Base64 طويل
+
+        // حفظ المسار القصير فقط
+        officialMapImage: officialMapImagePath,
+        googleMapImage: googleMapImagePath,
+
         notes: data.notes,
         specialRegulations: data.specialRegulations || [],
 
-        // ربط الأحياء إن وجدت
         districts:
           data.districtIds &&
           Array.isArray(data.districtIds) &&
@@ -608,7 +620,6 @@ const createPlan = async (req, res) => {
             ? { connect: data.districtIds.map((id) => ({ id })) }
             : undefined,
 
-        // 🚀 --- إنشاء الشوارع الفرعية المرتبطة ---
         streets: {
           create:
             data.streets?.map((s) => ({
@@ -619,40 +630,51 @@ const createPlan = async (req, res) => {
             })) || [],
         },
 
-        // 🚀 --- إنشاء الملفات المرتبطة ---
-        files: {
-          create:
-            data.files?.map((f) => ({
-              url: f.url,
-              name: f.name,
-              desc: f.desc,
-              type: f.type,
-            })) || [],
-        },
+        // 🚀 إدخال الملفات المعالجة
+        files: { create: processedFiles },
       },
       include: { districts: true, streets: true, files: true },
     });
 
-    // إرجاع النتيجة متوافقة مع الفرونت إند (مغلفة بـ data)
     res.status(201).json({ success: true, data: newPlan });
-
   } catch (error) {
     console.error("🔥 Create Plan Error:", error);
-    if (error.code === "P2002") {
-      return res
-        .status(400)
-        .json({ success: false, message: "رقم المخطط مسجل مسبقاً بالنظام!" });
-    }
-    res.status(500).json({ success: false, message: "فشل إنشاء المخطط", error: error.message });
+    res
+      .status(500)
+      .json({
+        success: false,
+        message: "فشل إنشاء المخطط",
+        error: error.message,
+      });
   }
 };
 
-
-// تحديث مخطط
+// ==========================================
+// تحديث مخطط (مع حفظ الملفات الجديدة)
+// ==========================================
 const updatePlan = async (req, res) => {
   try {
     const { id } = req.params;
+
     const data = req.body;
+
+    // 🚀 تحويل الصور والخرائط
+    const officialMapImagePath = saveBase64ToFile(
+      data.officialMapImage,
+      "official_map.jpg",
+    );
+    const googleMapImagePath = saveBase64ToFile(
+      data.googleMapImage,
+      "google_map.jpg",
+    );
+
+    // 🚀 تحويل ومعالجة ملفات المخطط المرفقة
+    const processedFiles = (data.files || []).map((f) => ({
+      url: saveBase64ToFile(f.url, f.name) || f.url,
+      name: f.name,
+      desc: f.desc || "",
+      type: f.type || "FILE",
+    }));
 
     const updatedPlan = await prisma.riyadhPlan.update({
       where: { id },
@@ -663,8 +685,6 @@ const updatePlan = async (req, res) => {
         isWithout: data.isWithout,
         properties: parseInt(data.properties || 0),
         plots: parseInt(data.plots || 0),
-
-        // 🚀 --- الحقول الجديدة ---
         hijriYear: data.hijriYear,
         areaKm: data.areaKm?.toString(),
         areaM: data.areaM?.toString(),
@@ -674,18 +694,17 @@ const updatePlan = async (req, res) => {
         neighborhoods: data.neighborhoods,
         officialMapUrl: data.officialMapUrl,
         googleMapUrl: data.googleMapUrl,
-        officialMapImage: data.officialMapImage,
-        googleMapImage: data.googleMapImage,
+
+        officialMapImage: officialMapImagePath,
+        googleMapImage: googleMapImagePath,
+
         notes: data.notes,
         specialRegulations: data.specialRegulations || [],
 
         districts: data.districtIds
-          ? {
-              set: data.districtIds.map((id) => ({ id })),
-            }
+          ? { set: data.districtIds.map((id) => ({ id })) }
           : undefined,
 
-        // 🚀 --- تحديث الشوارع (مسح القديم وإضافة الجديد بالكامل) ---
         streets: {
           deleteMany: {},
           create:
@@ -697,16 +716,10 @@ const updatePlan = async (req, res) => {
             })) || [],
         },
 
-        // 🚀 --- تحديث الملفات (مسح القديم وإضافة الجديد بالكامل) ---
+        // 🚀 تحديث الملفات بأمان
         files: {
-          deleteMany: {},
-          create:
-            data.files?.map((f) => ({
-              url: f.url,
-              name: f.name,
-              desc: f.desc,
-              type: f.type,
-            })) || [],
+          deleteMany: {}, // يمسح السجلات القديمة من الداتابيز
+          create: processedFiles, // يضيف السجلات الجديدة (التي تتضمن المسارات المحفوظة فعلياً)
         },
       },
       include: { districts: true, streets: true, files: true },
@@ -1493,9 +1506,80 @@ const uploadMedia = async (req, res) => {
   }
 };
 
-// ===================================================
-// جلب إحصائيات وبيانات المخطط التفصيلية
-// ===================================================
+// ==========================================
+// جلب تفاصيل القطع المرتبطة بمخطط معين والمشاريع المقامة عليها
+// ==========================================
+const getPlanPlotsDetails = async (req, res) => {
+  try {
+    const { id } = req.params; // id الخاص بالمخطط
+
+    // 🚀 التعديل الجذري: البحث في جدول القطع الرئيسي (RiyadhPlanPlot) بدلاً من الجدول الوسيط
+    const plots = await prisma.riyadhPlanPlot.findMany({
+      where: {
+        planId: id, // جلب جميع القطع التابعة لهذا المخطط
+      },
+      include: {
+        // جلب المشاريع المرتبطة بهذه القطعة عبر الجدول الوسيط
+        projectPlots: {
+          include: {
+            project: {
+              select: {
+                id: true,
+                clientId: true,
+                licenseNumber: true,
+                licenseHijriYear: true,
+                requestNumber: true,
+                requestYear: true,
+                ownerName: true,
+                archiveCode: true,
+              },
+            },
+          },
+        },
+      },
+      orderBy: {
+        plotNumber: "asc", // الترتيب تصاعدياً حسب رقم القطعة
+      },
+    });
+
+    // 💡 إعادة صياغة البيانات بشكل مسطح (Flat) لتناسب الفرونت إند كما كان متوقعاً سابقاً
+    const formattedPlots = [];
+    
+    plots.forEach(plotRecord => {
+      if (plotRecord.projectPlots && plotRecord.projectPlots.length > 0) {
+        // إذا كان هناك مشاريع مرتبطة بالقطعة
+        plotRecord.projectPlots.forEach(pp => {
+          if (pp.project) {
+            formattedPlots.push({
+              plotId: plotRecord.id,
+              plotNumber: plotRecord.plotNumber,
+              plotCode: plotRecord.plotCode,
+              project: pp.project
+            });
+          }
+        });
+      } else {
+        // إذا كانت القطعة مسجلة ولكن لا يوجد عليها مشروع حالياً
+        formattedPlots.push({
+          plotId: plotRecord.id,
+          plotNumber: plotRecord.plotNumber,
+          plotCode: plotRecord.plotCode,
+          project: null
+        });
+      }
+    });
+
+    res.status(200).json(formattedPlots);
+
+  } catch (error) {
+    console.error("Plots Details Error:", error);
+    res.status(500).json({ success: false, message: "فشل جلب بيانات القطع", error: error.message });
+  }
+};
+
+// ---------------------------------------------------
+// 📊 تطوير جلب الإحصائيات (Stats Overview)
+// ---------------------------------------------------
 const getPlanStats = async (req, res) => {
   try {
     const { planNumber } = req.query;
@@ -1504,66 +1588,54 @@ const getPlanStats = async (req, res) => {
       return res.status(400).json({ message: "رقم المخطط مطلوب" });
     }
 
-    // 1. جلب الملكيات (الصكوك) المرتبطة بالمخطط مع بيانات العميل
-    const properties = await prisma.ownershipFile.findMany({
-      where: { planNumber: planNumber },
-      include: {
-        client: {
-          select: { name: true, clientCode: true },
-        },
-      },
-      orderBy: { createdAt: "desc" },
-    });
+    // جلب البيانات من 3 مصادر مختلفة لتعطي صورة كاملة
+    const [properties, transactions, aiProjects] = await Promise.all([
+      // 1. الملكيات
+      prisma.ownershipFile.count({ where: { planNumber } }),
+      // 2. المعاملات الخاصة
+      prisma.privateTransaction.findMany({
+        where: { planNumber },
+        select: { status: true, plots: true },
+      }),
+      // 3. مشاريع الأرشيف (الذكاء الاصطناعي)
+      prisma.archivedProject.findMany({
+        where: { planNumber },
+        select: { projectPlots: { select: { plotNumber: true } } },
+      }),
+    ]);
 
-    // 2. جلب المعاملات المرتبطة برقم هذا المخطط مع بيانات العميل
-    const transactions = await prisma.privateTransaction.findMany({
-      where: { planNumber: planNumber },
-      include: {
-        client: {
-          select: { name: true, clientCode: true },
-        },
-      },
-      orderBy: { createdAt: "desc" },
-    });
-
-    // حساب الإحصائيات (Counts)
-    let completed = 0,
-      pending = 0,
-      draft = 0,
-      cancelled = 0;
-    let plotsWithTx = new Set();
+    // حساب حالات المعاملات
+    let statusCounts = { completed: 0, pending: 0, draft: 0, cancelled: 0 };
+    let uniquePlots = new Set();
 
     transactions.forEach((tx) => {
-      const st = tx.status || "";
-      if (st.includes("مكتمل") || st.includes("Completed")) completed++;
-      else if (
-        st.includes("جديد") ||
-        st.includes("مسودة") ||
-        st.includes("Draft")
-      )
-        draft++;
-      else if (st.includes("ملغ") || st.includes("Cancelled")) cancelled++;
-      else pending++;
+      const st = (tx.status || "").toLowerCase();
+      if (st.includes("مكتمل") || st.includes("completed"))
+        statusCounts.completed++;
+      else if (st.includes("جديد") || st.includes("draft"))
+        statusCounts.draft++;
+      else if (st.includes("ملغ") || st.includes("cancelled"))
+        statusCounts.cancelled++;
+      else statusCounts.pending++;
 
-      if (tx.plots && Array.isArray(tx.plots)) {
-        tx.plots.forEach((p) => plotsWithTx.add(p));
-      }
+      if (Array.isArray(tx.plots)) tx.plots.forEach((p) => uniquePlots.add(p));
+    });
+
+    // إضافة القطع المستخرجة من الأرشيف لمجموعة القطع الفريدة
+    aiProjects.forEach((proj) => {
+      proj.projectPlots.forEach((p) => uniquePlots.add(p.plotNumber));
     });
 
     res.json({
-      propertiesCount: properties.length,
-      plotsWithTransactions:
-        plotsWithTx.size > 0 ? plotsWithTx.size : transactions.length,
-      statusCounts: { completed, pending, draft, cancelled },
-      // 🚀 إرسال القوائم الكاملة للواجهة
-      transactions: transactions,
-      properties: properties,
+      propertiesCount: properties,
+      plotsWithTransactions: uniquePlots.size,
+      statusCounts,
+      // يمكن إضافة قوائم كاملة إذا لزم الأمر
     });
   } catch (error) {
-    console.error("Plan Stats Error:", error);
     res
       .status(500)
-      .json({ message: "فشل جلب إحصائيات المخطط", error: error.message });
+      .json({ message: "خطأ في الإحصائيات", error: error.message });
   }
 };
 
@@ -1593,5 +1665,6 @@ module.exports = {
   getNodeDetails,
   addNodeDetail,
   uploadMedia,
+  getPlanPlotsDetails,
   getPlanStats,
 };

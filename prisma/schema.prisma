@@ -1263,6 +1263,44 @@ model RiyadhSector {
   attachments    Attachment[] // ربط المرفقات
 }
 
+// 🚀 الجدول الرئيسي للقطع (Master Data for Plots)
+model RiyadhPlanPlot {
+  id         String @id @default(cuid())
+  plotNumber String // رقم القطعة (مثلاً: 15 أو القطعة الشمالية)
+  plotCode   String @unique // 👈 كود البحث المميز (مثال: PLT-8374-12)
+
+  planId String
+  plan   RiyadhPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  // العلاقات (كل قطعة يمكن أن ترتبط بعدة مشاريع عبر الجدول الوسيط)
+  projectPlots ProjectPlot[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // 🛡️ حماية: لا يمكن تكرار نفس رقم القطعة داخل نفس المخطط
+  @@unique([plotNumber, planId])
+}
+
+// 🚀 الجدول الوسيط (بين المشروع والقطعة)
+model ProjectPlot {
+  id String @id @default(cuid())
+
+  projectId String
+  project   ArchivedProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  // 👈 تم التعديل: نربط السجل بمعرف القطعة بدلاً من كتابة اسمها
+  plotId String
+  plot   RiyadhPlanPlot @relation(fields: [plotId], references: [id], onDelete: Cascade)
+
+  createdAt    DateTime    @default(now())
+  RiyadhPlan   RiyadhPlan? @relation(fields: [riyadhPlanId], references: [id])
+  riyadhPlanId String?
+
+  // 🛡️ حماية: لا يمكن ربط نفس القطعة بنفس المشروع مرتين
+  @@unique([projectId, plotId])
+}
+
 model RiyadhPlan {
   id         String  @id @default(cuid())
   planNumber String  @unique // رقم المخطط الرسمي
@@ -1296,12 +1334,14 @@ model RiyadhPlan {
   specialRegulations Json?            @default("[]")
 
   // 🚀 --- العلاقات الجديدة ---
-  streets  RiyadhPlanStreet[]
-  files    RiyadhPlanFile[]
-  projects ArchivedProject[]
+  streets      RiyadhPlanStreet[]
+  files        RiyadhPlanFile[]
+  projects     ArchivedProject[]
+  projectPlots ProjectPlot[]
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  RiyadhPlanPlot RiyadhPlanPlot[]
 }
 
 // 🚀 نموذج فرعي: شوارع المخطط
@@ -3484,7 +3524,8 @@ model ArchivedProject {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  files ArchivedProjectFile[]
+  files        ArchivedProjectFile[]
+  projectPlots ProjectPlot[]
 
   @@index([clientId])
   @@index([districtId])
