@@ -1,286 +1,65 @@
 const { PrismaClient } = require("@prisma/client");
 const prisma = new PrismaClient();
 const fs = require("fs");
-const { z } = require("zod");
-
-// 💡 1. استيراد الـ SDK الجديد
-const { GoogleGenAI } = require("@google/genai");
-
-// 💡 2. تهيئة العميل الجديد
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-const { findBestMatchAI } = require("../services/aiMatchingService");
-
-// ==========================================
-// 💡 Zod Schema (لضمان نوع البيانات)
-// ==========================================
-const PermitSchema = z.object({
-  permitNumber: z.string().nullable().catch(""),
-  issueDate: z.string().nullable().catch(""),
-  expiryDate: z.string().nullable().catch(""),
-  year: z.string().nullable().catch(new Date().getFullYear().toString()),
-  type: z.string().nullable().catch("غير محدد"),
-  ownerName: z.string().nullable().catch(""),
-  idNumber: z.string().nullable().catch(""),
-  district: z.string().nullable().catch(""),
-  sector: z.string().nullable().catch(""),
-  plotNumber: z.string().nullable().catch(""),
-  planNumber: z.string().nullable().catch(""),
-  mainUsage: z.string().nullable().catch("سكني"),
-  subUsage: z.string().nullable().catch(""),
-  landArea: z
-    .union([z.number(), z.string()])
-    .nullable()
-    .catch("")
-    .transform((val) => Number(val) || 0),
-  engineeringOffice: z.string().nullable().catch(""),
-  form: z.string().nullable().catch("أخضر"),
-  notes: z.string().nullable().catch(""),
-  componentsData: z
-    .array(
-      z.object({
-        name: z.string().catch("مكون غير معروف"),
-        usage: z.string().nullable().catch(""),
-        area: z
-          .union([z.number(), z.string()])
-          .nullable()
-          .catch("")
-          .transform((val) => Number(val) || 0),
-        units: z
-          .union([z.number(), z.string()])
-          .nullable()
-          .catch("")
-          .transform((val) => Number(val) || 0),
-      }),
-    )
-    .catch([]),
-  boundariesData: z
-    .array(
-      z.object({
-        direction: z.string().catch("اتجاه غير معروف"),
-        length: z
-          .union([z.number(), z.string()])
-          .nullable()
-          .catch("")
-          .transform((val) => Number(val) || 0),
-        neighbor: z.string().nullable().catch(""),
-      }),
-    )
-    .catch([]),
-  detailedReport: z.string().catch("لم يتم توليد تقرير مفصل."),
-});
+const { aiQueue } = require('../queue/aiQueue');
 
 // ==========================================
 // 💡 تحليل رخص البناء بالذكاء الاصطناعي (Enterprise Version)
 // ==========================================
 const analyzePermitAI = async (req, res) => {
-  let tempFilePath = null;
-
   try {
-    let fileBuffer;
-    let mimeType;
+    let tempFilePath = null;
+    let mimeType = null;
 
-    // استلام الملف
+    // 1. التعامل مع استلام الملف سواء كان Multipart أو Base64
     if (req.file) {
       tempFilePath = req.file.path;
-      fileBuffer = fs.readFileSync(tempFilePath);
       mimeType = req.file.mimetype;
     } else if (req.body.imageBase64) {
       const { imageBase64 } = req.body;
-      mimeType = imageBase64.substring(
-        imageBase64.indexOf(":") + 1,
-        imageBase64.indexOf(";"),
-      );
+      mimeType = imageBase64.substring(imageBase64.indexOf(":") + 1, imageBase64.indexOf(";"));
       const base64Data = imageBase64.split(",")[1];
-      fileBuffer = Buffer.from(base64Data, "base64");
+      const buffer = Buffer.from(base64Data, "base64");
+      
+      // حفظ ملف مؤقت للـ Base64 لكي يستطيع الـ Worker قراءته
+      const tempFileName = `temp_permit_${Date.now()}.jpg`;
+      tempFilePath = path.join(__dirname, '../../uploads/temp', tempFileName); // تأكد من وجود مجلد temp
+      fs.writeFileSync(tempFilePath, buffer);
     } else {
-      return res
-        .status(400)
-        .json({ success: false, message: "لم يتم إرسال أي وثيقة" });
+      return res.status(400).json({ success: false, message: "لم يتم إرسال أي وثيقة" });
     }
 
-    console.log(
-      `🚀 جاري إرسال الملف بصيغة (${mimeType}) إلى Gemini 3 Flash Preview للتحليل...`,
-    );
-
-    // تجهيز الملف بالطريقة التي يفهمها Gemini
-    const documentPart = {
-      inlineData: {
-        data: fileBuffer.toString("base64"),
-        mimeType: mimeType,
-      },
-    };
-
-    const prompt = `
-    أنت نظام استخراج بيانات (Data Extractor) عالي الدقة تعمل لدى أمانة منطقة الرياض.
-    أمامك وثيقة رسمية (قد تكون: رخصة بناء، تعديل مخططات، رخصة تسوير، إضافة، أو أي وثيقة بلدية). 
-    استخرج البيانات الموجودة فيها حصرياً لملء كائن الـ JSON التالي.
-
-    ⚠️ أمر حاسم (CRITICAL): يجب أن تحتوي المصفوفة "permits" على عنصر واحد على الأقل طالما أن المستند يحتوي على أي بيانات عقارية (رقم رخصة، مالك، قطعة، الخ). يُمنع منعاً باتاً إرجاع مصفوفة فارغة.
-
-    تعليمات صارمة جداً:
-    1. اقرأ البيانات من الجداول بدقة، خاصة جدول "الحدود والأبعاد والإرتدادات" وجدول "عرض مكونات البناء".
-    2. الأرقام: قم بتحويل أي رقم هندي (١،٢،٣) إلى رقم إنجليزي (1,2,3).
-    3. المساحات والأطوال: استخرج الرقم فقط (بدون كتابة حرف 'م' أو 'م2').
-    4. لا تخمن أي معلومة. إذا كانت المعلومة غير موجودة في المستند، أرجع null للنصوص أو 0 للأرقام.
-    5. التقرير (detailedReport): اكتب 3 أسطر باللغة العربية تلخص محتوى الرخصة (مثل نوع الطلب المذكور وأهم الشروط).
-
-    يجب أن يكون المخرج حصرياً بصيغة JSON المطابقة للتركيبة التالية:
-    {
-      "permits": [
-        {
-          "permitNumber": "رقم الرخصة",
-          "issueDate": "تاريخ إصدارها",
-          "expiryDate": "تاريخ انتهائها",
-          "year": "سنة الإصدار",
-          "type": "نوع الطلب أو الرخصة المكتوب (مثال: تعديل مخططات، رخصة بناء)",
-          "ownerName": "اسم صاحب الرخصة",
-          "idNumber": "رقم الهوية أو السجل التجاري",
-          "district": "الحي",
-          "sector": "الجهة (مثال: قطاع وسط مدينة الرياض)",
-          "plotNumber": "رقم قطعة الأرض",
-          "planNumber": "رقم المخطط",
-          "mainUsage": "التصنيف الرئيسي (مثال: تجاري)",
-          "subUsage": "التصنيف الفرعي",
-          "landArea": 0,
-          "engineeringOffice": "المكتب الهندسي المصمم أو المشرف",
-          "notes": "الملاحظات والشروط المكتوبة أسفل الرخصة",
-          "form": "أخضر",
-          "componentsData": [
-            { "name": "اسم المكون", "usage": "الاستخدام", "area": 0, "units": 0 }
-          ],
-          "boundariesData": [
-            { "direction": "الشمال/الجنوب/الشرق/الغرب", "length": 0, "neighbor": "حدودها" }
-          ],
-          "detailedReport": "تقرير هندسي وصفي..."
-        }
-      ]
-    }
-    `;
-
-    // 💡 قائمة النماذج حسب الأولوية (من الأحدث إلى الأكثر استقراراً)
-    const fallbackModels = [
-      "gemini-3-flash-preview", // المحاولة الأولى (الأحدث)
-      "gemini-2.5-flash", // المحاولة الثانية (سريع ومستقر جداً)
-      "gemini-1.5-flash", // المحاولة الثالثة (صخرة لا تنكسر)
-      "gemini-1.5-pro", // المحاولة الأخيرة
-    ];
-
-    let response = null;
-    let lastError = null;
-
-    // 💡 نظام الطوارئ: المحاولة على عدة نماذج متتالية إذا كان السيرفر مشغولاً
-    for (const modelName of fallbackModels) {
-      try {
-        console.log(`🔄 جاري محاولة التحليل باستخدام الموديل: ${modelName}...`);
-
-        response = await ai.models.generateContent({
-          model: modelName,
-          contents: [prompt, documentPart],
-          config: {
-            temperature: 0.0,
-            responseMimeType: "application/json",
-          },
-        });
-
-        console.log(`✅ نجح التحليل باستخدام: ${modelName}`);
-        break; // إذا نجح الطلب، نوقف اللوب فوراً
-      } catch (error) {
-        console.warn(
-          `⚠️ الموديل ${modelName} مشغول أو غير متاح (${error.status}). جاري التحويل للبديل...`,
-        );
-        lastError = error;
-
-        // انتظار بسيط (ثانية واحدة) قبل المحاولة بالنموذج التالي لتجنب حظر الـ API
-        await new Promise((resolve) => setTimeout(resolve, 1000));
+    // 2. إنشاء مهمة في جدول AiJob
+    const aiJob = await prisma.aiJob.create({
+      data: {
+        jobType: 'ANALYZE_PERMIT',
+        status: 'PENDING',
+        targetType: 'PERMIT',
+        requestedBy: req.user?.id || null // إذا كان لديك نظام مصادقة
       }
-    }
-
-    // إذا فشلت جميع المحاولات
-    if (!response) {
-      throw new Error(
-        `جميع نماذج الذكاء الاصطناعي مشغولة حالياً بسبب الضغط العالي. يرجى المحاولة بعد قليل. (الخطأ الأخير: ${lastError.message})`,
-      );
-    }
-
-    // استخراج النص من الاستجابة الناجحة
-    const responseText = response.text;
-
-    // الفلتر السحري لتنظيف الأرقام العربية الهندية (احتياطياً)
-    let cleanedContent = responseText.replace(/[٠-٩]/g, (d) =>
-      "٠١٢٣٤٥٦٧٨٩".indexOf(d),
-    );
-
-    const parsedData = JSON.parse(cleanedContent);
-    let rawPermits = parsedData.permits || [];
-
-    // 🛡️ التحقق والتنظيف بواسطة Zod
-    const validatedPermits = rawPermits.map((permit) =>
-      PermitSchema.parse(permit),
-    );
-
-    console.log("✅ تم تحليل الوثيقة بنجاح بواسطة Gemini 3!");
-
-    // المطابقة الذكية في الباك إند
-    console.log("🔄 جاري المطابقة الذكية مع قاعدة البيانات...");
-
-    const dbClients = await prisma.client.findMany({
-      select: { id: true, name: true, idNumber: true },
-    });
-    const dbOffices = await prisma.intermediaryOffice.findMany({
-      select: { id: true, nameAr: true, nameEn: true },
-    });
-    const dbDistricts = await prisma.riyadhDistrict.findMany({
-      select: { id: true, name: true },
-    });
-    const dbPlans = await prisma.riyadhPlan.findMany({
-      select: { id: true, planNumber: true },
     });
 
-    const smartLinkedPermits = await Promise.all(
-      validatedPermits.map(async (permit) => {
-        const [
-          matchedClientId,
-          matchedOfficeId,
-          matchedDistrictId,
-          matchedPlanId,
-        ] = await Promise.all([
-          findBestMatchAI(permit.ownerName, dbClients, "Client/العميل"),
-          findBestMatchAI(
-            permit.engineeringOffice,
-            dbOffices,
-            "Engineering Office/المكتب الهندسي",
-          ),
-          findBestMatchAI(permit.district, dbDistricts, "District/الحي"),
-          findBestMatchAI(permit.planNumber, dbPlans, "Plan Number/المخطط"),
-        ]);
+    const fixedOffice = req.body.fixedOffice || null;
+    // 3. إضافة المهمة إلى طابور BullMQ لتعمل في الخلفية
+    await aiQueue.add('analyze_permit_job', {
+      dbJobId: aiJob.id,
+      jobType: 'ANALYZE_PERMIT',
+      filePath: tempFilePath,
+      mimeType: mimeType,
+      employeeId: req.user?.id,
+      fixedOffice: fixedOffice
+    });
 
-        return {
-          ...permit,
-          linkedClientId: matchedClientId,
-          linkedOfficeId: matchedOfficeId,
-          linkedDistrictId: matchedDistrictId,
-          linkedPlanId: matchedPlanId,
-        };
-      }),
-    );
+    // 4. الرد فوراً للواجهة الأمامية بأن المهمة قيد المعالجة
+    res.status(202).json({
+      success: true,
+      message: "تم استلام الملف وجاري التحليل بذكاء في الخلفية.",
+      jobId: aiJob.id // 👈 سنستخدم هذا في الفرونت إند لمتابعة شريط التحميل
+    });
 
-    res.json({ success: true, data: smartLinkedPermits });
   } catch (error) {
-    console.error("🔥 Gemini Analysis Error:", error);
-    res.status(500).json({
-      success: false,
-      message: "فشل تحليل الرخصة بواسطة الذكاء الاصطناعي",
-      details: error.message,
-    });
-  } finally {
-    // الحذف المضمون للملفات المؤقتة
-    if (tempFilePath && fs.existsSync(tempFilePath)) {
-      try {
-        fs.unlinkSync(tempFilePath);
-      } catch (cleanupError) {
-        console.error("⚠️ فشل في حذف الملف المؤقت:", cleanupError);
-      }
-    }
+    console.error("🔥 Error queuing permit analysis:", error);
+    res.status(500).json({ success: false, message: "حدث خطأ أثناء بدء التحليل", details: error.message });
   }
 };
 
@@ -426,6 +205,115 @@ const updatePermit = async (req, res) => {
   }
 };
 
+// ==========================================
+// 💡 دالة الدمج الذكي (Smart Auto Merge)
+// ==========================================
+const autoMergePermit = async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    // 1. جلب الرخصة المكررة (المؤقتة)
+    const duplicatePermit = await prisma.permit.findUnique({ where: { id } });
+    if (!duplicatePermit) {
+      return res.status(404).json({ success: false, message: "الرخصة المؤقتة غير موجودة." });
+    }
+
+    // 2. البحث عن السجل الأساسي الأقدم
+    const originalPermit = await prisma.permit.findFirst({
+      where: {
+        OR: [
+          { permitNumber: duplicatePermit.permitNumber },
+          { idNumber: duplicatePermit.idNumber, planNumber: duplicatePermit.planNumber }
+        ],
+        NOT: { id: duplicatePermit.id }, // استثناء الرخصة المؤقتة نفسها
+        aiStatus: { not: "مكرر - بانتظار الدمج" } // يجب أن يكون السجل الأساسي سليماً
+      },
+      // 👈 التعديل هنا: استخدام archiveDate بدلاً من createdAt
+      orderBy: { archiveDate: 'asc' } 
+    });
+
+    if (!originalPermit) {
+       // إذا لم يجد النظام سجلاً أساسياً لسبب ما، نعتبر هذه الرخصة أساسية
+       await prisma.permit.update({ 
+         where: { id }, 
+         data: { aiStatus: "تم التحليل" } 
+       });
+       return res.json({ success: true, message: "تمت إزالة حالة التكرار واعتبارها رخصة أساسية." });
+    }
+
+    // 3. نقل البيانات الفارغة من المؤقتة إلى الأساسية
+    await prisma.permit.update({
+      where: { id: originalPermit.id },
+      data: {
+         ownerName: originalPermit.ownerName || duplicatePermit.ownerName,
+         landArea: originalPermit.landArea || duplicatePermit.landArea,
+         attachmentUrl: originalPermit.attachmentUrl || duplicatePermit.attachmentUrl,
+         componentsData: originalPermit.componentsData?.length > 5 ? originalPermit.componentsData : duplicatePermit.componentsData,
+         boundariesData: originalPermit.boundariesData?.length > 5 ? originalPermit.boundariesData : duplicatePermit.boundariesData,
+         notes: (originalPermit.notes || "") + (duplicatePermit.notes ? ` | إضافة (AI): ${duplicatePermit.notes}` : ""),
+         // تحديث حالة الذكاء الاصطناعي للسجل الأساسي
+         aiStatus: "تم الدمج والتحديث",
+         aiJobId: duplicatePermit.aiJobId
+      }
+    });
+
+    // 4. حذف الرخصة المؤقتة لتنظيف قاعدة البيانات
+    await prisma.permit.delete({ where: { id: duplicatePermit.id } });
+
+    res.json({ success: true, message: "تم دمج البيانات ونقل المرفقات بنجاح! 🚀" });
+    
+  } catch (error) {
+    console.error("Merge Error:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ==========================================
+// 💡 جلب الرخص المكررة (التي تنتظر الدمج)
+// ==========================================
+const getDuplicates = async (req, res) => {
+  try {
+    // 1. جلب كل الرخص التي صنفها الذكاء الاصطناعي كمكررة
+    const pendingDuplicates = await prisma.permit.findMany({
+      where: { aiStatus: "مكرر - بانتظار الدمج" },
+      // 👈 التعديل الأول: استخدام archiveDate بدلاً من createdAt
+      orderBy: { archiveDate: 'desc' }
+    });
+
+    const duplicateGroups = [];
+
+    // 2. البحث عن الأصل لكل رخصة مكررة
+    for (const dup of pendingDuplicates) {
+      const original = await prisma.permit.findFirst({
+        where: {
+          OR: [
+            { permitNumber: dup.permitNumber },
+            { idNumber: dup.idNumber, planNumber: dup.planNumber }
+          ],
+          NOT: { id: dup.id },
+          aiStatus: { not: "مكرر - بانتظار الدمج" }
+        },
+        // 👈 التعديل الثاني: استخدام archiveDate للبحث عن السجل الأقدم
+        orderBy: { archiveDate: 'asc' }
+      });
+
+      if (original) {
+        duplicateGroups.push({
+          duplicateId: dup.id,
+          reason: dup.permitNumber === original.permitNumber ? "تطابق في رقم الرخصة" : "تطابق في الهوية والمخطط",
+          duplicatePermit: dup,
+          originalPermit: original
+        });
+      }
+    }
+
+    res.json({ success: true, data: duplicateGroups });
+  } catch (error) {
+    console.error("Get Duplicates Error:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 // حذف رخصة
 const deletePermit = async (req, res) => {
   try {
@@ -443,4 +331,6 @@ module.exports = {
   updatePermit,
   deletePermit,
   analyzePermitAI,
+  autoMergePermit,
+  getDuplicates
 };

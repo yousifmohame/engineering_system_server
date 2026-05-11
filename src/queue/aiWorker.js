@@ -6,6 +6,7 @@ const { createSystemNotification } = require("../controllers/notificationControl
 
 // 💡 استيراد خدمات الذكاء الاصطناعي المختلفة (Services)
 const archiveAiService = require('../services/archiveAiService');
+const permitAiService = require('../services/permitAiService'); // 👈 1. تمت إضافة خدمة الرخص هنا
 // const contractAiService = require('../services/contractAiService'); // مستقبلاً
 // const aiMatchingService = require('../services/aiMatchingService'); // مستقبلاً
 
@@ -45,6 +46,11 @@ const aiWorker = new Worker('AI_PROCESSING_QUEUE', async (job) => {
       case 'MERGE_AND_ANALYZE':
       case 'UPLOAD_AND_ANALYZE':
         result = await archiveAiService.processArchiveJob(job.data, updateProgress);
+        break;
+
+      // 👈 2. تمت إضافة مسار تحليل رخص البناء هنا
+      case 'ANALYZE_PERMIT':
+        result = await permitAiService.processPermitJob(job.data, updateProgress);
         break;
 
       // ب) مهام العقود الذكية (مستقبلاً)

@@ -9,6 +9,8 @@ const {
   updatePermit,
   deletePermit,
   analyzePermitAI,
+  autoMergePermit,
+  getDuplicates,
 } = require("../controllers/permitsController");
 const { protect } = require("../middleware/authMiddleware");
 
@@ -47,5 +49,10 @@ router.put("/:id", upload.single("file"), updatePermit);
 router.delete("/:id", deletePermit);
 
 router.post("/analyze", upload.single("file"), analyzePermitAI);
+
+router.get("/duplicates", getDuplicates);
+
+// دمج رخصة مكررة
+router.post("/:id/auto-merge", autoMergePermit);
 
 module.exports = router;

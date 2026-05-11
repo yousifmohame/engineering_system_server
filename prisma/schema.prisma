@@ -2377,6 +2377,12 @@ model Permit {
 
   archiveDate DateTime @default(now()) @db.Date
   updatedAt   DateTime @updatedAt
+
+  aiJobId       String? // لمعرفة أي مهمة AI قامت باستخراج هذه الرخصة
+  isMerged      Boolean  @default(false) // هل هذه رخصة تم دمجها مع أخرى؟
+  mergedIntoId  String? // ID الرخصة الأساسية التي تم دمج هذه الرخصة معها
+  mergedInto    Permit?  @relation("MergedPermits", fields: [mergedIntoId], references: [id])
+  duplicateFrom Permit[] @relation("MergedPermits")
 }
 
 // ============================================================================

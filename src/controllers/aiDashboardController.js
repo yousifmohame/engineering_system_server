@@ -53,3 +53,20 @@ exports.getRecentJobs = async (req, res) => {
     res.status(500).json({ success: false, message: "حدث خطأ أثناء جلب المهام." });
   }
 };
+
+exports.getJobStatus = async (req, res) => {
+  try {
+    const job = await prisma.aiJob.findUnique({
+      where: { id: req.params.id }
+    });
+
+    if (!job) {
+      return res.status(404).json({ success: false, message: "المهمة غير موجودة" });
+    }
+
+    res.status(200).json({ success: true, data: job });
+  } catch (error) {
+    console.error("Error fetching job status:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
