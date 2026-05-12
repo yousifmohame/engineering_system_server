@@ -38,7 +38,7 @@ const ReferenceAISchema = z.object({
  * 🚀 دالة المعالجة التي سيستدعيها الـ Worker
  */
 const processReferenceJob = async (jobData, updateProgress) => {
-  const { filePathsArray, mimeTypesArray, dbJobId, existingDocumentId, analysisType = "full", savedAttachmentUrl } = jobData;
+  const { filePathsArray, mimeTypesArray, dbJobId, existingDocumentId, analysisType = "full", savedAttachmentUrl, fixedCategory } = jobData;
   let uploadedCloudFiles = [];
 
   try {
@@ -137,8 +137,26 @@ const processReferenceJob = async (jobData, updateProgress) => {
     await updateProgress(85);
 
     // 5. التنظيف والتحقق
-    const cleanJson = responseText.replace(/```json/gi, "").replace(/```/g, "").trim();
-    let parsedData = JSON.parse(cleanJson);
+    // 5. التنظيف الذكي والتحقق (Smart JSON Extraction)
+    let cleanJson = responseText.replace(/```json/gi, "").replace(/```/g, "").trim();
+    
+    // 💡 البحث عن أول قوس فتح وآخر قوس إغلاق لتجاهل أي "ثرثرة" من الذكاء الاصطناعي
+    const firstBrace = cleanJson.indexOf('{');
+    const lastBrace = cleanJson.lastIndexOf('}');
+    
+    if (firstBrace !== -1 && lastBrace !== -1) {
+      // اقتطاع كائن الـ JSON فقط الصافي
+      cleanJson = cleanJson.substring(firstBrace, lastBrace + 1);
+    }
+
+    let parsedData;
+    try {
+      parsedData = JSON.parse(cleanJson);
+    } catch (parseError) {
+      console.error("الاستجابة الخاطئة من AI كانت:", responseText);
+      throw new Error("لم يتمكن النظام من استخراج بيانات صالحة من استجابة الذكاء الاصطناعي.");
+    }
+
     if (Array.isArray(parsedData)) parsedData = parsedData[0];
     
     const validatedData = ReferenceAISchema.parse(parsedData);
@@ -147,7 +165,7 @@ const processReferenceJob = async (jobData, updateProgress) => {
     const updateData = {
       title: validatedData.title,
       source: validatedData.source,
-      category: validatedData.category,
+      category: fixedCategory ? fixedCategory : validatedData.category,
       type: validatedData.type,
       analysisStatus: "محلل",
       aiSummary: finalSummaryText,

@@ -43,7 +43,8 @@ exports.analyzeReferenceAsync = async (req, res) => {
         requestedBy: req.user?.id || null
       }
     });
-
+    
+    
     // 3. إضافة المهمة للطابور
     await aiQueue.add('analyze_reference_job', {
       dbJobId: aiJob.id,
@@ -51,7 +52,8 @@ exports.analyzeReferenceAsync = async (req, res) => {
       filePathsArray: [targetPath], // نمرر المسار الدائم
       mimeTypesArray: [req.file.mimetype],
       savedAttachmentUrl: savedAttachmentUrl,
-      employeeId: req.user?.id
+      employeeId: req.user?.id,
+      fixedCategory: req.body.fixedCategory
     });
 
     // حذف الملف المؤقت لأنه نُسخ
