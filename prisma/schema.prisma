@@ -122,6 +122,7 @@ model Employee {
   archivedProjects   ArchivedProject[]    @relation("EmployeeArchivedProjects")
   approvedProjects   ArchivedProject[]    @relation("ProjectApprover")
   SystemNotification SystemNotification[]
+  AttendanceLog      AttendanceLog[]
 }
 
 // نموذج لسجل الحضور
@@ -3616,4 +3617,29 @@ model AiDailyStat {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+// 💡 جهاز البصمة
+model ZkDevice {
+  id        String    @id @default(uuid())
+  name      String // مثال: "جهاز الإدارة الرئيسي"
+  ipAddress String    @unique // مثال: "192.168.1.201"
+  port      Int       @default(4370)
+  status    String    @default("متصل") // متصل، غير متصل
+  lastSync  DateTime? // آخر مرة تم سحب البصمات فيها
+  createdAt DateTime  @default(now())
+}
+
+// 💡 سجل الحضور والانصراف
+model AttendanceLog {
+  id         String   @id @default(uuid())
+  employeeId String // يُربط مع جدول الموظفين (Employee)
+  deviceUid  String // رقم البصمة داخل الجهاز نفسه (uid)
+  punchTime  DateTime // وقت البصمة الفعلي
+  type       String // حضور (Check-In) أم انصراف (Check-Out)
+
+  employee Employee @relation(fields: [employeeId], references: [id])
+
+  // لمنع تكرار نفس البصمة لنفس الموظف في نفس الدقيقة
+  @@unique([employeeId, punchTime])
 }
