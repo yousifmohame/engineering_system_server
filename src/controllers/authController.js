@@ -121,7 +121,11 @@ exports.login = async (req, res) => {
     const isMatch = await bcrypt.compare(password, employee.password);
     if (!isMatch) {
       console.log(`[Login Failed] Wrong password for: ${loginValue}`);
-      return res.status(401).json({ message: "كلمة المرور غير صحيحة" });
+      // 💡 نرسل رسالة واضحة ستلتقطها الواجهة الأمامية
+      return res.status(401).json({
+        success: false,
+        message: "كلمة المرور غير صحيحة، يرجى التأكد منها والمحاولة مجدداً.",
+      });
     }
 
     // 6. التحقق من حالة الحساب
