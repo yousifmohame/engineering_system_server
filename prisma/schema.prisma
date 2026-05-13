@@ -2749,6 +2749,11 @@ model EmailMessage {
   // الربط التلقائي بمعاملة (للاستخدام لاحقاً)
   linkedTxId      String?
   matchConfidence Int? // نسبة التطابق
+
+  @@index([date(sort: Desc)])
+  @@index([isDraft, isSent, isArchived, isDeleted])
+  @@index([messageId])
+  @@index([from])
 }
 
 model Notification {

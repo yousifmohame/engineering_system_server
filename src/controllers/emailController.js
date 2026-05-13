@@ -632,14 +632,11 @@ exports.deleteMessagePermanently = async (req, res) => {
 };
 
 // =========================================================
-// 🚀 جلب الرسائل وحفظها فوراً مع تشغيل التحليل في الخلفية
+// ⚡ المزامنة السريعة جداً (Smart IMAP Sync)
 // =========================================================
 exports.syncHostingerEmails = async (req, res) => {
-  let client; // تعريف العميل خارج النطاق لاستخدامه في الإغلاق
+  let client;
   try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 50;
-
     const account = await prisma.emailAccount.findFirst({
       where: { isActive: true },
     });
@@ -648,6 +645,17 @@ exports.syncHostingerEmails = async (req, res) => {
         .status(404)
         .json({ success: false, message: "لا يوجد حساب بريد مربوط" });
 
+    // 1. الرد الفوري من قاعدة البيانات لتسريع واجهة المستخدم
+    // بمجرد أن يطلب الفرونت إند الرسائل، نعطيه ما لدينا في الداتابيز فوراً
+    const localMessages = await prisma.emailMessage.findMany({
+      orderBy: { date: "desc" },
+      take: 100, // جلب آخر 100 رسالة فوراً
+    });
+
+    // إرسال الرد للفرونت إند للعمل، وإكمال المزامنة في الخلفية بصمت
+    res.json({ success: true, data: localMessages });
+
+    // --- ما يلي يحدث في الخلفية دون تعطيل المستخدم ---
     client = new ImapFlow({
       host: account.imapServer || "imap.hostinger.com",
       port: account.imapPort || 993,
@@ -658,48 +666,41 @@ exports.syncHostingerEmails = async (req, res) => {
 
     await client.connect();
     let lock = await client.getMailboxLock("INBOX");
-    const messages = [];
 
     try {
+      // معرفة أعلى UID موجود في قاعدة البيانات لنجلب ما بعده فقط
+      const lastSavedMessage = await prisma.emailMessage.findFirst({
+        where: { accountId: account.id, isSent: false, isDraft: false },
+        orderBy: { messageId: "desc" }, // افتراض أن messageId هو الـ UID
+      });
+
+      const highestUid =
+        lastSavedMessage && !isNaN(lastSavedMessage.messageId)
+          ? parseInt(lastSavedMessage.messageId)
+          : 1;
+
       const totalMessages = client.mailbox.exists;
-      if (totalMessages === 0) {
-        lock.release();
-        await client.logout();
-        return res.json({ success: true, data: [] });
-      }
+      if (totalMessages === 0) return;
 
-      const fetchEnd = totalMessages - (page - 1) * limit;
-      const fetchStart = Math.max(1, totalMessages - page * limit + 1);
+      // ⚡ جلب الرسائل الجديدة فقط (التي الـ UID الخاص بها أكبر من الموجود لدينا)
+      const fetchQuery = `${highestUid + 1}:*`;
 
-      if (fetchEnd < 1) {
-        lock.release();
-        await client.logout();
-        return res.json({ success: true, data: [] });
-      }
-
-      console.log(
-        `⏳ جاري مزامنة الرسائل... النطاق: ${fetchStart}:${fetchEnd}`,
-      );
-
-      for await (let msg of client.fetch(
-        `${fetchStart}:${fetchEnd}`,
-        { source: true, envelope: true, flags: true, uid: true },
-        { reverse: true },
-      )) {
+      for await (let msg of client.fetch(fetchQuery, {
+        source: true,
+        flags: true,
+        uid: true,
+      })) {
         const msgIdStr = msg.uid.toString();
 
-        // 1. التحقق السريع في قاعدة البيانات
-        let dbMessage = await prisma.emailMessage.findUnique({
+        const exists = await prisma.emailMessage.findUnique({
           where: { messageId: msgIdStr },
         });
-
-        // 2. إذا لم تكن موجودة، احفظها فوراً واعرضها
-        if (!dbMessage) {
+        if (!exists) {
           const parsed = await simpleParser(msg.source);
-          const subject = parsed.subject || "(بدون عنوان)";
           const bodyText = parsed.text || "";
+          const subject = parsed.subject || "(بدون عنوان)";
 
-          dbMessage = await prisma.emailMessage.create({
+          const dbMessage = await prisma.emailMessage.create({
             data: {
               messageId: msgIdStr,
               accountId: account.id,
@@ -711,28 +712,22 @@ exports.syncHostingerEmails = async (req, res) => {
               html: parsed.html || parsed.textAsHtml || "",
               date: parsed.date,
               isRead: msg.flags?.has("\\Seen") || false,
-              isAnalyzed: false, // لم تُحلل بعد
+              isAnalyzed: false,
             },
           });
 
-          // 💡 سر الحل: تشغيل دالة التحليل في الخلفية "بدون await"
-          // هذا يسمح للسيرفر بإكمال الرد للمستخدم بينما الذكاء الاصطناعي يعمل في صمت
+          // تشغيل الذكاء الاصطناعي في الخلفية
           analyzeInBackground(dbMessage.id, subject, bodyText);
         }
-
-        messages.push(dbMessage);
       }
     } finally {
       if (lock) lock.release();
+      await client.logout();
     }
-
-    await client.logout();
-    // إرجاع النتيجة فوراً
-    res.json({ success: true, data: messages });
   } catch (error) {
     if (client) await client.logout();
-    console.error("IMAP Error:", error);
-    res.status(500).json({ success: false, message: "حدث خطأ أثناء المزامنة" });
+    console.error("Fast IMAP Sync Error:", error);
+    // لا نرسل res.status(500) لأننا أرسلنا الاستجابة بالفعل (res.json) أعلاه
   }
 };
 
@@ -741,7 +736,7 @@ exports.syncHostingerEmails = async (req, res) => {
 // =========================================================
 async function analyzeInBackground(dbId, subject, body) {
   try {
-    console.log(`✨ بدء تحليل الرسالة [${dbId}] في الخلفية...`);
+
 
     const textToAnalyze = `Subject: ${subject}\n\nBody:\n${body.substring(0, 1500)}`;
     const promptInstruction = `أنت نظام تحليل نصوص حكومي سعودي. استخرج البيانات بصيغة JSON:\n{ "reqNumber": null, "reqYear": null, "serviceNumber": null, "serviceYear": null, "ownerName": null, "serviceType": null, "replyText": null, "entityName": null, "viewTime": null, "sectorName": null }\nالنص:\n${textToAnalyze}`;
@@ -766,7 +761,6 @@ async function analyzeInBackground(dbId, subject, body) {
         ...validatedData,
       },
     });
-    console.log(`✅ انتهى تحليل الرسالة [${dbId}] بنجاح.`);
   } catch (err) {
     console.error(`❌ خطأ في تحليل الرسالة الخلفي [${dbId}]:`, err.message);
   }
@@ -963,5 +957,84 @@ exports.searchMessages = async (req, res) => {
     res.json({ success: true, data: messages });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// =========================================================
+// 🧠 البحث الذكي بالذكاء الاصطناعي (AI Smart Search)
+// =========================================================
+exports.aiSmartSearch = async (req, res) => {
+  try {
+    const { query } = req.body;
+
+    if (!query || query.trim() === "") {
+      return res.json({ success: true, data: [] });
+    }
+
+    console.log(`🔍 جاري تحليل نية البحث: "${query}"...`);
+
+    // 1. استخدام Gemini لفهم ماذا يريد المستخدم بالضبط
+    const promptInstruction = `
+    أنت مساعد ذكي للبحث في قاعدة بيانات رسائل بريد إلكتروني لمكتب هندسي.
+    قام المستخدم بكتابة عبارة البحث التالية: "${query}"
+    
+    استخرج معايير البحث من العبارة وقم بإرجاعها كـ JSON فقط بالصيغة التالية:
+    {
+      "from": "اسم المرسل أو إيميله إن وجد، وإلا null",
+      "keyword": "الكلمة المفتاحية للبحث في نص الرسالة أو الموضوع، وإلا null",
+      "isRead": true أو false أو null (إذا قال رسائل غير مقروءة مثلاً),
+      "hasAttachments": true أو false أو null (إذا قال رسائل بها مرفقات)
+    }
+    بدون أي نص إضافي أو Markdown.
+    `;
+
+    const aiResponse = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: [{ role: "user", parts: [{ text: promptInstruction }] }],
+      config: { temperature: 0.0, responseMimeType: "application/json" },
+    });
+
+    const cleanJson = aiResponse.text
+      .replace(/```json/gi, "")
+      .replace(/```/g, "")
+      .trim();
+    const searchCriteria = JSON.parse(cleanJson);
+
+    // 2. بناء استعلام Prisma السريع بناءً على فهم الذكاء الاصطناعي
+    const prismaWhere = {};
+    const orConditions = [];
+
+    if (searchCriteria.from) {
+      prismaWhere.from = { contains: searchCriteria.from };
+    }
+
+    if (searchCriteria.keyword) {
+      orConditions.push({ subject: { contains: searchCriteria.keyword } });
+      orConditions.push({ body: { contains: searchCriteria.keyword } });
+    }
+
+    if (orConditions.length > 0) {
+      prismaWhere.OR = orConditions;
+    }
+
+    if (searchCriteria.isRead !== null) {
+      prismaWhere.isRead = searchCriteria.isRead;
+    }
+
+    if (searchCriteria.hasAttachments !== null) {
+      prismaWhere.hasAttachments = searchCriteria.hasAttachments;
+    }
+
+    // 3. تنفيذ الاستعلام السريع من قاعدة البيانات المحلية
+    const messages = await prisma.emailMessage.findMany({
+      where: prismaWhere,
+      orderBy: { date: "desc" },
+      take: 50, // جلب أهم 50 نتيجة فقط للسرعة
+    });
+
+    res.json({ success: true, data: messages, searchIntent: searchCriteria });
+  } catch (error) {
+    console.error("AI Search Error:", error);
+    res.status(500).json({ success: false, message: "فشل البحث الذكي" });
   }
 };

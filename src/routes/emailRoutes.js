@@ -34,6 +34,7 @@ router.post("/send", emailController.sendMessage);
 
 router.get("/sync", emailController.syncHostingerEmails);
 
+router.post("/search-ai", emailController.aiSmartSearch);
 // إضافة هذا السطر لمسارات البريد
 router.get('/analyze-inbox', emailController.analyzeInboxWithAI);
 
