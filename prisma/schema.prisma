@@ -110,6 +110,9 @@ model Employee {
   paymentsReceived    Payment[]     @relation("EmployeeToPayment")
   activitiesPerformed ActivityLog[] @relation("EmployeeToActivityLog")
 
+  shiftStartTime String? @default("08:00") // بداية دوام الموظف
+  shiftEndTime   String? @default("17:00") // نهاية دوام الموظف
+
   // --- إدارة الوثائق ---
   ownedDocuments         Document[]               @relation("OwnedDocuments")
   docPermissions         DocumentPermission[]     @relation("GrantedPermissions")
@@ -3649,4 +3652,14 @@ model AttendanceLog {
 
   // لمنع تكرار نفس البصمة لنفس الموظف في نفس الدقيقة
   @@unique([employeeId, punchTime])
+}
+
+// 💡 إعدادات سياسات الدوام (سجل واحد فقط للشركة)
+model AttendancePolicy {
+  id                     String   @id @default("global_policy")
+  morningGracePeriodMins Int      @default(15) // فترة السماحية
+  autoAbsentAfterMins    Int      @default(120) // احتساب غياب بعد
+  enableAiExcuseApproval Boolean  @default(true) // الذكاء الاصطناعي للأعذار
+  enableAiCriticalAlerts Boolean  @default(true) // الذكاء الاصطناعي للتنبيهات
+  updatedAt              DateTime @updatedAt
 }

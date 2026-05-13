@@ -261,6 +261,10 @@ app.use('/api/notifications', notificationRoutes);
 const aiDashboardRoutes = require("./routes/aiDashboardRoutes");
 app.use("/api/ai-dashboard", aiDashboardRoutes);
 
+
+const attendanceRoutes = require("./routes/attendanceRoutes");
+app.use("/api/attendance", attendanceRoutes);
+
 // فحص صحة السيرفر
 app.get("/", (req, res) => {
   res.json({ status: "Online", message: "Engineering System API v1" });

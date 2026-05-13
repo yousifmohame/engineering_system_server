@@ -75,6 +75,8 @@ const getAllEmployees = async (req, res) => {
         createdAt: true,
         updatedAt: true,
         roles: true,
+        shiftStartTime: true,
+        shiftEndTime: true,
         _count: { select: { specialPermissions: true } },
       },
     });
@@ -138,7 +140,8 @@ const createEmployee = async (req, res) => {
       additionalNumber,
       cityAr,
       cityEn,
-
+      shiftStartTime,
+      shiftEndTime,
       roleIds,
     } = req.body;
 
@@ -247,7 +250,8 @@ const createEmployee = async (req, res) => {
         additionalNumber,
         cityAr,
         cityEn,
-
+        shiftStartTime: shiftStartTime || "08:00",
+        shiftEndTime: shiftEndTime || "17:00",
         roles: {
           connect:
             roleIds && roleIds.length > 0 ? roleIds.map((id) => ({ id })) : [],
@@ -319,7 +323,8 @@ const updateEmployee = async (req, res) => {
       additionalNumber,
       cityAr,
       cityEn,
-
+      shiftStartTime,
+      shiftEndTime,
       roleIds,
       password,
     } = req.body;
@@ -394,6 +399,8 @@ const updateEmployee = async (req, res) => {
       additionalNumber,
       cityAr,
       cityEn,
+      shiftStartTime: shiftStartTime || "08:00",
+      shiftEndTime: shiftEndTime || "17:00",
     };
 
     if (birthDate) updateData.birthDate = new Date(birthDate);
