@@ -23,10 +23,10 @@ const getAllEmployees = async (req, res) => {
   try {
     const employees = await prisma.employee.findMany({
       orderBy: { createdAt: "desc" },
-      // لا نرسل كلمة المرور، ونجلب كل الحقول الجديدة
       select: {
         id: true,
         employeeCode: true,
+        fingerprintId: true, // 👈 1. جلب رقم البصمة ليعرض في الجدول
         name: true,
         nameEn: true,
         firstNameAr: true,
@@ -93,7 +93,7 @@ const createEmployee = async (req, res) => {
   try {
     const {
       employeeCode,
-      // 💡 دمج الاسم إذا لم يُرسل صراحة
+      fingerprintId, // 👈 2. استلام رقم البصمة من الواجهة
       firstNameAr,
       secondNameAr,
       thirdNameAr,
@@ -126,7 +126,6 @@ const createEmployee = async (req, res) => {
       gosiNumber,
       iqamaNumber,
 
-      // 💡 حقول العنوان الوطني
       shortAddress,
       streetNameAr,
       streetNameEn,
@@ -164,18 +163,27 @@ const createEmployee = async (req, res) => {
     });
 
     if (employeeExists) {
-      return res
-        .status(400)
-        .json({
-          message:
-            "موظف مسجل بالفعل بنفس رقم الهوية، الإيميل، الجوال، أو الرقم الوظيفي",
-        });
+      return res.status(400).json({
+        message:
+          "موظف مسجل بالفعل بنفس رقم الهوية، الإيميل، الجوال، أو الرقم الوظيفي",
+      });
+    }
+
+    // التحقق من أن رقم البصمة غير مستخدم مع موظف آخر
+    if (fingerprintId && String(fingerprintId).trim() !== "") {
+      const fingerprintExists = await prisma.employee.findFirst({
+        where: { fingerprintId: String(fingerprintId).trim() },
+      });
+      if (fingerprintExists) {
+        return res
+          .status(400)
+          .json({ message: "رقم البصمة هذا مستخدم مسبقاً لموظف آخر" });
+      }
     }
 
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
-    // 💡 تجميع الاسم الكامل برمجياً لضمان عمل الشاشات القديمة
     const fullNameAr =
       name ||
       [firstNameAr, secondNameAr, thirdNameAr, fourthNameAr]
@@ -190,6 +198,10 @@ const createEmployee = async (req, res) => {
     const newEmployee = await prisma.employee.create({
       data: {
         employeeCode,
+        fingerprintId:
+          fingerprintId && String(fingerprintId).trim() !== ""
+            ? String(fingerprintId).trim()
+            : null, // 👈 3. حفظ رقم البصمة (أو null)
         name: fullNameAr,
         nameEn: fullNameEn,
         firstNameAr,
@@ -265,6 +277,7 @@ const updateEmployee = async (req, res) => {
     const { id } = req.params;
     const {
       employeeCode,
+      fingerprintId, // 👈 4. استلام رقم البصمة في التحديث
       firstNameAr,
       secondNameAr,
       thirdNameAr,
@@ -311,6 +324,21 @@ const updateEmployee = async (req, res) => {
       password,
     } = req.body;
 
+    // التحقق من أن رقم البصمة غير مستخدم مع موظف آخر (غير الموظف الحالي)
+    if (fingerprintId && String(fingerprintId).trim() !== "") {
+      const fingerprintExists = await prisma.employee.findFirst({
+        where: {
+          fingerprintId: String(fingerprintId).trim(),
+          id: { not: id }, // نستثني الموظف الحالي من البحث
+        },
+      });
+      if (fingerprintExists) {
+        return res
+          .status(400)
+          .json({ message: "رقم البصمة هذا مستخدم مسبقاً لموظف آخر" });
+      }
+    }
+
     const fullNameAr =
       name ||
       [firstNameAr, secondNameAr, thirdNameAr, fourthNameAr]
@@ -324,6 +352,10 @@ const updateEmployee = async (req, res) => {
 
     const updateData = {
       employeeCode,
+      fingerprintId:
+        fingerprintId && String(fingerprintId).trim() !== ""
+          ? String(fingerprintId).trim()
+          : null, // 👈 5. تحديث رقم البصمة
       name: fullNameAr,
       nameEn: fullNameEn,
       firstNameAr,
@@ -423,12 +455,10 @@ const getEmployeeAttendance = async (req, res) => {
     });
     res.status(200).json(attendanceRecords);
   } catch (error) {
-    res
-      .status(500)
-      .json({
-        message: "Error fetching attendance records",
-        error: error.message,
-      });
+    res.status(500).json({
+      message: "Error fetching attendance records",
+      error: error.message,
+    });
   }
 };
 
@@ -554,12 +584,10 @@ const updateEmployeeStatus = async (req, res) => {
     });
     res.status(200).json(updatedEmployee);
   } catch (error) {
-    res
-      .status(500)
-      .json({
-        message: "Error updating employee status",
-        error: error.message,
-      });
+    res.status(500).json({
+      message: "Error updating employee status",
+      error: error.message,
+    });
   }
 };
 
