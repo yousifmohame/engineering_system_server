@@ -649,7 +649,7 @@ exports.syncHostingerEmails = async (req, res) => {
     // بمجرد أن يطلب الفرونت إند الرسائل، نعطيه ما لدينا في الداتابيز فوراً
     const localMessages = await prisma.emailMessage.findMany({
       orderBy: { date: "desc" },
-      take: 20, // جلب آخر 20 رسالة فوراً
+      take: 10, // جلب آخر 10 رسالة فوراً
     });
 
     // إرسال الرد للفرونت إند للعمل، وإكمال المزامنة في الخلفية بصمت
