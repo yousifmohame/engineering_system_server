@@ -8,8 +8,9 @@ const { createSystemNotification } = require("../controllers/notificationControl
 const archiveAiService = require('../services/archiveAiService');
 const permitAiService = require('../services/permitAiService'); // 👈 1. تمت إضافة خدمة الرخص هنا
 const referenceAiService = require('../services/referenceAiService');
-// const contractAiService = require('../services/contractAiService'); // مستقبلاً
-// const aiMatchingService = require('../services/aiMatchingService'); // مستقبلاً
+const aiDeviceService = require('../services/aiDeviceService');
+const contractAiService = require('../services/contractAiService');
+
 
 const prisma = new PrismaClient();
 
@@ -54,14 +55,12 @@ const aiWorker = new Worker('AI_PROCESSING_QUEUE', async (job) => {
         result = await permitAiService.processPermitJob(job.data, updateProgress);
         break;
 
-      // ب) مهام العقود الذكية (مستقبلاً)
-      case 'ANALYZE_CONTRACT':
-        // result = await contractAiService.processContractJob(job.data, updateProgress);
+      case 'ASSESS_CONTRACT_RISKS':
+        result = await contractAiService.processRiskAssessment(job.data, updateProgress);
         break;
 
-      // ج) مهام المطابقة (مستقبلاً)
-      case 'MATCH_DOCUMENTS':
-        // result = await aiMatchingService.processMatchingJob(job.data, updateProgress);
+      case 'GENERATE_CONTRACT_SUMMARY':
+        result = await contractAiService.processContractSummary(job.data, updateProgress);
         break;
 
       case "ANALYZE_REFERENCE":
@@ -70,6 +69,10 @@ const aiWorker = new Worker('AI_PROCESSING_QUEUE', async (job) => {
             updateProgress
           );
           break;
+
+      case 'EXTRACT_DEVICE_SPECS': // 👈 إضافة هذه الحالة
+        result = await aiDeviceService.processDeviceImageJob(job.data, updateProgress);
+        break;
 
       default:
         throw new Error(`نوع المهمة غير معروف: ${jobType}`);

@@ -1,8 +1,9 @@
 const { PrismaClient } = require("@prisma/client");
 const prisma = new PrismaClient();
 const fs = require("fs");
-const { GoogleGenAI } = require("@google/genai");
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY }); // تأكد من وجود المفتاح في .env
+
+// 💡 1. استيراد الطابور الموحد (تأكد من المسار حسب هيكلة مجلداتك)
+const { aiQueue } = require("../queue/aiQueue"); 
 
 exports.getDevices = async (req, res) => {
   try {
@@ -12,15 +13,9 @@ exports.getDevices = async (req, res) => {
 
     const formattedDevices = devices.map((dev) => ({
       ...dev,
-      purchaseDate: dev.purchaseDate
-        ? dev.purchaseDate.toISOString().split("T")[0]
-        : "",
-      nextMaintenanceDate: dev.nextMaintenanceDate
-        ? dev.nextMaintenanceDate.toISOString().split("T")[0]
-        : "",
-      warrantyEnd: dev.warrantyEnd
-        ? dev.warrantyEnd.toISOString().split("T")[0]
-        : "",
+      purchaseDate: dev.purchaseDate ? dev.purchaseDate.toISOString().split("T")[0] : "",
+      nextMaintenanceDate: dev.nextMaintenanceDate ? dev.nextMaintenanceDate.toISOString().split("T")[0] : "",
+      warrantyEnd: dev.warrantyEnd ? dev.warrantyEnd.toISOString().split("T")[0] : "",
     }));
 
     res.json({ success: true, data: formattedDevices });
@@ -47,7 +42,7 @@ exports.createDevice = async (req, res) => {
         location: data.location,
         assignedTo: data.assignedTo,
         purchasePrice: data.purchasePrice,
-        depreciationRate: data.depreciationRate, // 💡 حفظ معدل الإهلاك
+        depreciationRate: data.depreciationRate,
         vendor: data.vendor,
         purchaseDate: data.purchaseDate ? new Date(data.purchaseDate) : null,
         warrantyEnd: data.warrantyEnd ? new Date(data.warrantyEnd) : null,
@@ -79,9 +74,7 @@ exports.updateDevice = async (req, res) => {
       data: {
         ...data,
         purchaseDate: data.purchaseDate ? new Date(data.purchaseDate) : null,
-        nextMaintenanceDate: data.nextMaintenanceDate
-          ? new Date(data.nextMaintenanceDate)
-          : null,
+        nextMaintenanceDate: data.nextMaintenanceDate ? new Date(data.nextMaintenanceDate) : null,
         warrantyEnd: data.warrantyEnd ? new Date(data.warrantyEnd) : null,
       },
     });
@@ -102,116 +95,88 @@ exports.deleteDevice = async (req, res) => {
   }
 };
 
-// 🚀 رفع مرفقات الفواتير والضمان
 exports.uploadAttachment = (req, res) => {
   try {
-    if (!req.file)
-      return res
-        .status(400)
-        .json({ success: false, message: "لم يتم استلام أي ملف" });
+    if (!req.file) return res.status(400).json({ success: false, message: "لم يتم استلام أي ملف" });
     const fileUrl = `/uploads/devices/${req.file.filename}`;
     res.json({ success: true, url: fileUrl });
   } catch (error) {
-    res
-      .status(500)
-      .json({ success: false, message: "فشل رفع الملف: " + error.message });
+    res.status(500).json({ success: false, message: "فشل رفع الملف: " + error.message });
   }
 };
 
-// 🚀 الذكاء الاصطناعي: استخراج المواصفات والماك أدريس والاحتفاظ بالصورة
+// =========================================================================
+// 🚀 الذكاء الاصطناعي: استخراج المواصفات والماك أدريس (تم نقل المعالجة للطابور)
+// =========================================================================
 exports.extractSpecsFromImage = async (req, res) => {
   try {
-    if (!req.file)
-      return res
-        .status(400)
-        .json({ success: false, message: "الرجاء إرفاق صورة المواصفات" });
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: "الرجاء إرفاق صورة المواصفات" });
+    }
 
-    console.log("🤖 جاري تحليل صورة الجهاز (المواصفات + MAC)...");
+    // 💡 يجب إرسال deviceId من الواجهة لكي نعرف أي جهاز نُحدثه في الداتا بيز
+    const { deviceId } = req.body; 
+    if (!deviceId) {
+      // إذا فشل العميل في إرسال الـ ID، نمسح الصورة المرفوعة لتوفير المساحة
+      fs.unlinkSync(req.file.path);
+      return res.status(400).json({ success: false, message: "معرف الجهاز (deviceId) مطلوب لتحديث بياناته." });
+    }
 
-    // تحويل الصورة إلى Base64 لقرائتها عبر Gemini
-    const fileBytes = fs.readFileSync(req.file.path).toString("base64");
+    const employeeId = req.user?.id; // من التوكن (لمعرفة من أرسل الطلب)
 
-    // 💡 تحديث الـ Prompt لطلب الـ MAC Addresses كمصفوفة
-    const promptInstruction = `
-      قم بتحليل هذه الصورة التي تحتوي على مواصفات جهاز كمبيوتر، لابتوب، أو شبكة.
-      استخرج البيانات التالية بدقة شديدة وقم بإرجاعها ككائن JSON حصرياً (بدون أي نصوص إضافية أو علامات Markdown).
-      المفاتيح المطلوبة في الـ JSON هي:
-      {
-        "cpu": "اسم المعالج بدقة",
-        "ram": "سعة الذاكرة العشوائية",
-        "storage": "سعة ونوع التخزين (إن وجد)",
-        "gpu": "كرت الشاشة (إن وجد)",
-        "os": "نظام التشغيل (إن وجد)",
-        "macAddresses": ["الماك أدريس الأول", "الماك أدريس الثاني"] // استخرج أي عنوان MAC تجده وضعه في هذه المصفوفة
+    // 1. إنشاء سجل في جدول AiJob لكي يتتبعه المستخدم كشريط تحميل (Progress Bar)
+    const newAiJob = await prisma.aiJob.create({
+      data: {
+        jobType: "EXTRACT_DEVICE_SPECS",
+        status: "PENDING",
+        progress: 0,
+        createdBy: employeeId || "SYSTEM",
       }
-      إذا لم تجد معلومة معينة، اترك قيمتها فارغة "" (أو مصفوفة فارغة للماك أدريس []).
-    `;
-
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: [
-        {
-          role: "user",
-          parts: [
-            { inlineData: { data: fileBytes, mimeType: req.file.mimetype } },
-            { text: promptInstruction },
-          ],
-        },
-      ],
-      config: { temperature: 0.1, responseMimeType: "application/json" },
     });
 
-    const cleanJson = response.text
-      .replace(/```json/gi, "")
-      .replace(/```/g, "")
-      .trim();
-    const specsData = JSON.parse(cleanJson);
+    // 2. إرسال المهمة للطابور المركزي
+    await aiQueue.add("extract-device-specs", {
+      jobType: "EXTRACT_DEVICE_SPECS",
+      dbJobId: newAiJob.id,
+      deviceId: deviceId,
+      filePath: req.file.path,
+      mimeType: req.file.mimetype,
+      employeeId: employeeId
+    });
 
-    // 💡 التعديل الجوهري: لن نقوم بحذف الصورة (fs.unlinkSync)، بل سنحتفظ بها في المجلد
-    // ونقوم بتوليد الرابط الخاص بها لإرجاعه للفرونت إند
     const imageUrl = `/uploads/devices/${req.file.filename}`;
 
-    res.json({ success: true, data: specsData, imageUrl: imageUrl });
+    // 3. الرد فوراً (202 Accepted) لكي تُغلق النافذة في الواجهة ويكمل المستخدم عمله
+    res.status(202).json({ 
+      success: true, 
+      message: "بدأت عملية تحليل صورة الجهاز في الخلفية. سيصلك إشعار فور اكتمالها.",
+      jobId: newAiJob.id,
+      imageUrl: imageUrl 
+    });
+
   } catch (error) {
-    console.error("AI Specs Extraction Error:", error);
-    // تنظيف الصورة فقط في حالة فشل الذكاء الاصطناعي
     if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "فشل الذكاء الاصطناعي في قراءة الصورة",
-      });
+    console.error("Device Specs Queue Error:", error);
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// جلب التصنيفات المخصصة
 exports.getCategories = async (req, res) => {
   try {
-    const categories = await prisma.deviceCategory.findMany({
-      orderBy: { createdAt: "asc" },
-    });
+    const categories = await prisma.deviceCategory.findMany({ orderBy: { createdAt: "asc" } });
     res.json({ success: true, data: categories });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// إضافة تصنيف جديد
 exports.addCategory = async (req, res) => {
   try {
     const { label, value } = req.body;
-    const newCategory = await prisma.deviceCategory.create({
-      data: { label, value },
-    });
+    const newCategory = await prisma.deviceCategory.create({ data: { label, value } });
     res.status(201).json({ success: true, data: newCategory });
   } catch (error) {
-    // التحقق إذا كان التصنيف موجود مسبقاً
-    if (error.code === "P2002") {
-      return res
-        .status(400)
-        .json({ success: false, message: "هذا التصنيف موجود مسبقاً" });
-    }
+    if (error.code === "P2002") return res.status(400).json({ success: false, message: "التصنيف موجود مسبقاً" });
     res.status(500).json({ success: false, message: error.message });
   }
 };

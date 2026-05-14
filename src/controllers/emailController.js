@@ -5,6 +5,9 @@ const simpleParser = require("mailparser").simpleParser;
 const prisma = new PrismaClient();
 const { OpenAI } = require("openai");
 const { GoogleGenAI } = require("@google/genai");
+
+const { aiQueue } = require("../queue/aiQueue");
+
 const { z } = require("zod");
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -119,99 +122,29 @@ exports.getAutoContacts = async (req, res) => {
 exports.analyzeEmail = async (req, res) => {
   try {
     const { id } = req.params;
-    const { subject, body, text, from, date } = req.body;
-
     let message = await prisma.emailMessage.findFirst({
       where: { OR: [{ id: id }, { messageId: id }] },
     });
 
     if (!message) {
-      const account = await prisma.emailAccount.findFirst({
-        where: { isActive: true },
-      });
-      if (!account)
-        return res.status(404).json({
-          success: false,
-          message: "لا يوجد حساب بريد مربوط لحفظ الرسالة",
-        });
-
-      message = await prisma.emailMessage.create({
-        data: {
-          messageId: id,
-          accountId: account.id,
-          subject: subject || "بدون عنوان",
-          body: body || text || "",
-          from: from || "مجهول",
-          to: account.email,
-          date: date ? new Date(date) : new Date(),
-          isRead: true,
-        },
-      });
+      return res.status(404).json({ success: false, message: "الرسالة غير موجودة في قاعدة البيانات" });
     }
 
-    const textToAnalyze = `Subject: ${message.subject}\n\nBody:\n${message.body || message.text}`;
-
-    const promptInstruction = `
-    أنت نظام تحليل نصوص حكومي سعودي (منصة بلدي).
-    اقرأ الرسالة التالية بعناية، واستخرج منها البيانات التالية بدقة باللغة العربية:
-    رقم الطلب، سنة الطلب، رقم الخدمة، سنة الخدمة، اسم المالك (إن وجد)، نوع الخدمة، الإفادة (أي محتوى الرد أو الملاحظة)، اسم الجهة المصدرة، وقت الإطلاع (إذا تم ذكره صراحة)، والقطاع (مثل: قطاع وسط الرياض).
-    
-    قم بإرجاع كائن JSON حصرياً بالصيغة التالية (بدون أي نص إضافي أو Markdown):
-    {
-      "reqNumber": "القيمة أو null", "reqYear": "القيمة أو null", "serviceNumber": "القيمة أو null",
-      "serviceYear": "القيمة أو null", "ownerName": "القيمة أو null", "serviceType": "القيمة أو null",
-      "replyText": "القيمة أو null", "entityName": "القيمة أو null", "viewTime": "القيمة أو null", "sectorName": "القيمة أو null"
-    }`;
-
-    console.log(`🤖 جاري تحليل الرسالة [${id}]...`);
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: [{ role: "user", parts: [{ text: promptInstruction }] }],
-      config: { temperature: 0.0, responseMimeType: "application/json" },
+    // 💡 🚀 بدلاً من تحليلها فوراً وتجميد الشاشة، نضعها في الطابور
+    await aiQueue.add("analyze-email", {
+      dbId: message.id,
+      subject: message.subject,
+      body: message.body || message.text || ""
     });
 
-    const cleanJson = response.text
-      .replace(/```json/gi, "")
-      .replace(/```/g, "")
-      .trim();
-    const parsedData = JSON.parse(cleanJson);
-    const validatedData = EmailAISchema.parse(parsedData);
-
-    let linkedTxId = null;
-    let matchConfidence = null;
-    if (validatedData.reqNumber) {
-      const matchedTx = await prisma.privateTransaction.findFirst({
-        where: {
-          OR: [
-            { transactionCode: { contains: validatedData.reqNumber } },
-            {
-              notes: {
-                path: ["refs", "baladyNumber"],
-                equals: validatedData.reqNumber,
-              },
-            },
-          ],
-        },
-      });
-      if (matchedTx) {
-        linkedTxId = matchedTx.id;
-        matchConfidence = 95;
-      }
-    }
-
-    const updatedMessage = await prisma.emailMessage.update({
-      where: { id: message.id },
-      data: {
-        isAnalyzed: true,
-        ...validatedData,
-        linkedTxId: linkedTxId,
-        matchConfidence: matchConfidence,
-      },
+    // نرد على الواجهة بأن المهمة قيد التنفيذ
+    res.status(202).json({ 
+      success: true, 
+      message: "تم إرسال الرسالة إلى طابور الذكاء الاصطناعي لتحليلها في الخلفية." 
     });
 
-    res.json({ success: true, data: updatedMessage });
   } catch (error) {
-    console.error("AI Email Analysis Error:", error);
+    console.error("AI Queue Error:", error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -637,25 +570,17 @@ exports.deleteMessagePermanently = async (req, res) => {
 exports.syncHostingerEmails = async (req, res) => {
   let client;
   try {
-    const account = await prisma.emailAccount.findFirst({
-      where: { isActive: true },
-    });
-    if (!account)
-      return res
-        .status(404)
-        .json({ success: false, message: "لا يوجد حساب بريد مربوط" });
+    const account = await prisma.emailAccount.findFirst({ where: { isActive: true } });
+    if (!account) return res.status(404).json({ success: false, message: "لا يوجد حساب بريد مربوط" });
 
     // 1. الرد الفوري من قاعدة البيانات لتسريع واجهة المستخدم
-    // بمجرد أن يطلب الفرونت إند الرسائل، نعطيه ما لدينا في الداتابيز فوراً
     const localMessages = await prisma.emailMessage.findMany({
       orderBy: { date: "desc" },
-      take: 10, // جلب آخر 10 رسالة فوراً
+      take: 10,
     });
+    res.json({ success: true, data: localMessages }); // 👈 نرد للمستخدم فوراً!
 
-    // إرسال الرد للفرونت إند للعمل، وإكمال المزامنة في الخلفية بصمت
-    res.json({ success: true, data: localMessages });
-
-    // --- ما يلي يحدث في الخلفية دون تعطيل المستخدم ---
+    // 2. إكمال المزامنة في الخلفية بصمت
     client = new ImapFlow({
       host: account.imapServer || "imap.hostinger.com",
       port: account.imapPort || 993,
@@ -668,33 +593,20 @@ exports.syncHostingerEmails = async (req, res) => {
     let lock = await client.getMailboxLock("INBOX");
 
     try {
-      // معرفة أعلى UID موجود في قاعدة البيانات لنجلب ما بعده فقط
       const lastSavedMessage = await prisma.emailMessage.findFirst({
         where: { accountId: account.id, isSent: false, isDraft: false },
-        orderBy: { messageId: "desc" }, // افتراض أن messageId هو الـ UID
+        orderBy: { messageId: "desc" },
       });
 
-      const highestUid =
-        lastSavedMessage && !isNaN(lastSavedMessage.messageId)
-          ? parseInt(lastSavedMessage.messageId)
-          : 1;
+      const highestUid = lastSavedMessage && !isNaN(lastSavedMessage.messageId) ? parseInt(lastSavedMessage.messageId) : 1;
+      if (client.mailbox.exists === 0) return;
 
-      const totalMessages = client.mailbox.exists;
-      if (totalMessages === 0) return;
-
-      // ⚡ جلب الرسائل الجديدة فقط (التي الـ UID الخاص بها أكبر من الموجود لدينا)
       const fetchQuery = `${highestUid + 1}:*`;
 
-      for await (let msg of client.fetch(fetchQuery, {
-        source: true,
-        flags: true,
-        uid: true,
-      })) {
+      for await (let msg of client.fetch(fetchQuery, { source: true, flags: true, uid: true })) {
         const msgIdStr = msg.uid.toString();
 
-        const exists = await prisma.emailMessage.findUnique({
-          where: { messageId: msgIdStr },
-        });
+        const exists = await prisma.emailMessage.findUnique({ where: { messageId: msgIdStr } });
         if (!exists) {
           const parsed = await simpleParser(msg.source);
           const bodyText = parsed.text || "";
@@ -705,8 +617,7 @@ exports.syncHostingerEmails = async (req, res) => {
               messageId: msgIdStr,
               accountId: account.id,
               subject: subject,
-              from:
-                parsed.from?.value[0]?.address || parsed.from?.text || "مجهول",
+              from: parsed.from?.value[0]?.address || parsed.from?.text || "مجهول",
               to: account.email,
               body: bodyText,
               html: parsed.html || parsed.textAsHtml || "",
@@ -716,8 +627,12 @@ exports.syncHostingerEmails = async (req, res) => {
             },
           });
 
-          // تشغيل الذكاء الاصطناعي في الخلفية
-          analyzeInBackground(dbMessage.id, subject, bodyText);
+          // 💡 🚀 إضافة المهمة لطابور BullMQ ليحللها Worker بعيداً عن السيرفر الأساسي
+          await aiQueue.add("analyze-email", {
+            dbId: dbMessage.id,
+            subject: subject,
+            body: bodyText
+          });
         }
       }
     } finally {
@@ -727,7 +642,6 @@ exports.syncHostingerEmails = async (req, res) => {
   } catch (error) {
     if (client) await client.logout();
     console.error("Fast IMAP Sync Error:", error);
-    // لا نرسل res.status(500) لأننا أرسلنا الاستجابة بالفعل (res.json) أعلاه
   }
 };
 

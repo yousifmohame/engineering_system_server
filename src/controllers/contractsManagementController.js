@@ -1,7 +1,7 @@
 const { PrismaClient } = require("@prisma/client");
 const prisma = new PrismaClient();
 const aiService = require("../services/contractAiService");
-
+const { aiQueue } = require("../queue/aiQueue");
 // --------------------------------------------------------
 // 1. عمليات البيانات (CRUD Operations)
 // --------------------------------------------------------
@@ -205,7 +205,9 @@ exports.updateContractStatus = async (req, res) => {
     res.status(200).json({ success: true, data: updatedContract });
   } catch (error) {
     console.error("Update Contract Status Error:", error);
-    res.status(500).json({ success: false, error: "حدث خطأ أثناء تحديث حالة العقد" });
+    res
+      .status(500)
+      .json({ success: false, error: "حدث خطأ أثناء تحديث حالة العقد" });
   }
 };
 
@@ -218,15 +220,45 @@ exports.rephraseText = async (req, res) => {
     const rephrased = await aiService.rephraseText(text, formality, length);
     res.json({ success: true, rephrased });
   } catch (error) {
+    console.error("Rephrase Error:", error);
     res.status(500).json({ success: false, error: error.message });
   }
 };
 
 exports.assessRisks = async (req, res) => {
   try {
-    const { contractData } = req.body;
-    const assessment = await aiService.assessRisks(contractData);
-    res.json({ success: true, assessment });
+    const { contractId, contractData } = req.body;
+    const employeeId = req.user?.id; // من التوكن
+
+    if (!contractId)
+      return res
+        .status(400)
+        .json({ success: false, error: "رقم العقد مطلوب." });
+
+    // 1. إنشاء سجل للمتابعة (Progress Bar)
+    const newAiJob = await prisma.aiJob.create({
+      data: {
+        jobType: "ASSESS_CONTRACT_RISKS",
+        status: "PENDING",
+        progress: 0,
+        createdBy: employeeId || "SYSTEM",
+      },
+    });
+
+    // 2. إضافة المهمة للطابور
+    await aiQueue.add("assess-contract-risks", {
+      jobType: "ASSESS_CONTRACT_RISKS",
+      dbJobId: newAiJob.id,
+      employeeId: employeeId,
+      contractId: contractId,
+      contractData: contractData,
+    });
+
+    res.status(202).json({
+      success: true,
+      message: "جاري تحليل المخاطر في الخلفية، سيتم تحديث العقد فور الانتهاء.",
+      jobId: newAiJob.id,
+    });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -234,9 +266,36 @@ exports.assessRisks = async (req, res) => {
 
 exports.generateSummary = async (req, res) => {
   try {
-    const data = req.body;
-    const summaryData = await aiService.generateSummary(data);
-    res.json({ success: true, ...summaryData });
+    const { contractId, contractData } = req.body;
+    const employeeId = req.user?.id;
+
+    if (!contractId)
+      return res
+        .status(400)
+        .json({ success: false, error: "رقم العقد مطلوب." });
+
+    const newAiJob = await prisma.aiJob.create({
+      data: {
+        jobType: "GENERATE_CONTRACT_SUMMARY",
+        status: "PENDING",
+        progress: 0,
+        createdBy: employeeId || "SYSTEM",
+      },
+    });
+
+    await aiQueue.add("generate-contract-summary", {
+      jobType: "GENERATE_CONTRACT_SUMMARY",
+      dbJobId: newAiJob.id,
+      employeeId: employeeId,
+      contractId: contractId,
+      contractData: contractData,
+    });
+
+    res.status(202).json({
+      success: true,
+      message: "جاري توليد الملخص في الخلفية، سيتم تحديث الغلاف فور الانتهاء.",
+      jobId: newAiJob.id,
+    });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }

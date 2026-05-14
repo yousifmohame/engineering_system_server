@@ -47,6 +47,7 @@ function ensureUploadsDirectory() {
 // استدعاء عامل الذكاء الاصطناعي ليعمل في الخلفية
 require('./src/queue/aiWorker');
 require('./src/queue/optimizationWorker');
+require('./src/queue/aiEmailWorker');
 
 async function startServer() {
   try {
