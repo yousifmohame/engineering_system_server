@@ -45,13 +45,13 @@ exports.getDashboardStats = async (req, res) => {
       prisma.documentedRecord.count({ where: { type: "INVOICE" } }),
       prisma.documentedRecord.count({ where: { type: "QUOTATION" } }),
       prisma.documentedRecord.count({ where: { type: "EXTERNAL" } }),
-      prisma.documentedRecord.count({ where: { status: "REVOKED" } }), // الوثائق الملغاة
+      prisma.documentedRecord.count({ where: { status: "REVOKED" } }),
     ]);
 
     const recentActivity = await prisma.documentedRecord.findMany({
       take: 6,
       orderBy: { createdAt: "desc" },
-      include: { sealTemplate: true },
+      // 💡 تم حذف include: { sealTemplate: true }
     });
 
     res.status(200).json({
@@ -71,59 +71,19 @@ exports.getDashboardStats = async (req, res) => {
 };
 
 // ==========================================
-// 2. Templates Management (إدارة القوالب)
+// 2. Templates Management (إدارة القوالب - تم تعطيلها بأمان)
 // ==========================================
+// 💡 نترك هذه الدوال ترجع بيانات فارغة بدلاً من حذفها لكي لا يحدث خطأ 404 إذا ناداها الفرونت إند القديم
 exports.getTemplates = async (req, res) => {
-  try {
-    const templates = await prisma.sealTemplate.findMany({
-      orderBy: { createdAt: "desc" },
-    });
-    res.status(200).json({ success: true, data: templates });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
+  res.status(200).json({ success: true, data: [] });
 };
 
 exports.saveTemplate = async (req, res) => {
-  try {
-    const data = req.body;
-
-    // إذا تم تعيين هذا القالب كافتراضي، قم بإلغاء الافتراضي من البقية
-    if (data.isDefault) {
-      await prisma.sealTemplate.updateMany({
-        where: { isDefault: true },
-        data: { isDefault: false },
-      });
-    }
-
-    let template;
-    if (data.id && !data.id.startsWith("new-")) {
-      template = await prisma.sealTemplate.update({
-        where: { id: data.id },
-        data,
-      });
-    } else {
-      const { id, ...createData } = data;
-      template = await prisma.sealTemplate.create({ data: createData });
-    }
-
-    res.status(200).json({ success: true, data: template });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
+  res.status(200).json({ success: true, data: {} });
 };
 
 exports.deleteTemplate = async (req, res) => {
-  try {
-    const { id } = req.params;
-    await prisma.sealTemplate.delete({ where: { id } });
-    res.status(200).json({ success: true, message: "تم حذف القالب بنجاح" });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "لا يمكن حذف قالب مرتبط بوثائق سابقة.",
-    });
-  }
+  res.status(200).json({ success: true, message: "تمت العملية بنجاح" });
 };
 
 // ==========================================
@@ -131,8 +91,7 @@ exports.deleteTemplate = async (req, res) => {
 // ==========================================
 exports.createDocumentation = async (req, res) => {
   try {
-    const { docType, docId, signatureType, templateId, partyBName, fileName } =
-      req.body;
+    const { docType, docId, signatureType, partyBName, fileName } = req.body;
     const employeeId = req.user?.id || "SYSTEM";
     let finalFileUrl = "";
 
@@ -148,51 +107,26 @@ exports.createDocumentation = async (req, res) => {
       });
     }
 
-    // 2. جلب القالب (Seal Template)
-    // 2. جلب القالب (Seal Template) بذكاء
-    let template;
-    if (templateId) {
-      template = await prisma.sealTemplate.findUnique({
-        where: { id: templateId },
-      });
-    } else {
-      // 💡 إذا لم يتم إرسال قالب، نبحث عن القالب الافتراضي
-      template = await prisma.sealTemplate.findFirst({
-        where: { isDefault: true },
-      });
-      if (!template) {
-        // إذا لم يكن هناك قالب افتراضي، نجلب أول قالب موجود في النظام
-        template = await prisma.sealTemplate.findFirst();
-      }
-    }
-
-    if (!template) {
-      return res.status(404).json({
-        success: false,
-        message:
-          "لا يوجد قوالب أختام في النظام. يرجى إنشاء قالب أولاً من الإعدادات.",
-      });
-    }
-    // 3. توليد السريال (Serial Number)
+    // 2. توليد السريال (Serial Number) بدون الاعتماد على قوالب الداتا بيز
     const year = new Date().getFullYear();
     const randomDigits = Math.floor(100000 + Math.random() * 900000);
-    const serialNumber = `${template.serialPrefix}${year}-${randomDigits}`;
+    const serialPrefix = "DOC"; // بادئة السيريال الثابتة
+    const serialNumber = `${serialPrefix}${year}-${randomDigits}`;
 
-    // 4. 🚀 توليد الختم الأمني (QR + Barcode + 8-Digit Token)
-    // نستخدم الخدمة التي صممناها لنحصل على الـ Token المكون من 8 أرقام والصور
+    // 3. 🚀 توليد الختم الأمني (QR + Barcode + 8-Digit Token)
     const stampData = await stampSecurityService.generateSecureStampData(
       docId || "EXT",
       serialNumber,
     );
 
-    // 5. التشفير الداخلي (Security Hash) إضافي لضمان عدم التلاعب
+    // 4. التشفير الداخلي (Security Hash)
     const hashPayload = `${serialNumber}|${stampData.token}|${docType}`;
     const securityHash = crypto
       .createHash("sha256")
       .update(hashPayload)
       .digest("hex");
 
-    // 6. الحفظ في قاعدة البيانات
+    // 5. الحفظ في قاعدة البيانات
     const documentedRecord = await prisma.documentedRecord.create({
       data: {
         name: fileName || `مستند ${docType} #${docId || "خارجي"}`,
@@ -200,17 +134,17 @@ exports.createDocumentation = async (req, res) => {
         referenceId: docId || null,
         partyB: partyBName || "غير محدد",
         serialNumber: serialNumber,
-        verificationToken: stampData.token, // 👈 حفظ التوكن للتحقق لاحقاً
+        verificationToken: stampData.token,
         securityHash: securityHash,
         fileUrl: finalFileUrl,
         signatureType: signatureType.toUpperCase(),
-        sealTemplateId: template.id,
         status: "VALID",
         createdBy: employeeId,
+        // 💡 تم حذف إسناد sealTemplateId
       },
     });
 
-    // 7. الرد بإرجاع (الوثيقة + بيانات الختم لترسمها الفرونت إند فوراً)
+    // 6. الرد بإرجاع البيانات
     res.status(201).json({
       success: true,
       message: "تم التوثيق وإصدار الختم الأمني بنجاح",
@@ -240,7 +174,6 @@ exports.getRegistry = async (req, res) => {
   try {
     const { search, type, status } = req.query;
 
-    // بناء فلاتر البحث الديناميكية
     const whereClause = {};
     if (type && type !== "ALL") whereClause.type = type;
     if (status && status !== "ALL") whereClause.status = status;
@@ -255,19 +188,17 @@ exports.getRegistry = async (req, res) => {
     const records = await prisma.documentedRecord.findMany({
       where: whereClause,
       orderBy: { createdAt: "desc" },
-      // 💡 التعديل هنا: جلب القالب بالكامل لتفادي خطأ الحقول الناقصة
-      include: { sealTemplate: true },
-      take: 100, // Limit for performance
+      // 💡 تم حذف include: { sealTemplate: true }
+      take: 100,
     });
 
     res.status(200).json({ success: true, data: records });
   } catch (error) {
-    console.error("Registry Error:", error); // 👈 سيطبع الخطأ الحقيقي في الكونسول لتراه
+    console.error("Registry Error:", error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// 🛑 دالة إلغاء/إبطال وثيقة (Revoke)
 exports.revokeDocument = async (req, res) => {
   try {
     const { id } = req.params;
@@ -285,14 +216,13 @@ exports.revokeDocument = async (req, res) => {
   }
 };
 
-// 🛡️ Public Route للتحقق من صحة المستند عبر مسح الـ QR أو إدخال الـ 8 أرقام
 exports.verifyDocument = async (req, res) => {
   try {
-    const { token } = req.params; // نستقبل التوكن وليس السيريال
+    const { token } = req.params;
 
     const record = await prisma.documentedRecord.findUnique({
       where: { verificationToken: token },
-      include: { sealTemplate: true },
+      // 💡 تم حذف include: { sealTemplate: true }
     });
 
     if (!record) {
@@ -326,6 +256,7 @@ exports.verifyDocument = async (req, res) => {
       .json({ success: false, message: "حدث خطأ أثناء فحص الوثيقة." });
   }
 };
+
 exports.approveAndBurnDocument = async (req, res) => {
   try {
     const { id } = req.params;
@@ -349,11 +280,7 @@ exports.approveAndBurnDocument = async (req, res) => {
     let firstPage;
     let pageWidth, pageHeight;
 
-    // ==========================================
-    // الخطوة 1: توحيد الملفات لكي تصبح كلها PDF
-    // ==========================================
     if (fileExtension === ".pdf") {
-      // إذا كان الملف أصلاً PDF، نقرأه مباشرة
       const existingPdfBytes = fs.readFileSync(originalFilePath);
       pdfDoc = await PDFDocument.load(existingPdfBytes);
       firstPage = pdfDoc.getPages()[0];
@@ -361,7 +288,6 @@ exports.approveAndBurnDocument = async (req, res) => {
       pageWidth = size.width;
       pageHeight = size.height;
     } else if ([".png", ".jpg", ".jpeg"].includes(fileExtension)) {
-      // إذا كان الملف صورة، ننشئ PDF جديد ونضع الصورة بداخله
       pdfDoc = await PDFDocument.create();
       const imageBytes = fs.readFileSync(originalFilePath);
 
@@ -372,15 +298,12 @@ exports.approveAndBurnDocument = async (req, res) => {
         embeddedImage = await pdfDoc.embedJpg(imageBytes);
       }
 
-      // أخذ أبعاد الصورة لنجعل صفحة الـ PDF مطابقة لها تماماً
       const imgDims = embeddedImage.scale(1);
       pageWidth = imgDims.width;
       pageHeight = imgDims.height;
 
-      // إنشاء صفحة مطابقة لحجم الصورة
       firstPage = pdfDoc.addPage([pageWidth, pageHeight]);
 
-      // رسم الصورة لتملا الصفحة بالكامل
       firstPage.drawImage(embeddedImage, {
         x: 0,
         y: 0,
@@ -393,9 +316,6 @@ exports.approveAndBurnDocument = async (req, res) => {
         .json({ success: false, message: "صيغة الملف غير مدعومة للتوثيق" });
     }
 
-    // ==========================================
-    // الخطوة 2: طباعة الأختام (Vector) على الـ PDF الموحد
-    // ==========================================
     for (const stamp of stamps) {
       const vectorStampBuffer = await convertSvgToPdfVector(
         stamp.svgString,
@@ -421,13 +341,8 @@ exports.approveAndBurnDocument = async (req, res) => {
       });
     }
 
-    // حفظ ملف الـ PDF النهائي
     const finalPdfBytes = await pdfDoc.save();
 
-    // ==========================================
-    // الخطوة 3: تحديث المسارات وقاعدة البيانات
-    // ==========================================
-    // تغيير الامتداد إلى .pdf إذا كان صورة
     let finalFileUrl = record.fileUrl;
     let finalFilePath = originalFilePath;
 
@@ -440,20 +355,16 @@ exports.approveAndBurnDocument = async (req, res) => {
         new RegExp(`\\${fileExtension}$`),
         ".pdf",
       );
-
-      // حذف الصورة الأصلية لأننا استبدلناها بـ PDF
       fs.unlinkSync(originalFilePath);
     }
 
-    // كتابة الملف الجديد
     fs.writeFileSync(finalFilePath, finalPdfBytes);
 
-    // تحديث حالة السجل ورابط الملف في قاعدة البيانات
     const updatedRecord = await prisma.documentedRecord.update({
       where: { id },
       data: {
         status: "VALID",
-        fileUrl: finalFileUrl, // تحديث الرابط ليكون .pdf
+        fileUrl: finalFileUrl,
       },
     });
 
