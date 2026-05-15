@@ -216,25 +216,26 @@ exports.revokeDocument = async (req, res) => {
   }
 };
 
+// في ملف electronicDocController.js
 exports.verifyDocument = async (req, res) => {
   try {
     const { token } = req.params;
 
     const record = await prisma.documentedRecord.findUnique({
       where: { verificationToken: token },
-      // 💡 تم حذف include: { sealTemplate: true }
     });
 
     if (!record) {
-      return res
-        .status(404)
-        .json({ success: false, message: "مستند مزور أو غير مسجل في النظام." });
+      return res.status(404).json({ success: false, message: "مستند مزور أو غير مسجل في النظام." });
     }
 
     if (record.status === "REVOKED") {
       return res.status(403).json({
         success: false,
         message: "هذا المستند تم إبطاله وغير صالح للاستخدام.",
+        data: {
+          serialNumber: record.serialNumber, // نرسل السيريال فقط للتأكيد
+        }
       });
     }
 
@@ -248,12 +249,11 @@ exports.verifyDocument = async (req, res) => {
         serialNumber: record.serialNumber,
         timestamp: record.createdAt,
         hash: record.securityHash,
+        fileUrl: record.fileUrl, // 👈 أضفنا رابط الملف هنا ليتم عرضه
       },
     });
   } catch (error) {
-    res
-      .status(500)
-      .json({ success: false, message: "حدث خطأ أثناء فحص الوثيقة." });
+    res.status(500).json({ success: false, message: "حدث خطأ أثناء فحص الوثيقة." });
   }
 };
 
