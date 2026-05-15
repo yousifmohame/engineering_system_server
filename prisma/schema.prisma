@@ -3432,19 +3432,20 @@ model DocumentedRecord {
   referenceId String? // ID العقد أو الفاتورة المرتبطة (nullable للملفات الخارجية)
   partyB      String? // اسم العميل أو الجهة
 
-  serialNumber String @unique
-  securityHash String @unique // الهاش المشفر لضمان عدم التلاعب
-  fileUrl      String // مسار ملف الـ PDF النهائي الموثق
+  serialNumber      String  @unique
+  verificationToken String? @unique
+  securityHash      String  @unique // الهاش المشفر لضمان عدم التلاعب
+  fileUrl           String // مسار ملف الـ PDF النهائي الموثق
 
-  status        DocumentStatus @default(VERIFIED)
-  signatureType SignatureType
+  status        String? @default("VALID") // VERIFIED, VALID, REVOKED
+  signatureType String?
 
   // Relations
   sealTemplateId String?
   sealTemplate   SealTemplate? @relation(fields: [sealTemplateId], references: [id], onDelete: SetNull)
 
   createdBy String // ID الموظف الذي قام بالتوثيق
-
+  updatedAt DateTime @default(now())
   createdAt DateTime @default(now()) // timestamp
 }
 
@@ -3662,4 +3663,15 @@ model AttendancePolicy {
   enableAiExcuseApproval Boolean  @default(true) // الذكاء الاصطناعي للأعذار
   enableAiCriticalAlerts Boolean  @default(true) // الذكاء الاصطناعي للتنبيهات
   updatedAt              DateTime @updatedAt
+}
+
+// جدول الأختام المرجعية
+model DeviceStamp {
+  token     String   @id // الـ 8 أرقام ستكون هي المفتاح الأساسي
+  deviceId  String
+  printId   String
+  createdAt DateTime @default(now())
+
+  // (اختياري) يمكنك ربطها بجدول الأجهزة إذا أردت
+  // device     Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
 }

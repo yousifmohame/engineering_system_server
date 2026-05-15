@@ -37,4 +37,6 @@ router.post("/upload", upload.single("file"), deviceController.uploadAttachment)
 // 🚀 مسار رفع صورة المواصفات للذكاء الاصطناعي
 router.post("/extract-specs", upload.single("image"), deviceController.extractSpecsFromImage);
 
+router.get('/:id/stamp', deviceController.getSecureStamp);
+
 module.exports = router;

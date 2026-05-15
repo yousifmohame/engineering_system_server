@@ -248,8 +248,8 @@ app.use("/api/contacts", contactRoutes);
 const meetingMinutesRoutes = require('./routes/meetingMinutesRoutes');
 app.use('/api/meeting-minutes', meetingMinutesRoutes);
 
-const documentationRoutes = require('./routes/documentationRoutes');
-app.use('/api/documentation', documentationRoutes);
+const electronicDocRoutes = require('./routes/electronicDocRoutes');
+app.use('/api/documentation', electronicDocRoutes);
 
 // استيراد مسار الأرشيف الجديد
 const archivedProjectRoutes = require('./routes/archivedProjectRoutes');

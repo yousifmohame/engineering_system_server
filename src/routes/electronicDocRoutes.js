@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const documentationController = require('../controllers/documentationController');
+const documentationController = require('../controllers/electronicDocController');
 const { protect } = require('../middleware/authMiddleware');
 const multer = require('multer');
 const fs = require('fs');
@@ -33,7 +33,7 @@ const upload = multer({ storage: storage });
 // المسارات (Routes)
 // ==========================================
 router.use(protect); // حماية المسارات
-
+router.post('/', protect, upload.single('file'), documentationController.createDocumentation);
 router.get('/dashboard', documentationController.getDashboardStats);
 router.get('/registry', documentationController.getRegistry);
 
@@ -45,5 +45,5 @@ router.route('/templates')
 router.post('/document', upload.single('externalFile'), documentationController.createDocumentation);
 // Public Verification Route (لا يحتاج protect)
 router.get('/verify/:serial', documentationController.verifyDocument);
-
+router.put('/:id/approve', documentationController.approveAndBurnDocument);
 module.exports = router;

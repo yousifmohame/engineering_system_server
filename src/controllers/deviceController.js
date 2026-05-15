@@ -4,6 +4,7 @@ const fs = require("fs");
 
 // 💡 1. استيراد الطابور الموحد (تأكد من المسار حسب هيكلة مجلداتك)
 const { aiQueue } = require("../queue/aiQueue"); 
+const stampSecurityService = require('../services/stampSecurityService');
 
 exports.getDevices = async (req, res) => {
   try {
@@ -178,5 +179,25 @@ exports.addCategory = async (req, res) => {
   } catch (error) {
     if (error.code === "P2002") return res.status(400).json({ success: false, message: "التصنيف موجود مسبقاً" });
     res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+exports.getSecureStamp = async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const device = await prisma.device.findUnique({ where: { id } });
+    if (!device) return res.status(404).json({ success: false, message: 'الجهاز غير موجود' });
+
+    // 💡 نمرر الـ id والـ deviceCode فقط
+    const stampData = await stampSecurityService.generateSecureStampData(
+      device.id, 
+      device.deviceCode
+    );
+
+    res.json({ success: true, data: stampData });
+  } catch (error) {
+    console.error("Stamp Generation Error:", error);
+    res.status(500).json({ success: false, message: 'فشل توليد الختم الآمن' });
   }
 };
