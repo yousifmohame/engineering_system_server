@@ -1,13 +1,33 @@
 const { PrismaClient } = require("@prisma/client");
 const prisma = new PrismaClient();
 const crypto = require("crypto");
-const { PDFDocument } = require("pdf-lib");
+const { PDFDocument, degrees } = require("pdf-lib");
 const sharp = require("sharp");
 const fs = require("fs");
 const path = require("path");
 
 // 💡 استدعاء خدمة الأمان التي صممناها سابقاً
 const stampSecurityService = require("../services/stampSecurityService");
+
+const PDFDocumentKit = require("pdfkit");
+const SVGtoPDF = require("svg-to-pdfkit");
+
+function convertSvgToPdfVector(svgString, width = 900, height = 410) {
+  return new Promise((resolve, reject) => {
+    // إنشاء ملف PDF فارغ في الذاكرة بأبعاد الختم الأصلية
+    const doc = new PDFDocumentKit({ size: [width, height], margin: 0 });
+    const buffers = [];
+
+    doc.on("data", buffers.push.bind(buffers));
+    doc.on("end", () => resolve(Buffer.concat(buffers)));
+    doc.on("error", reject);
+
+    // رسم الـ SVG كخطوط (Vector) داخل الـ PDF
+    SVGtoPDF(doc, svgString, 0, 0, { preserveAspectRatio: "xMidYMid meet" });
+
+    doc.end();
+  });
+}
 
 // ==========================================
 // 1. Dashboard & Stats (لوحة التحكم)
@@ -317,112 +337,131 @@ exports.approveAndBurnDocument = async (req, res) => {
         .status(404)
         .json({ success: false, message: "السجل غير موجود" });
 
-    const filePath = path.join(__dirname, "..", "..", record.fileUrl);
-    if (!fs.existsSync(filePath))
+    const originalFilePath = path.join(__dirname, "..", "..", record.fileUrl);
+    if (!fs.existsSync(originalFilePath))
       return res
         .status(404)
         .json({ success: false, message: "الملف الأصلي غير موجود" });
 
-    const fileExtension = path.extname(filePath).toLowerCase();
+    const fileExtension = path.extname(originalFilePath).toLowerCase();
+
+    let pdfDoc;
+    let firstPage;
+    let pageWidth, pageHeight;
 
     // ==========================================
-    // 🖨️ معالجة ملفات الـ PDF
+    // الخطوة 1: توحيد الملفات لكي تصبح كلها PDF
     // ==========================================
     if (fileExtension === ".pdf") {
-      const existingPdfBytes = fs.readFileSync(filePath);
-      const pdfDoc = await PDFDocument.load(existingPdfBytes);
-      const pages = pdfDoc.getPages();
-      const firstPage = pages[0];
-      const { width, height } = firstPage.getSize();
+      // إذا كان الملف أصلاً PDF، نقرأه مباشرة
+      const existingPdfBytes = fs.readFileSync(originalFilePath);
+      pdfDoc = await PDFDocument.load(existingPdfBytes);
+      firstPage = pdfDoc.getPages()[0];
+      const size = firstPage.getSize();
+      pageWidth = size.width;
+      pageHeight = size.height;
+    } else if ([".png", ".jpg", ".jpeg"].includes(fileExtension)) {
+      // إذا كان الملف صورة، ننشئ PDF جديد ونضع الصورة بداخله
+      pdfDoc = await PDFDocument.create();
+      const imageBytes = fs.readFileSync(originalFilePath);
 
-      for (const stamp of stamps) {
-        // 💡 السحر هنا: تحويل كود الـ SVG الكامل إلى صورة عالية الدقة (density 300) وتدويرها!
-        const imageBuffer = await sharp(Buffer.from(stamp.svgString), {
-          density: 300,
-        })
-          .rotate(stamp.rotation || 0, {
-            background: { r: 0, g: 0, b: 0, alpha: 0 },
-          })
-          .png()
-          .toBuffer();
-
-        const embeddedImage = await pdfDoc.embedPng(imageBuffer);
-
-        const stampWidth = stamp.widthPercent * width;
-        const stampHeight = stamp.heightPercent * height;
-        const xPos = stamp.xPercent * width;
-        const yPos = stamp.yPercent * height;
-
-        firstPage.drawImage(embeddedImage, {
-          x: xPos,
-          y: yPos,
-          width: stampWidth,
-          height: stampHeight,
-        });
+      let embeddedImage;
+      if (fileExtension === ".png") {
+        embeddedImage = await pdfDoc.embedPng(imageBytes);
+      } else {
+        embeddedImage = await pdfDoc.embedJpg(imageBytes);
       }
 
-      const pdfBytes = await pdfDoc.save();
-      fs.writeFileSync(filePath, pdfBytes);
+      // أخذ أبعاد الصورة لنجعل صفحة الـ PDF مطابقة لها تماماً
+      const imgDims = embeddedImage.scale(1);
+      pageWidth = imgDims.width;
+      pageHeight = imgDims.height;
+
+      // إنشاء صفحة مطابقة لحجم الصورة
+      firstPage = pdfDoc.addPage([pageWidth, pageHeight]);
+
+      // رسم الصورة لتملا الصفحة بالكامل
+      firstPage.drawImage(embeddedImage, {
+        x: 0,
+        y: 0,
+        width: pageWidth,
+        height: pageHeight,
+      });
+    } else {
+      return res
+        .status(400)
+        .json({ success: false, message: "صيغة الملف غير مدعومة للتوثيق" });
     }
 
     // ==========================================
-    // 🖼️ معالجة الصور العادية (PNG, JPG)
+    // الخطوة 2: طباعة الأختام (Vector) على الـ PDF الموحد
     // ==========================================
-    else if ([".png", ".jpg", ".jpeg"].includes(fileExtension)) {
-      const originalImage = sharp(filePath);
-      const metadata = await originalImage.metadata();
-      const { width, height } = metadata;
+    for (const stamp of stamps) {
+      const vectorStampBuffer = await convertSvgToPdfVector(
+        stamp.svgString,
+        900,
+        410,
+      );
+      const stampPdfDoc = await PDFDocument.load(vectorStampBuffer);
+      const [embeddedStampPage] = await pdfDoc.embedPages([
+        stampPdfDoc.getPages()[0],
+      ]);
 
-      const composites = [];
+      const stampWidth = stamp.widthPercent * pageWidth;
+      const stampHeight = stamp.heightPercent * pageHeight;
+      const xPos = stamp.xPercent * pageWidth;
+      const yPos = stamp.yPercent * pageHeight;
 
-      for (const stamp of stamps) {
-        // تحويل وتدوير الـ SVG إلى صورة تناسب تركيب sharp
-        const stampBuffer = await sharp(Buffer.from(stamp.svgString), {
-          density: 300,
-        })
-          .rotate(stamp.rotation || 0, {
-            background: { r: 0, g: 0, b: 0, alpha: 0 },
-          })
-          .png()
-          .toBuffer();
-
-        const stampWidth = Math.round(stamp.widthPercent * width);
-        const stampHeight = Math.round(stamp.heightPercent * height);
-
-        const xPos = Math.round(stamp.xPercent * width);
-        const yPos = Math.round(height - stamp.yPercent * height - stampHeight); // عکس الإحداثيات לلصور
-
-        const resizedStamp = await sharp(stampBuffer)
-          .resize(stampWidth, stampHeight, {
-            fit: "contain",
-            background: { r: 0, g: 0, b: 0, alpha: 0 },
-          })
-          .toBuffer();
-
-        composites.push({
-          input: resizedStamp,
-          top: Math.max(0, yPos),
-          left: Math.max(0, xPos),
-        });
-      }
-
-      const tempFilePath = `${filePath}.temp`;
-      await originalImage.composite(composites).toFile(tempFilePath);
-      fs.renameSync(tempFilePath, filePath);
+      firstPage.drawPage(embeddedStampPage, {
+        x: xPos,
+        y: yPos,
+        width: stampWidth,
+        height: stampHeight,
+        rotation: stamp.rotation ? degrees(stamp.rotation) : degrees(0),
+      });
     }
 
+    // حفظ ملف الـ PDF النهائي
+    const finalPdfBytes = await pdfDoc.save();
+
+    // ==========================================
+    // الخطوة 3: تحديث المسارات وقاعدة البيانات
+    // ==========================================
+    // تغيير الامتداد إلى .pdf إذا كان صورة
+    let finalFileUrl = record.fileUrl;
+    let finalFilePath = originalFilePath;
+
+    if (fileExtension !== ".pdf") {
+      finalFileUrl = record.fileUrl.replace(
+        new RegExp(`\\${fileExtension}$`),
+        ".pdf",
+      );
+      finalFilePath = originalFilePath.replace(
+        new RegExp(`\\${fileExtension}$`),
+        ".pdf",
+      );
+
+      // حذف الصورة الأصلية لأننا استبدلناها بـ PDF
+      fs.unlinkSync(originalFilePath);
+    }
+
+    // كتابة الملف الجديد
+    fs.writeFileSync(finalFilePath, finalPdfBytes);
+
+    // تحديث حالة السجل ورابط الملف في قاعدة البيانات
     const updatedRecord = await prisma.documentedRecord.update({
       where: { id },
-      data: { status: "VALID" },
+      data: {
+        status: "VALID",
+        fileUrl: finalFileUrl, // تحديث الرابط ليكون .pdf
+      },
     });
 
-    res
-      .status(200)
-      .json({
-        success: true,
-        message: "تم حرق الأختام واعتماد الوثيقة بنجاح",
-        data: updatedRecord,
-      });
+    res.status(200).json({
+      success: true,
+      message: "تم توثيق الملف وتحويله إلى PDF بنجاح",
+      data: updatedRecord,
+    });
   } catch (error) {
     console.error("Burn Error:", error);
     res
