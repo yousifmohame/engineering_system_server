@@ -29,6 +29,18 @@ function convertSvgToPdfVector(svgString, width = 900, height = 410) {
   });
 }
 
+// دالة مساعدة لتعمية اسم المالك عند الفحص العام (Data Masking)
+const maskName = (name) => {
+  if (!name || name === "غير محدد") return "غير محدد";
+  return name
+    .split(" ")
+    .map((word) => {
+      if (word.length <= 2) return word;
+      return word[0] + "*".repeat(word.length - 2) + word[word.length - 1];
+    })
+    .join(" ");
+};
+
 // ==========================================
 // 1. Dashboard & Stats (لوحة التحكم)
 // ==========================================
@@ -51,7 +63,6 @@ exports.getDashboardStats = async (req, res) => {
     const recentActivity = await prisma.documentedRecord.findMany({
       take: 6,
       orderBy: { createdAt: "desc" },
-      // 💡 تم حذف include: { sealTemplate: true }
     });
 
     res.status(200).json({
@@ -71,9 +82,8 @@ exports.getDashboardStats = async (req, res) => {
 };
 
 // ==========================================
-// 2. Templates Management (إدارة القوالب - تم تعطيلها بأمان)
+// 2. Templates Management
 // ==========================================
-// 💡 نترك هذه الدوال ترجع بيانات فارغة بدلاً من حذفها لكي لا يحدث خطأ 404 إذا ناداها الفرونت إند القديم
 exports.getTemplates = async (req, res) => {
   res.status(200).json({ success: true, data: [] });
 };
@@ -87,7 +97,7 @@ exports.deleteTemplate = async (req, res) => {
 };
 
 // ==========================================
-// 3. Document Creation & Cryptography (قلب النظام)
+// 3. Document Creation & Cryptography
 // ==========================================
 exports.createDocumentation = async (req, res) => {
   try {
@@ -95,38 +105,32 @@ exports.createDocumentation = async (req, res) => {
     const employeeId = req.user?.id || "SYSTEM";
     let finalFileUrl = "";
 
-    // 1. معالجة الملف
     if (req.file) {
       finalFileUrl = `/uploads/documented/${req.file.filename}`;
     } else if (docId) {
       finalFileUrl = `/system-files/${docType}/${docId}.pdf`;
     } else {
-      return res.status(400).json({
-        success: false,
-        message: "يجب إرفاق ملف أو تحديد معرف مستند داخلي.",
-      });
+      return res
+        .status(400)
+        .json({
+          success: false,
+          message: "يجب إرفاق ملف أو تحديد معرف مستند داخلي.",
+        });
     }
 
-    // 2. توليد السريال (Serial Number) بدون الاعتماد على قوالب الداتا بيز
     const year = new Date().getFullYear();
     const randomDigits = Math.floor(100000 + Math.random() * 900000);
-    const serialPrefix = "DOC"; // بادئة السيريال الثابتة
-    const serialNumber = `${serialPrefix}${year}-${randomDigits}`;
+    const serialNumber = `DOC${year}-${randomDigits}`;
 
-    // 3. 🚀 توليد الختم الأمني (QR + Barcode + 8-Digit Token)
     const stampData = await stampSecurityService.generateSecureStampData(
       docId || "EXT",
       serialNumber,
     );
-
-    // 4. التشفير الداخلي (Security Hash)
-    const hashPayload = `${serialNumber}|${stampData.token}|${docType}`;
     const securityHash = crypto
       .createHash("sha256")
-      .update(hashPayload)
+      .update(`${serialNumber}|${stampData.token}|${docType}`)
       .digest("hex");
 
-    // 5. الحفظ في قاعدة البيانات
     const documentedRecord = await prisma.documentedRecord.create({
       data: {
         name: fileName || `مستند ${docType} #${docId || "خارجي"}`,
@@ -138,13 +142,11 @@ exports.createDocumentation = async (req, res) => {
         securityHash: securityHash,
         fileUrl: finalFileUrl,
         signatureType: signatureType.toUpperCase(),
-        status: "VALID",
+        status: "PENDING_APPROVAL",
         createdBy: employeeId,
-        // 💡 تم حذف إسناد sealTemplateId
       },
     });
 
-    // 6. الرد بإرجاع البيانات
     res.status(201).json({
       success: true,
       message: "تم التوثيق وإصدار الختم الأمني بنجاح",
@@ -167,13 +169,12 @@ exports.createDocumentation = async (req, res) => {
 };
 
 // ==========================================
-// 4. Registry & Verification (السجل والتحقق)
+// 4. Registry & Verification
 // ==========================================
 
 exports.getRegistry = async (req, res) => {
   try {
     const { search, type, status } = req.query;
-
     const whereClause = {};
     if (type && type !== "ALL") whereClause.type = type;
     if (status && status !== "ALL") whereClause.status = status;
@@ -184,17 +185,13 @@ exports.getRegistry = async (req, res) => {
         { partyB: { contains: search } },
       ];
     }
-
     const records = await prisma.documentedRecord.findMany({
       where: whereClause,
       orderBy: { createdAt: "desc" },
-      // 💡 تم حذف include: { sealTemplate: true }
       take: 100,
     });
-
     res.status(200).json({ success: true, data: records });
   } catch (error) {
-    console.error("Registry Error:", error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -206,17 +203,27 @@ exports.revokeDocument = async (req, res) => {
       where: { id },
       data: { status: "REVOKED" },
     });
-    res.status(200).json({
-      success: true,
-      message: "تم إبطال الوثيقة بنجاح.",
-      data: record,
+    await prisma.documentationAuditLog.create({
+      data: {
+        recordId: record.id,
+        action: "REVOKED",
+        employeeId: req.user?.id,
+        details: "تم إبطال الوثيقة أمنياً",
+      },
     });
+    res
+      .status(200)
+      .json({
+        success: true,
+        message: "تم إبطال الوثيقة بنجاح.",
+        data: record,
+      });
   } catch (error) {
     res.status(500).json({ success: false, message: "فشل إبطال الوثيقة." });
   }
 };
 
-// في ملف electronicDocController.js
+// 🛡️ التحقق من المستند (تم تحديثه ليرسل الميتا داتا والـ OTP)
 exports.verifyDocument = async (req, res) => {
   try {
     const { token } = req.params;
@@ -225,19 +232,94 @@ exports.verifyDocument = async (req, res) => {
       where: { verificationToken: token },
     });
 
-    if (!record) {
-      return res.status(404).json({ success: false, message: "مستند مزور أو غير مسجل في النظام." });
+    if (!record)
+      return res
+        .status(404)
+        .json({ success: false, message: "مستند مزور أو غير مسجل في النظام." });
+
+    if (!record.isVerifiable)
+      return res
+        .status(403)
+        .json({
+          success: false,
+          message: "هذا المستند غير مصرح بفحصه للعامة.",
+        });
+
+    if (record.expiryDate && new Date() > record.expiryDate) {
+      await prisma.documentedRecord.update({
+        where: { id: record.id },
+        data: { status: "EXPIRED" },
+      });
+      return res
+        .status(403)
+        .json({ success: false, message: "صلاحية هذا المستند منتهية." });
     }
 
-    if (record.status === "REVOKED") {
-      return res.status(403).json({
-        success: false,
-        message: "هذا المستند تم إبطاله وغير صالح للاستخدام.",
+    if (record.status === "PENDING_APPROVAL")
+      return res
+        .status(403)
+        .json({
+          success: false,
+          message: "هذا المستند قيد المراجعة ولم يتم اعتماده رسمياً بعد.",
+        });
+    if (record.status === "REVOKED")
+      return res
+        .status(403)
+        .json({
+          success: false,
+          message: "هذا المستند تم إبطاله وغير صالح للاستخدام.",
+          data: { serialNumber: record.serialNumber },
+        });
+    if (record.status !== "VALID")
+      return res
+        .status(403)
+        .json({
+          success: false,
+          message: `هذا المستند غير ساري (الحالة: ${record.status}).`,
+        });
+
+    if (record.maxViews !== null && record.currentViews >= record.maxViews) {
+      return res
+        .status(403)
+        .json({
+          success: false,
+          message: "تم تجاوز الحد الأقصى لمرات عرض هذا المستند המسموح بها.",
+        });
+    }
+
+    // 💡 1. إذا كان المستند يتطلب OTP ولم يتم التحقق منه في هذه الجلسة، نرسل الداتا بدون رابط الملف
+    if (record.requireOTP) {
+      // هنا مفترض إرسال SMS لرقم record.clientPhone باستخدام أي مزود خدمة
+      // مؤقتاً للتجربة، سنفترض أن الـ OTP هو: 1234
+      const mockOTP = "1234";
+
+      // يجب حفظ الـ OTP المؤقت في الـ session أو الكاش (هنا للتوضيح نرسله للفرونت وهو غير آمن بالواقع، ولكن لغرض الـ Demo)
+
+      return res.status(200).json({
+        success: true,
         data: {
-          serialNumber: record.serialNumber, // نرسل السيريال فقط للتأكيد
-        }
+          status: "OTP_REQUIRED",
+          requireOTP: true,
+          serialNumber: record.serialNumber,
+          clientPhone: record.clientPhone
+            ? record.clientPhone.replace(/.(?=.{4})/g, "*")
+            : "غير مسجل", // إخفاء جزء من الرقم
+        },
       });
     }
+
+    // 💡 2. إذا لم يكن هناك OTP، أو تم تجاوزه، نكمل عادي ونزيد المشاهدات
+    await prisma.documentedRecord.update({
+      where: { id: record.id },
+      data: { currentViews: record.currentViews + 1 },
+    });
+    await prisma.documentationAuditLog.create({
+      data: {
+        recordId: record.id,
+        action: "VERIFIED",
+        details: "تم مسح رمز הـ QR بنجاح",
+      },
+    });
 
     res.status(200).json({
       success: true,
@@ -245,22 +327,98 @@ exports.verifyDocument = async (req, res) => {
         status: "VERIFIED",
         name: record.name,
         type: record.type,
-        partyB: record.partyB,
+        partyB: maskName(record.partyB),
         serialNumber: record.serialNumber,
         timestamp: record.createdAt,
+        approvedAt: record.approvedAt,
+        expiryDate: record.expiryDate,
         hash: record.securityHash,
-        fileUrl: record.fileUrl, // 👈 أضفنا رابط الملف هنا ليتم عرضه
+        fileUrl: record.fileUrl,
+        customMetadata: record.customMetadata, // 👈 هنا تم إضافة إرسال البيانات المرنة
       },
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: "حدث خطأ أثناء فحص الوثيقة." });
+    res
+      .status(500)
+      .json({ success: false, message: "حدث خطأ أثناء فحص الوثيقة." });
   }
 };
+
+// 🛡️ دالة جديدة للتحقق من الـ OTP
+exports.verifyOTP = async (req, res) => {
+  try {
+    const { token, otpCode } = req.body;
+
+    // محاكاة للتحقق (هنا يجب مقارنته مع ما تم إرساله للعميل)
+    if (otpCode !== "1234") {
+      return res
+        .status(400)
+        .json({ success: false, message: "رمز التحقق غير صحيح" });
+    }
+
+    const record = await prisma.documentedRecord.findUnique({
+      where: { verificationToken: token },
+    });
+    if (!record)
+      return res
+        .status(404)
+        .json({ success: false, message: "مستند غير مسجل." });
+
+    // زيادة المشاهدات بعد نجاح ה-OTP
+    await prisma.documentedRecord.update({
+      where: { id: record.id },
+      data: { currentViews: record.currentViews + 1 },
+    });
+    await prisma.documentationAuditLog.create({
+      data: {
+        recordId: record.id,
+        action: "VERIFIED",
+        details: "تم التحقق من الوثيقة عبر الـ OTP",
+      },
+    });
+
+    // إرسال البيانات كاملة
+    res.status(200).json({
+      success: true,
+      data: {
+        status: "VERIFIED",
+        name: record.name,
+        type: record.type,
+        partyB: maskName(record.partyB),
+        serialNumber: record.serialNumber,
+        timestamp: record.createdAt,
+        approvedAt: record.approvedAt,
+        expiryDate: record.expiryDate,
+        hash: record.securityHash,
+        fileUrl: record.fileUrl,
+        customMetadata: record.customMetadata,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "حدث خطأ أثناء التحقق." });
+  }
+};
+
+// ==========================================
+// 5. حرق الأختام وتقديمها للاعتماد
+// ==========================================
 
 exports.approveAndBurnDocument = async (req, res) => {
   try {
     const { id } = req.params;
-    const { stamps } = req.body;
+    const {
+      stamps,
+      transactionId,
+      propertyId,
+      clientId,
+      isVerifiable = true,
+      maxViews = null,
+      expiryDate = null,
+      requireOTP = false,
+      clientPhone = null,
+      applyToAllPages = false,
+      customMetadata = [],
+    } = req.body;
 
     const record = await prisma.documentedRecord.findUnique({ where: { id } });
     if (!record)
@@ -275,35 +433,25 @@ exports.approveAndBurnDocument = async (req, res) => {
         .json({ success: false, message: "الملف الأصلي غير موجود" });
 
     const fileExtension = path.extname(originalFilePath).toLowerCase();
-
-    let pdfDoc;
-    let firstPage;
-    let pageWidth, pageHeight;
+    let pdfDoc, pageWidth, pageHeight;
 
     if (fileExtension === ".pdf") {
       const existingPdfBytes = fs.readFileSync(originalFilePath);
       pdfDoc = await PDFDocument.load(existingPdfBytes);
-      firstPage = pdfDoc.getPages()[0];
-      const size = firstPage.getSize();
+      const size = pdfDoc.getPage(0).getSize();
       pageWidth = size.width;
       pageHeight = size.height;
     } else if ([".png", ".jpg", ".jpeg"].includes(fileExtension)) {
       pdfDoc = await PDFDocument.create();
       const imageBytes = fs.readFileSync(originalFilePath);
-
-      let embeddedImage;
-      if (fileExtension === ".png") {
-        embeddedImage = await pdfDoc.embedPng(imageBytes);
-      } else {
-        embeddedImage = await pdfDoc.embedJpg(imageBytes);
-      }
-
+      let embeddedImage =
+        fileExtension === ".png"
+          ? await pdfDoc.embedPng(imageBytes)
+          : await pdfDoc.embedJpg(imageBytes);
       const imgDims = embeddedImage.scale(1);
       pageWidth = imgDims.width;
       pageHeight = imgDims.height;
-
-      firstPage = pdfDoc.addPage([pageWidth, pageHeight]);
-
+      const firstPage = pdfDoc.addPage([pageWidth, pageHeight]);
       firstPage.drawImage(embeddedImage, {
         x: 0,
         y: 0,
@@ -313,7 +461,7 @@ exports.approveAndBurnDocument = async (req, res) => {
     } else {
       return res
         .status(400)
-        .json({ success: false, message: "صيغة الملف غير مدعومة للتوثيق" });
+        .json({ success: false, message: "صيغة الملف غير مدعومة" });
     }
 
     for (const stamp of stamps) {
@@ -332,17 +480,20 @@ exports.approveAndBurnDocument = async (req, res) => {
       const xPos = stamp.xPercent * pageWidth;
       const yPos = stamp.yPercent * pageHeight;
 
-      firstPage.drawPage(embeddedStampPage, {
-        x: xPos,
-        y: yPos,
-        width: stampWidth,
-        height: stampHeight,
-        rotation: stamp.rotation ? degrees(stamp.rotation) : degrees(0),
-      });
+      const pagesCount = applyToAllPages ? pdfDoc.getPageCount() : 1;
+      for (let i = 0; i < pagesCount; i++) {
+        const page = pdfDoc.getPage(i);
+        page.drawPage(embeddedStampPage, {
+          x: xPos,
+          y: yPos,
+          width: stampWidth,
+          height: stampHeight,
+          rotation: stamp.rotation ? degrees(stamp.rotation) : degrees(0),
+        });
+      }
     }
 
     const finalPdfBytes = await pdfDoc.save();
-
     let finalFileUrl = record.fileUrl;
     let finalFilePath = originalFilePath;
 
@@ -363,20 +514,178 @@ exports.approveAndBurnDocument = async (req, res) => {
     const updatedRecord = await prisma.documentedRecord.update({
       where: { id },
       data: {
-        status: "VALID",
+        status: "PENDING_APPROVAL",
         fileUrl: finalFileUrl,
+        transactionId: transactionId || null,
+        propertyId: propertyId || null,
+        clientId: clientId || null,
+        isVerifiable: Boolean(isVerifiable),
+        maxViews: maxViews ? parseInt(maxViews) : null,
+        expiryDate: expiryDate ? new Date(expiryDate) : null,
+        requireOTP: Boolean(requireOTP),
+        clientPhone: clientPhone || null,
+        customMetadata: customMetadata.length > 0 ? customMetadata : null,
       },
     });
 
-    res.status(200).json({
-      success: true,
-      message: "تم توثيق الملف وتحويله إلى PDF بنجاح",
-      data: updatedRecord,
+    await prisma.documentationAuditLog.create({
+      data: {
+        recordId: updatedRecord.id,
+        action: "SUBMITTED_FOR_APPROVAL",
+        employeeId: req.user?.id,
+        details: "تم دمج الأختام بالملف وإرساله للمشرف للاعتماد",
+      },
     });
+
+    res
+      .status(200)
+      .json({
+        success: true,
+        message: "تم دمج الأختام بنجاح",
+        data: updatedRecord,
+      });
   } catch (error) {
     console.error("Burn Error:", error);
     res
       .status(500)
       .json({ success: false, message: "حدث خطأ أثناء دمج الأختام بالملف" });
+  }
+};
+
+// ==========================================
+// 6. Supervisor Actions (إجراءات المشرف)
+// ==========================================
+
+exports.getPendingApprovals = async (req, res) => {
+  try {
+    const pendingRecords = await prisma.documentedRecord.findMany({
+      where: { status: "PENDING_APPROVAL" },
+      orderBy: { createdAt: "asc" },
+    });
+    res.status(200).json({ success: true, data: pendingRecords });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+exports.approveDocumentFinal = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const supervisorId = req.user?.id;
+    const record = await prisma.documentedRecord.update({
+      where: { id },
+      data: {
+        status: "VALID",
+        approvedBy: supervisorId,
+        approvedAt: new Date(),
+      },
+    });
+    await prisma.documentationAuditLog.create({
+      data: {
+        recordId: record.id,
+        action: "APPROVED",
+        employeeId: supervisorId,
+        details: "تم الاعتماد النهائي من قبل المشرف والمستند أصبح سارياً",
+      },
+    });
+    res
+      .status(200)
+      .json({ success: true, message: "تم اعتماد الوثيقة نهائياً وتفعيلها." });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+exports.rejectDocument = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+    await prisma.documentedRecord.update({
+      where: { id },
+      data: { status: "REJECTED" },
+    });
+    await prisma.documentationAuditLog.create({
+      data: {
+        recordId: id,
+        action: "REJECTED",
+        employeeId: req.user?.id,
+        details: `تم رفض المستند. السبب: ${reason || "بدون سبب"}`,
+      },
+    });
+    res.status(200).json({ success: true, message: "تم رفض المستند بنجاح." });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ==========================================
+// 7. Audit & Logs (سجل التدقيق)
+// ==========================================
+
+exports.getDocumentationLogs = async (req, res) => {
+  try {
+    const { search } = req.query;
+    const logs = await prisma.documentationAuditLog.findMany({
+      where: search
+        ? {
+            OR: [
+              { details: { contains: search } },
+              { record: { name: { contains: search } } },
+              { record: { serialNumber: { contains: search } } },
+            ],
+          }
+        : {},
+      orderBy: { createdAt: "desc" },
+      take: 100,
+      include: {
+        employee: { select: { name: true } },
+        record: { select: { name: true, serialNumber: true, fileUrl: true } },
+      },
+    });
+    res.status(200).json({ success: true, data: logs });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+exports.logDocumentAction = async (req, res) => {
+  try {
+    const { recordId, action, details } = req.body;
+    await prisma.documentationAuditLog.create({
+      data: { recordId, action, details, employeeId: req.user?.id },
+    });
+    res.status(200).json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// حذف المستند نهائياً من النظام
+exports.deleteDocument = async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    // التأكد من وجود المستند
+    const record = await prisma.documentedRecord.findUnique({ where: { id } });
+    if (!record) {
+      return res.status(404).json({ success: false, message: "المستند غير موجود." });
+    }
+
+    // حذف المستند من قاعدة البيانات (سيتم حذف الـ Audit Logs المرتبطة به إذا كان onDelete: Cascade، وإلا ستتحول لـ null)
+    await prisma.documentedRecord.delete({ where: { id } });
+
+    // تسجيل الحدث أمنياً (اختياري، لأن السجل قد حُذف، ولكن لتتبع نشاط الموظف)
+    await prisma.documentationAuditLog.create({
+      data: {
+        action: "DELETED", // يجب إضافة DELETED للـ Enum في الـ Prisma Schema أو تخزينها كنص
+        employeeId: req.user?.id,
+        details: `قام بحذف المستند نهائياً (السيريال: ${record.serialNumber})`
+      }
+    });
+
+    res.status(200).json({ success: true, message: "تم الحذف بنجاح." });
+  } catch (error) {
+    console.error("Delete Error:", error);
+    res.status(500).json({ success: false, message: "حدث خطأ أثناء الحذف." });
   }
 };

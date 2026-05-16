@@ -1,49 +1,107 @@
-const express = require('express');
+const express = require("express");
 const router = express.Router();
-const documentationController = require('../controllers/electronicDocController');
-const { protect } = require('../middleware/authMiddleware');
-const multer = require('multer');
-const fs = require('fs');
-const path = require('path'); // استدعاء مكتبة المسارات
+const documentationController = require("../controllers/electronicDocController");
+const { protect } = require("../middleware/authMiddleware");
+const multer = require("multer");
+const fs = require("fs");
+const path = require("path");
 
-// 1. تحديد المسار المطلق للمجلد (بناءً على أن هذا الملف داخل src/routes)
-// هذا سيشير إلى مجلد uploads في الجذر الرئيسي للمشروع
-const uploadDir = path.join(__dirname, '../../uploads/documented');
+// ==========================================
+// 📁 إعدادات رفع الملفات (Multer Configuration)
+// ==========================================
+const uploadDir = path.join(__dirname, "../../uploads/documented");
 
-// 2. التأكد من إنشاء المجلد برمجياً إذا لم يكن موجوداً
-if (!fs.existsSync(uploadDir)){
-    fs.mkdirSync(uploadDir, { recursive: true });
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
 }
 
-// 3. إعداد التخزين في Multer
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    cb(null, uploadDir); // استخدام المسار المطلق
+    cb(null, uploadDir);
   },
   filename: function (req, file, cb) {
-    // تنظيف اسم الملف من المسافات والرموز الغريبة التي تسبب مشاكل (مثل أسماء صور واتساب)
-    const safeName = file.originalname.replace(/[^a-zA-Z0-9.]/g, '_');
-    cb(null, Date.now() + '-' + safeName);
-  }
+    // تنظيف اسم الملف من المسافات والرموز الغريبة
+    const safeName = file.originalname.replace(/[^a-zA-Z0-9.]/g, "_");
+    cb(null, Date.now() + "-" + safeName);
+  },
 });
 
 const upload = multer({ storage: storage });
 
 // ==========================================
-// المسارات (Routes)
+// 🌍 المسارات العامة (Public Routes) 
+// 💡 (يجب أن تكون قبل router.use(protect) لكي تعمل للعامة)
 // ==========================================
-router.use(protect); // حماية المسارات
-router.post('/', protect, upload.single('file'), documentationController.createDocumentation);
-router.get('/dashboard', documentationController.getDashboardStats);
-router.get('/registry', documentationController.getRegistry);
+// التحقق من المستند عبر مسح הـ QR (لاحظ استخدمنا :token وليس :serial ليتطابق مع الكنترولر)
+router.get("/verify/:token", documentationController.verifyDocument);
+router.post("/verify-otp", documentationController.verifyOTP);
 
-router.route('/templates')
+// ==========================================
+// 🛡️ تفعيل الحماية على باقي المسارات
+// ==========================================
+router.use(protect);
+
+// ==========================================
+// 📊 لوحة التحكم والإحصائيات
+// ==========================================
+router.get("/dashboard", documentationController.getDashboardStats);
+
+// ==========================================
+// 📝 إنشاء وتوثيق المستندات
+// ==========================================
+// مسار التوثيق الأساسي (استقبال ملفات وربطها)
+router.post(
+  "/",
+  upload.single("file"),
+  documentationController.createDocumentation
+);
+
+// مسار بديل (Alias) للتوثيق
+router.post(
+  "/document",
+  upload.single("externalFile"),
+  documentationController.createDocumentation
+);
+
+// حرق الأختام وتقديم المستند للاعتماد (PENDING_APPROVAL)
+router.put("/:id/approve", documentationController.approveAndBurnDocument);
+
+// ==========================================
+// 🚦 دورة الاعتماد وإجراءات المشرف (Supervisor Workflow)
+// ==========================================
+// 1. جلب المستندات المعلقة لاعتمادها
+router.get("/pending", documentationController.getPendingApprovals);
+
+router.delete("/:id", documentationController.deleteDocument);
+// 2. اعتماد المستند نهائياً (VALID)
+router.put("/:id/final-approve", documentationController.approveDocumentFinal);
+
+// 3. رفض المستند (REJECTED)
+router.put("/:id/reject", documentationController.rejectDocument);
+
+// 4. إبطال مستند ساري (REVOKED) - أمان
+router.put("/:id/revoke", documentationController.revokeDocument);
+
+// الحذف النهائي للمستند
+// ==========================================
+// 🗄️ السجل المركزي والتدقيق (Registry & Audit)
+// ==========================================
+// جلب سجل الوثائق
+router.get("/registry", documentationController.getRegistry);
+
+// جلب سجل الأنشطة والعمليات (Audit Logs)
+router.get("/logs", documentationController.getDocumentationLogs);
+
+// تسجيل حركة موظف (طباعة، تنزيل، مشاهدة)
+router.post("/logs/action", documentationController.logDocumentAction);
+
+// ==========================================
+// 🎨 إدارة قوالب الأختام (Templates)
+// ==========================================
+router.route("/templates")
   .get(documentationController.getTemplates)
   .post(documentationController.saveTemplate);
 
-// مسار التوثيق مع رفع الملف
-router.post('/document', upload.single('externalFile'), documentationController.createDocumentation);
-// Public Verification Route (لا يحتاج protect)
-router.get('/verify/:serial', documentationController.verifyDocument);
-router.put('/:id/approve', documentationController.approveAndBurnDocument);
+router.delete("/templates/:id", documentationController.deleteTemplate);
+
 module.exports = router;

@@ -124,10 +124,11 @@ model Employee {
   transactionAssignments TransactionEmployee[]
   quotationTemplates     QuotationTemplate[]
 
-  archivedProjects   ArchivedProject[]    @relation("EmployeeArchivedProjects")
-  approvedProjects   ArchivedProject[]    @relation("ProjectApprover")
+  archivedProjects   ArchivedProject[]       @relation("EmployeeArchivedProjects")
+  approvedProjects   ArchivedProject[]       @relation("ProjectApprover")
   SystemNotification SystemNotification[]
   AttendanceLog      AttendanceLog[]
+  documentationLogs  DocumentationAuditLog[]
 }
 
 // نموذج لسجل الحضور
@@ -3369,90 +3370,215 @@ enum DocumentStatus {
 }
 
 // ==========================================
-// Models for Documentation System
+// 🛡️ 1. Enums (الثوابت لضمان تكامل البيانات)
 // ==========================================
 
-// 1. قوالب الأختام (Seal Templates)
+enum SecuredDocStatus {
+  PENDING_APPROVAL // بانتظار اعتماد المشرف
+  VALID // ساري وموثق
+  REJECTED // تم رفضه من المشرف
+  REVOKED // تم إبطاله أمنياً
+  EXPIRED // منتهي الصلاحية
+}
+
+enum DocumentCategory {
+  CONTRACT
+  INVOICE
+  QUOTATION
+  RECEIPT
+  EXTERNAL
+}
+
+enum SignatureStyle {
+  DIGITAL_SEAL
+  MANUAL_SIGNATURE
+  SIG_AND_STAMP
+  NONE
+}
+
+enum StampPosition {
+  TOP_LEFT
+  TOP_RIGHT
+  BOTTOM_LEFT
+  BOTTOM_RIGHT
+  CENTER
+  CUSTOM
+}
+
+enum AuditAction {
+  SUBMITTED_FOR_APPROVAL
+  APPROVED
+  REJECTED
+  DOCUMENTED
+  VIEWED
+  VERIFIED
+  DOWNLOADED
+  PRINTED
+  SHARED
+  REVOKED
+  DELETED
+}
+
+enum StampType {
+  NONE
+  SECURE_QR
+}
+
+// ==========================================
+// 🎨 2. قوالب الأختام (Seal Templates)
+// ==========================================
 model SealTemplate {
   id                String  @id @default(uuid())
   name              String
-  stampImage        String // مسار الصورة في السيرفر أو الرابط
+  stampImage        String // مسار الصورة في السيرفر
   serialPrefix      String  @default("SEC-")
   backgroundText    String?
   backgroundColor   String  @default("#eff6ff")
   backgroundOpacity Float   @default(0.6)
-  serialPosition    String  @default("bottom") // top, bottom, inside, around
-  showTimestamp     Boolean @default(true)
-  securityHash      Boolean @default(true)
-  verificationCode  Boolean @default(true)
-  isDefault         Boolean @default(false)
+  serialPosition    String  @default("bottom")
 
-  documentedFiles DocumentedRecord[]
-  createdAt       DateTime           @default(now())
-  updatedAt       DateTime           @updatedAt
-}
+  // إعدادات القالب
+  showTimestamp    Boolean @default(true)
+  securityHash     Boolean @default(true)
+  verificationCode Boolean @default(true)
+  isDefault        Boolean @default(false)
+  isActive         Boolean @default(true)
 
-// 2. إعدادات ربط المستندات (Linkage Mappings)
-model DocTypeLinkage {
-  id                         String        @id @default(uuid())
-  docTypeId                  String        @unique // مثلا: 'contract', 'invoice'
-  docTypeName                String
-  defaultSignatureType       SignatureType @default(SIG_AND_STAMP)
-  defaultSealType            SealType      @default(OFFICE_STAMP)
-  signerRoles                Json          @default("[\"Admin\"]") // Array of roles
-  showDocumentationStatement Boolean       @default(true)
-  signaturePosition          DocPosition   @default(BOTTOM_RIGHT)
-  sealPosition               DocPosition   @default(BOTTOM_LEFT)
-  statementTemplate          String?
+  // العلاقات
+  documentedRecords DocumentedRecord[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@map("seal_templates")
 }
 
-// 3. إعدادات النظام (System Settings - Singleton Model)
+// ==========================================
+// 🔗 3. إعدادات ربط المستندات (Doc Type Linkage)
+// ==========================================
+model DocTypeLinkage {
+  id          String @id @default(uuid())
+  docTypeId   String @unique // معرف النوع (عقد، فاتورة..)
+  docTypeName String
+
+  defaultSignatureType SignatureStyle @default(SIG_AND_STAMP)
+  signaturePosition    StampPosition  @default(BOTTOM_RIGHT)
+  sealPosition         StampPosition  @default(BOTTOM_LEFT)
+
+  signerRoles                Json    @default("[\"Admin\"]") // مصفوفة الصلاحيات
+  showDocumentationStatement Boolean @default(true)
+  statementTemplate          String? @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("doc_type_linkages")
+}
+
+// ==========================================
+// ⚙️ 4. إعدادات النظام الأمنية (System Settings)
+// ==========================================
 model DocumentationSetting {
-  id                    Int     @id @default(1) // دائماً صف واحد
+  id Int @id @default(1) // Singleton (صف واحد دائماً)
+
   autoDocumentContracts Boolean @default(true)
   autoDocumentInvoices  Boolean @default(true)
   autoDocumentQuotes    Boolean @default(false)
-  verificationUrl       String  @default("https://verify.domain.com")
-  defaultFolderName     String  @default("Generated Documents")
-  privateKeyHash        String? // مفتاح التشفير (يُحفظ مشفراً)
-  requireOtp            Boolean @default(false)
+
+  verificationUrl   String  @default("https://verify.domain.com")
+  defaultFolderName String  @default("Generated Documents")
+  privateKeyHash    String? @db.Text // مفتاح التشفير (يُحفظ مشفراً)
+  requireOtp        Boolean @default(false)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@map("documentation_settings")
 }
 
-// 4. سجل التوثيق (The Registry)
+// ==========================================
+// 📄 5. سجل التوثيق المركزي (The Registry - Core Model)
+// ==========================================
 model DocumentedRecord {
   id          String           @id @default(uuid())
-  name        String // اسم الملف أو العقد
-  type        ReferenceDocType // نوع المستند الأصلي
-  referenceId String? // ID العقد أو الفاتورة المرتبطة (nullable للملفات الخارجية)
-  partyB      String? // اسم العميل أو الجهة
+  name        String
+  type        DocumentCategory // نوع المستند
+  referenceId String? // معرف المستند الأصلي (إن وجد)
+  partyB      String? // اسم العميل أو الجهة الثانية
 
-  serialNumber      String  @unique
-  verificationToken String? @unique
-  securityHash      String  @unique // الهاش المشفر لضمان عدم التلاعب
-  fileUrl           String // مسار ملف الـ PDF النهائي الموثق
+  // 🔗 الربط بالكيانات الأخرى (Entity Linking)
+  clientId      String?
+  transactionId String?
+  propertyId    String?
 
-  status        String? @default("VALID") // VERIFIED, VALID, REVOKED
-  signatureType String?
+  // 🔐 البيانات الأمنية والمفاتيح
+  serialNumber      String          @unique
+  verificationToken String          @unique
+  securityHash      String          @unique
+  fileUrl           String          @db.Text
+  signatureType     SignatureStyle?
 
-  // Relations
+  // 🚦 دورة الاعتماد (Approval Workflow)
+  status     SecuredDocStatus @default(PENDING_APPROVAL)
+  approvedBy String? // ID المشرف الذي اعتمد
+  approvedAt DateTime?
+
+  // 🛡️ قيود الأمان والمشاهدة (Security & Access Limits)
+  isVerifiable Boolean   @default(true)
+  maxViews     Int? // الحد الأقصى للمشاهدات (null = لا محدود)
+  currentViews Int       @default(0)
+  expiryDate   DateTime? // تاريخ انتهاء الصلاحية
+
+  requireOTP  Boolean @default(false)
+  clientPhone String? // 👈 رقم جوال العميل لاستلام الـ OTP
+
+  // 📋 الميتا داتا الديناميكية (Dynamic Metadata)
+  customMetadata Json?
+
+  // العلاقات
   sealTemplateId String?
   sealTemplate   SealTemplate? @relation(fields: [sealTemplateId], references: [id], onDelete: SetNull)
 
-  createdBy String // ID الموظف الذي قام بالتوثيق
-  updatedAt DateTime @default(now())
-  createdAt DateTime @default(now()) // timestamp
+  createdBy String // ID الموظف المنشئ
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  auditLogs DocumentationAuditLog[]
+
+  // 🚀 فهارس لتسريع البحث الخرافي
+  @@index([serialNumber])
+  @@index([verificationToken])
+  @@index([status, type])
+  @@index([clientId])
+  @@index([transactionId])
+  @@map("documented_records")
 }
 
-// أنواع الأختام والمصادقة لعروض الأسعار
-enum StampType {
-  NONE
-  SECURE_QR
+// ==========================================
+// 👣 6. سجل العمليات والتدقيق (Audit Trail)
+// ==========================================
+model DocumentationAuditLog {
+  id String @id @default(uuid())
+
+  action    AuditAction // نوع الحدث باستخدام Enum
+  details   String?     @db.Text
+  ipAddress String? // للتتبع الأمني
+
+  // العلاقات
+  recordId String?
+  record   DocumentedRecord? @relation(fields: [recordId], references: [id], onDelete: SetNull)
+
+  employeeId String?
+  employee   Employee? @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  // فهارس لتسريع استخراج التقارير
+  @@index([recordId])
+  @@index([employeeId])
+  @@index([action, createdAt])
+  @@map("documentation_audit_logs")
 }
 
 // ===============================================
