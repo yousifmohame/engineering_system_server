@@ -26,7 +26,7 @@ const EmailAISchema = z.object({
 console.log("👷‍♂️ [AI Email Worker] جاهز للعمل على الطابور الموحد...");
 
 // 💡 إنشاء الـ Worker على نفس اسم الطابور الموحد
-const aiWorker = new Worker(
+const aiEmailWorker = new Worker(
   "AI_PROCESSING_QUEUE", 
   async (job) => {
     
@@ -94,4 +94,4 @@ const aiWorker = new Worker(
   { connection, concurrency: 2 } // 💡 استخدام نفس اتصال IORedis الخاص بك
 );
 
-module.exports = aiWorker;
+module.exports = aiEmailWorker;
