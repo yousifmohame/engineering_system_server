@@ -5,51 +5,33 @@ const emailController = require("../controllers/emailController");
 // ==========================================
 // 💡 مسارات حسابات البريد (Email Accounts)
 // ==========================================
-
-// جلب جميع حسابات البريد المربوطة
 router.get("/accounts", emailController.getAccounts);
-
-// إضافة حساب بريد جديد (Hostinger)
 router.post("/accounts", emailController.addAccount);
-
 router.delete('/accounts/:id', emailController.deleteAccount);
-
 router.put('/accounts/:id', emailController.updateAccount);
-// ==========================================
-// 💡 مسارات رسائل البريد (Email Messages)
-// ==========================================
-
-// جلب جميع الرسائل (الواردة والصادرة)
-router.get("/messages", emailController.getMessages);
-
-// تحديث حالة رسالة معينة (مقروءة، مفضلة، مؤرشفة، سلة المهملات)
-router.put("/messages/:id", emailController.updateMessageStatus);
 
 // ==========================================
-// 💡 مسارات إرسال البريد (Send Email)
+// 💡 مسارات العمليات المتنوعة والذكاء الاصطناعي
 // ==========================================
-
-// إرسال رسالة جديدة عبر SMTP
 router.post("/send", emailController.sendMessage);
-
 router.get("/sync", emailController.syncHostingerEmails);
-
 router.post("/search-ai", emailController.aiSmartSearch);
-// إضافة هذا السطر لمسارات البريد
 router.get('/analyze-inbox', emailController.analyzeInboxWithAI);
-
-router.post('/messages/:id/analyze', emailController.analyzeEmail);
-router.get('/messages/search', emailController.searchMessages);
-
+router.get('/messages/search', emailController.searchMessages); // 👈 يجب أن يكون قبل /:id
 router.post("/ai-compose", emailController.aiComposeEmail);
-// أضف هذا السطر مع مسارات الذكاء الاصطناعي
 router.post("/translate", emailController.translateWithAI);
 router.get("/contacts", emailController.getAutoContacts);
-// يجب أن يكون فوق مسار /messages/:id/status
 router.post("/messages/draft", emailController.saveDraft);
+
+// ==========================================
+// 💡 مسارات رسائل البريد الأساسية (Email Messages)
+// ==========================================
+router.get("/messages", emailController.getMessages);
+router.get("/messages/:id", emailController.getMessageDetails); // 👈 هذا هو المسار الذي كان مفقوداً (Lazy Loading)!
+
 router.put("/messages/:id/status", emailController.updateMessageStatus);
-// أضف هذا السطر مع باقي المسارات
-router.put("/messages/:id/status", emailController.updateMessageStatus);
-// أضف هذا السطر مع باقي المسارات
+router.put("/messages/:id", emailController.updateMessageStatus);
+router.post('/messages/:id/analyze', emailController.analyzeEmail);
 router.delete("/messages/:id/permanent", emailController.deleteMessagePermanently);
+
 module.exports = router;

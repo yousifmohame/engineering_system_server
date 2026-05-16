@@ -48,6 +48,7 @@ function ensureUploadsDirectory() {
 require('./src/queue/aiWorker');
 require('./src/queue/optimizationWorker');
 require('./src/queue/aiEmailWorker');
+require('./src/services/imapListenerService').startAllListeners();
 
 async function startServer() {
   try {

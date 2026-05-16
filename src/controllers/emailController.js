@@ -271,13 +271,80 @@ exports.deleteAccount = async (req, res) => {
   }
 };
 
+// =========================================================
+// 🚀 جلب الرسائل السريع (Pagination & Safe Select)
+// =========================================================
 exports.getMessages = async (req, res) => {
   try {
+    const { page = 1, limit = 50, folder = 'inbox' } = req.query;
+    const skip = (Math.max(1, parseInt(page)) - 1) * parseInt(limit);
+
+    // 💡 شروط الفلترة بناءً على المجلد (الإنبوكس، المرسل، المسودات)
+    const whereClause = {};
+    if (folder === 'sent') {
+       whereClause.isSent = true;
+    } else if (folder === 'drafts') {
+       whereClause.isDraft = true;
+    } else { 
+       // Inbox: ليست مرسلة وليست مسودة
+       whereClause.isSent = false; 
+       whereClause.isDraft = { not: true }; // نستخدم not:true لتفادي مشاكل الـ null
+    }
+
     const messages = await prisma.emailMessage.findMany({
+      where: whereClause,
       orderBy: { date: "desc" },
+      skip,
+      take: parseInt(limit),
+      // 💡 حقول آمنة 100% متأكدين من وجودها لتفادي خطأ 500
+      select: {
+        id: true,
+        messageId: true,
+        subject: true,
+        from: true,
+        to: true,
+        date: true,
+        isRead: true,
+        isAnalyzed: true,
+        hasAttachments: true, // اختياري: إذا كان موجوداً سيجلب حالة المرفقات
+      }
     });
-    res.json({ success: true, data: messages });
+
+    const total = await prisma.emailMessage.count({ where: whereClause });
+
+    res.json({ 
+      success: true, 
+      data: messages,
+      pagination: { total, page: parseInt(page), pages: Math.ceil(total / limit) }
+    });
   } catch (error) {
+    console.error("❌ GET Messages Error:", error); // سيطبع الخطأ الحقيقي في الكونسول لتراه
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// =========================================================
+// 🚀 جلب تفاصيل رسالة واحدة (Lazy Loading للمحتوى الثقيل)
+// =========================================================
+exports.getMessageDetails = async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    // جلب الرسالة بكل محتوياتها الثقيلة (Body, HTML) فقط عند الطلب
+    const message = await prisma.emailMessage.findFirst({
+      where: { OR: [{ id: id }, { messageId: id }] }
+    });
+
+    if (!message) return res.status(404).json({ success: false, message: "الرسالة غير موجودة" });
+
+    // تحديث الحالة كمقروءة إذا لم تكن كذلك
+    if (!message.isRead) {
+      await prisma.emailMessage.update({ where: { id: message.id }, data: { isRead: true } });
+    }
+
+    res.json({ success: true, data: message });
+  } catch (error) {
+    console.error("❌ GET Message Details Error:", error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -568,80 +635,19 @@ exports.deleteMessagePermanently = async (req, res) => {
 // ⚡ المزامنة السريعة جداً (Smart IMAP Sync)
 // =========================================================
 exports.syncHostingerEmails = async (req, res) => {
-  let client;
   try {
-    const account = await prisma.emailAccount.findFirst({ where: { isActive: true } });
-    if (!account) return res.status(404).json({ success: false, message: "لا يوجد حساب بريد مربوط" });
-
-    // 1. الرد الفوري من قاعدة البيانات لتسريع واجهة المستخدم
+    // بما أن ImapListener يعمل في الخلفية ويجلب الإيميلات، 
+    // هذه الدالة ستكتفي بجلب أحدث الرسائل من الداتابيز فقط لتحديث شاشة المستخدم
     const localMessages = await prisma.emailMessage.findMany({
+      where: { isSent: false, isDraft: false },
       orderBy: { date: "desc" },
-      take: 10,
+      take: 20,
+      select: { id: true, subject: true, from: true, date: true, isRead: true }
     });
-    res.json({ success: true, data: localMessages }); // 👈 نرد للمستخدم فوراً!
-
-    // 2. إكمال المزامنة في الخلفية بصمت
-    client = new ImapFlow({
-      host: account.imapServer || "imap.hostinger.com",
-      port: account.imapPort || 993,
-      secure: true,
-      auth: { user: account.email, pass: account.password },
-      logger: false,
-    });
-
-    await client.connect();
-    let lock = await client.getMailboxLock("INBOX");
-
-    try {
-      const lastSavedMessage = await prisma.emailMessage.findFirst({
-        where: { accountId: account.id, isSent: false, isDraft: false },
-        orderBy: { messageId: "desc" },
-      });
-
-      const highestUid = lastSavedMessage && !isNaN(lastSavedMessage.messageId) ? parseInt(lastSavedMessage.messageId) : 1;
-      if (client.mailbox.exists === 0) return;
-
-      const fetchQuery = `${highestUid + 1}:*`;
-
-      for await (let msg of client.fetch(fetchQuery, { source: true, flags: true, uid: true })) {
-        const msgIdStr = msg.uid.toString();
-
-        const exists = await prisma.emailMessage.findUnique({ where: { messageId: msgIdStr } });
-        if (!exists) {
-          const parsed = await simpleParser(msg.source);
-          const bodyText = parsed.text || "";
-          const subject = parsed.subject || "(بدون عنوان)";
-
-          const dbMessage = await prisma.emailMessage.create({
-            data: {
-              messageId: msgIdStr,
-              accountId: account.id,
-              subject: subject,
-              from: parsed.from?.value[0]?.address || parsed.from?.text || "مجهول",
-              to: account.email,
-              body: bodyText,
-              html: parsed.html || parsed.textAsHtml || "",
-              date: parsed.date,
-              isRead: msg.flags?.has("\\Seen") || false,
-              isAnalyzed: false,
-            },
-          });
-
-          // 💡 🚀 إضافة المهمة لطابور BullMQ ليحللها Worker بعيداً عن السيرفر الأساسي
-          await aiQueue.add("analyze-email", {
-            dbId: dbMessage.id,
-            subject: subject,
-            body: bodyText
-          });
-        }
-      }
-    } finally {
-      if (lock) lock.release();
-      await client.logout();
-    }
+    
+    res.json({ success: true, message: "تم تحديث الصندوق بنجاح", data: localMessages });
   } catch (error) {
-    if (client) await client.logout();
-    console.error("Fast IMAP Sync Error:", error);
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
