@@ -12,6 +12,31 @@ datasource db {
 // ===============================================
 // 1. نماذج المستخدمين والصلاحيات (Core Identity & Access)
 // ===============================================
+// ==================================================
+// 1. سياسات الدوام والإجازات (Time & Leave Policies)
+// ==================================================
+
+// 💡 الإجازات الرسمية للشركة (مثل: العيد، اليوم الوطني)
+model PublicHoliday {
+  id        String   @id @default(uuid())
+  name      String // مثال: "إجازة عيد الفطر"
+  startDate DateTime @db.Date
+  endDate   DateTime @db.Date
+  isPaid    Boolean  @default(true) // هل هي مدفوعة الأجر؟
+  createdAt DateTime @default(now())
+}
+
+// 💡 أيام العمل الأسبوعية الافتراضية للشركة (لمنع احتساب الجمعة غياب)
+model CompanyWorkingDays {
+  id        String  @id @default("global_working_days")
+  sunday    Boolean @default(true)
+  monday    Boolean @default(true)
+  tuesday   Boolean @default(true)
+  wednesday Boolean @default(true)
+  thursday  Boolean @default(true)
+  friday    Boolean @default(false) // 👈 إجازة افتراضية
+  saturday  Boolean @default(false) // 👈 إجازة افتراضية
+}
 
 // ------ نموذج الموظفين (شاشة 817) ------
 model Employee {
@@ -110,8 +135,15 @@ model Employee {
   paymentsReceived    Payment[]     @relation("EmployeeToPayment")
   activitiesPerformed ActivityLog[] @relation("EmployeeToActivityLog")
 
-  shiftStartTime String? @default("08:00") // بداية دوام الموظف
-  shiftEndTime   String? @default("17:00") // نهاية دوام الموظف
+  shiftType String @default("FIXED")
+
+  // للدوام الثابت (FIXED)
+  shiftStartTime String? @default("08:00")
+  shiftEndTime   String? @default("17:00")
+
+  requiredDailyHours Float? @default(8.0)
+
+  customWorkingDays Json?
 
   // --- إدارة الوثائق ---
   ownedDocuments         Document[]               @relation("OwnedDocuments")
@@ -129,6 +161,53 @@ model Employee {
   SystemNotification SystemNotification[]
   AttendanceLog      AttendanceLog[]
   documentationLogs  DocumentationAuditLog[]
+
+  documents EmployeeDocument[] @relation("EmployeeDocs")
+  leaves    EmployeeLeave[]    @relation("EmployeeLeaves")
+}
+
+// ==================================================
+// 3. الإجازات الخاصة بالموظف (Employee Leaves)
+// ==================================================
+model EmployeeLeave {
+  id         String   @id @default(uuid())
+  employeeId String
+  type       String // SICK, ANNUAL, UNPAID, EMERGENCY
+  startDate  DateTime @db.Date
+  endDate    DateTime @db.Date
+  reason     String?
+  status     String   @default("APPROVED") // PENDING, APPROVED, REJECTED
+
+  employee  Employee @relation("EmployeeLeaves", fields: [employeeId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+}
+
+// ==================================================
+// 4. مركز مستندات الموظف المعزز بالذكاء الاصطناعي (AI Document Center)
+// ==================================================
+model EmployeeDocument {
+  id         String @id @default(uuid())
+  employeeId String
+
+  // الأنواع المحددة: NATIONAL_ID, ADDRESS_PROOF, DEGREE, RESUME, PROFESSIONAL_LICENSE, PROFILE_PIC, QIWA_CONTRACT, INITIAL_CONTRACT, EXPERIENCE_CERT, OTHER
+  type    String
+  name    String // وصف المستند
+  fileUrl String // مسار الملف
+
+  issueDate    DateTime? @db.Date
+  expiryDate   DateTime? @db.Date // null يعني غير محدد (صلاحية دائمة)
+  isExpiryOpen Boolean   @default(false) // هل الصلاحية مفتوحة؟
+
+  // 🤖 التحليل الذكي (AI Analysis)
+  isAnalyzed   Boolean @default(false)
+  aiRating     Int? // تقييم من 1 إلى 100
+  aiSummary    String? @db.Text // ملخص المستند
+  aiValidation String? @default("PENDING") // VALID, EXPIRED, MISMATCH, SUSPICIOUS
+
+  employee Employee @relation("EmployeeDocs", fields: [employeeId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 // نموذج لسجل الحضور
@@ -3769,15 +3848,17 @@ model ZkDevice {
 
 // 💡 سجل الحضور والانصراف
 model AttendanceLog {
-  id         String   @id @default(uuid())
-  employeeId String // يُربط مع جدول الموظفين (Employee)
-  deviceUid  String // رقم البصمة داخل الجهاز نفسه (uid)
-  punchTime  DateTime // وقت البصمة الفعلي
-  type       String // حضور (Check-In) أم انصراف (Check-Out)
+  id          String   @id @default(uuid())
+  employeeId  String 
+  deviceUid   String 
+  punchTime   DateTime 
+  type        String 
 
-  employee Employee @relation(fields: [employeeId], references: [id])
+  // 🚀 الحقول الجديدة لإدارة تجاوز التأخير
+  isExcused    Boolean @default(false)
+  excuseReason String?
 
-  // لمنع تكرار نفس البصمة لنفس الموظف في نفس الدقيقة
+  employee    Employee @relation(fields: [employeeId], references: [id])
   @@unique([employeeId, punchTime])
 }
 

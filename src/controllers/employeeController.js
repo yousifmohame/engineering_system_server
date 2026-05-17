@@ -26,7 +26,7 @@ const getAllEmployees = async (req, res) => {
       select: {
         id: true,
         employeeCode: true,
-        fingerprintId: true, // 👈 1. جلب رقم البصمة ليعرض في الجدول
+        fingerprintId: true,
         name: true,
         nameEn: true,
         firstNameAr: true,
@@ -75,8 +75,11 @@ const getAllEmployees = async (req, res) => {
         createdAt: true,
         updatedAt: true,
         roles: true,
+        shiftType: true, // 👈 جديد: نوع الدوام
         shiftStartTime: true,
         shiftEndTime: true,
+        requiredDailyHours: true, // 👈 جديد: ساعات الدوام المرن
+        customWorkingDays: true, // 👈 جديد: أيام عمل مخصصة
         _count: { select: { specialPermissions: true } },
       },
     });
@@ -95,7 +98,7 @@ const createEmployee = async (req, res) => {
   try {
     const {
       employeeCode,
-      fingerprintId, // 👈 2. استلام رقم البصمة من الواجهة
+      fingerprintId,
       firstNameAr,
       secondNameAr,
       thirdNameAr,
@@ -106,7 +109,6 @@ const createEmployee = async (req, res) => {
       fourthNameEn,
       name,
       nameEn,
-
       profilePicture,
       isPhotoVisible,
       isAgeVisible,
@@ -127,7 +129,6 @@ const createEmployee = async (req, res) => {
       nationality,
       gosiNumber,
       iqamaNumber,
-
       shortAddress,
       streetNameAr,
       streetNameEn,
@@ -140,8 +141,11 @@ const createEmployee = async (req, res) => {
       additionalNumber,
       cityAr,
       cityEn,
+      shiftType,
       shiftStartTime,
       shiftEndTime,
+      requiredDailyHours,
+      customWorkingDays,
       roleIds,
     } = req.body;
 
@@ -166,13 +170,14 @@ const createEmployee = async (req, res) => {
     });
 
     if (employeeExists) {
-      return res.status(400).json({
-        message:
-          "موظف مسجل بالفعل بنفس رقم الهوية، الإيميل، الجوال، أو الرقم الوظيفي",
-      });
+      return res
+        .status(400)
+        .json({
+          message:
+            "موظف مسجل بالفعل بنفس رقم الهوية، الإيميل، الجوال، أو الرقم الوظيفي",
+        });
     }
 
-    // التحقق من أن رقم البصمة غير مستخدم مع موظف آخر
     if (fingerprintId && String(fingerprintId).trim() !== "") {
       const fingerprintExists = await prisma.employee.findFirst({
         where: { fingerprintId: String(fingerprintId).trim() },
@@ -204,7 +209,7 @@ const createEmployee = async (req, res) => {
         fingerprintId:
           fingerprintId && String(fingerprintId).trim() !== ""
             ? String(fingerprintId).trim()
-            : null, // 👈 3. حفظ رقم البصمة (أو null)
+            : null,
         name: fullNameAr,
         nameEn: fullNameEn,
         firstNameAr,
@@ -215,12 +220,10 @@ const createEmployee = async (req, res) => {
         secondNameEn,
         thirdNameEn,
         fourthNameEn,
-
         profilePicture,
         isPhotoVisible: isPhotoVisible ?? true,
         isAgeVisible: isAgeVisible ?? true,
         isInternalTitleVisible: isInternalTitleVisible ?? true,
-
         birthDate: birthDate ? new Date(birthDate) : null,
         nationalId,
         email,
@@ -237,7 +240,6 @@ const createEmployee = async (req, res) => {
         hireDate: new Date(hireDate),
         actualStartDate: actualStartDate ? new Date(actualStartDate) : null,
         baseSalary: baseSalary ? parseFloat(baseSalary) : null,
-
         shortAddress,
         streetNameAr,
         streetNameEn,
@@ -250,8 +252,16 @@ const createEmployee = async (req, res) => {
         additionalNumber,
         cityAr,
         cityEn,
+
+        // 🚀 إعدادات الدوام الجديدة
+        shiftType: shiftType || "FIXED",
         shiftStartTime: shiftStartTime || "08:00",
         shiftEndTime: shiftEndTime || "17:00",
+        requiredDailyHours: requiredDailyHours
+          ? parseFloat(requiredDailyHours)
+          : 8.0,
+        customWorkingDays: customWorkingDays ? customWorkingDays : null,
+
         roles: {
           connect:
             roleIds && roleIds.length > 0 ? roleIds.map((id) => ({ id })) : [],
@@ -281,7 +291,7 @@ const updateEmployee = async (req, res) => {
     const { id } = req.params;
     const {
       employeeCode,
-      fingerprintId, // 👈 4. استلام رقم البصمة في التحديث
+      fingerprintId,
       firstNameAr,
       secondNameAr,
       thirdNameAr,
@@ -292,7 +302,6 @@ const updateEmployee = async (req, res) => {
       fourthNameEn,
       name,
       nameEn,
-
       profilePicture,
       isPhotoVisible,
       isAgeVisible,
@@ -310,7 +319,6 @@ const updateEmployee = async (req, res) => {
       nationality,
       gosiNumber,
       iqamaNumber,
-
       shortAddress,
       streetNameAr,
       streetNameEn,
@@ -323,19 +331,18 @@ const updateEmployee = async (req, res) => {
       additionalNumber,
       cityAr,
       cityEn,
+      shiftType,
       shiftStartTime,
       shiftEndTime,
+      requiredDailyHours,
+      customWorkingDays,
       roleIds,
       password,
     } = req.body;
 
-    // التحقق من أن رقم البصمة غير مستخدم مع موظف آخر (غير الموظف الحالي)
     if (fingerprintId && String(fingerprintId).trim() !== "") {
       const fingerprintExists = await prisma.employee.findFirst({
-        where: {
-          fingerprintId: String(fingerprintId).trim(),
-          id: { not: id }, // نستثني الموظف الحالي من البحث
-        },
+        where: { fingerprintId: String(fingerprintId).trim(), id: { not: id } },
       });
       if (fingerprintExists) {
         return res
@@ -360,7 +367,7 @@ const updateEmployee = async (req, res) => {
       fingerprintId:
         fingerprintId && String(fingerprintId).trim() !== ""
           ? String(fingerprintId).trim()
-          : null, // 👈 5. تحديث رقم البصمة
+          : null,
       name: fullNameAr,
       nameEn: fullNameEn,
       firstNameAr,
@@ -371,12 +378,10 @@ const updateEmployee = async (req, res) => {
       secondNameEn,
       thirdNameEn,
       fourthNameEn,
-
       profilePicture,
       isPhotoVisible,
       isAgeVisible,
       isInternalTitleVisible,
-
       phone,
       position,
       qiwaPosition,
@@ -386,7 +391,6 @@ const updateEmployee = async (req, res) => {
       nationality,
       gosiNumber,
       iqamaNumber,
-
       shortAddress,
       streetNameAr,
       streetNameEn,
@@ -399,8 +403,15 @@ const updateEmployee = async (req, res) => {
       additionalNumber,
       cityAr,
       cityEn,
-      shiftStartTime: shiftStartTime || "08:00",
-      shiftEndTime: shiftEndTime || "17:00",
+
+      // 🚀 إعدادات الدوام الجديدة
+      shiftType,
+      shiftStartTime,
+      shiftEndTime,
+      customWorkingDays,
+      requiredDailyHours: requiredDailyHours
+        ? parseFloat(requiredDailyHours)
+        : undefined,
     };
 
     if (birthDate) updateData.birthDate = new Date(birthDate);
@@ -435,7 +446,154 @@ const updateEmployee = async (req, res) => {
 };
 
 // ===============================================
-// الدوال الأخرى (تبقى كما هي بدون تغيير لأنها تخص جداول منفصلة)
+// 🚀 5. محرك تحليل التايم شيت (Time Sheet Engine)
+// GET /api/employees/:id/attendance-analysis
+// ===============================================
+const getEmployeeAttendanceAnalysis = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { targetDate } = req.query; // يمرر كـ YYYY-MM-DD
+
+    if (!targetDate)
+      return res.status(400).json({ message: "تاريخ اليوم مطلوب للتحليل" });
+
+    const employee = await prisma.employee.findUnique({ where: { id } });
+    if (!employee) return res.status(404).json({ message: "الموظف غير موجود" });
+
+    const date = new Date(targetDate);
+    date.setHours(0, 0, 0, 0);
+
+    // 1. هل اليوم إجازة رسمية؟
+    const publicHoliday = await prisma.publicHoliday.findFirst({
+      where: { startDate: { lte: date }, endDate: { gte: date } },
+    });
+    if (publicHoliday)
+      return res
+        .status(200)
+        .json({ status: "PUBLIC_HOLIDAY", note: publicHoliday.name });
+
+    // 2. هل الموظف في إجازة خاصة؟
+    const employeeLeave = await prisma.employeeLeave.findFirst({
+      where: {
+        employeeId: employee.id,
+        startDate: { lte: date },
+        endDate: { gte: date },
+        status: "APPROVED",
+      },
+    });
+    if (employeeLeave)
+      return res
+        .status(200)
+        .json({ status: "ON_LEAVE", note: employeeLeave.type });
+
+    // 3. هل اليوم يوم راحة (Weekend)؟
+    const dayOfWeek = date.getDay();
+    let isWeekend = false;
+
+    if (employee.customWorkingDays) {
+      const daysMap = [
+        "sunday",
+        "monday",
+        "tuesday",
+        "wednesday",
+        "thursday",
+        "friday",
+        "saturday",
+      ];
+      isWeekend = !employee.customWorkingDays[daysMap[dayOfWeek]];
+    } else {
+      const companyDays = await prisma.companyWorkingDays.findUnique({
+        where: { id: "global_working_days" },
+      });
+      const daysMap = [
+        "sunday",
+        "monday",
+        "tuesday",
+        "wednesday",
+        "thursday",
+        "friday",
+        "saturday",
+      ];
+      isWeekend = companyDays
+        ? !companyDays[daysMap[dayOfWeek]]
+        : dayOfWeek === 5 || dayOfWeek === 6;
+    }
+
+    if (isWeekend)
+      return res.status(200).json({ status: "WEEKEND", note: "يوم راحة" });
+
+    // 4. جلب البصمات لهذا اليوم
+    const startOfDay = new Date(date);
+    const endOfDay = new Date(date);
+    endOfDay.setHours(23, 59, 59, 999);
+
+    const logs = await prisma.attendanceLog.findMany({
+      where: {
+        employeeId: employee.id,
+        punchTime: { gte: startOfDay, lte: endOfDay },
+      },
+      orderBy: { punchTime: "asc" },
+    });
+
+    if (logs.length === 0)
+      return res.status(200).json({ status: "ABSENT", note: "غياب بدون عذر" });
+
+    // 5. حساب الدوام (FIXED vs FLEXIBLE)
+    if (employee.shiftType === "FIXED") {
+      const checkIn = logs[0].punchTime;
+      const checkOut = logs[logs.length - 1].punchTime;
+
+      const [shiftHour, shiftMin] = (employee.shiftStartTime || "08:00")
+        .split(":")
+        .map(Number);
+      const expectedCheckIn = new Date(date);
+      expectedCheckIn.setHours(shiftHour, shiftMin, 0, 0);
+
+      let lateMinutes = 0;
+      if (checkIn > expectedCheckIn) {
+        lateMinutes = Math.floor((checkIn - expectedCheckIn) / 60000);
+      }
+
+      return res.status(200).json({
+        status: "PRESENT",
+        checkIn,
+        checkOut,
+        lateMinutes,
+        note: lateMinutes > 0 ? `تأخير ${lateMinutes} دقيقة` : "حضور منتظم",
+      });
+    } else {
+      // FLEXIBLE
+      let totalMinutesWorked = 0;
+      for (let i = 0; i < logs.length; i += 2) {
+        if (logs[i + 1]) {
+          totalMinutesWorked += Math.floor(
+            (logs[i + 1].punchTime - logs[i].punchTime) / 60000,
+          );
+        }
+      }
+
+      const requiredMinutes = (employee.requiredDailyHours || 8) * 60;
+      const difference = totalMinutesWorked - requiredMinutes;
+
+      return res.status(200).json({
+        status: "PRESENT_FLEX",
+        totalWorkedHours: (totalMinutesWorked / 60).toFixed(2),
+        shortageMinutes: difference < 0 ? Math.abs(difference) : 0,
+        overtimeMinutes: difference > 0 ? difference : 0,
+        note:
+          difference < 0
+            ? `نقص ${(Math.abs(difference) / 60).toFixed(1)} ساعة`
+            : "حضور مكتمل",
+      });
+    }
+  } catch (error) {
+    console.error("Attendance Analysis Error:", error);
+    res.status(500).json({ message: "خطأ في تحليل الدوام" });
+  }
+};
+
+// ===============================================
+// الدوال الأخرى (تبقى كما هي)
 // ===============================================
 const deleteEmployee = async (req, res) => {
   try {
@@ -462,10 +620,12 @@ const getEmployeeAttendance = async (req, res) => {
     });
     res.status(200).json(attendanceRecords);
   } catch (error) {
-    res.status(500).json({
-      message: "Error fetching attendance records",
-      error: error.message,
-    });
+    res
+      .status(500)
+      .json({
+        message: "Error fetching attendance records",
+        error: error.message,
+      });
   }
 };
 
@@ -591,10 +751,12 @@ const updateEmployeeStatus = async (req, res) => {
     });
     res.status(200).json(updatedEmployee);
   } catch (error) {
-    res.status(500).json({
-      message: "Error updating employee status",
-      error: error.message,
-    });
+    res
+      .status(500)
+      .json({
+        message: "Error updating employee status",
+        error: error.message,
+      });
   }
 };
 
@@ -676,6 +838,8 @@ const getEmployeesWithStats = async (req, res) => {
   }
 };
 
+
+
 module.exports = {
   getMe,
   getAllEmployees,
@@ -693,4 +857,5 @@ module.exports = {
   updateEmployeeStatus,
   updateEmployeePromotion,
   getEmployeesWithStats,
+  getEmployeeAttendanceAnalysis, // 👈 تصدير الدالة الذكية الجديدة
 };

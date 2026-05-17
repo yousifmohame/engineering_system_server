@@ -2,13 +2,21 @@ const express = require('express');
 const router = express.Router();
 const attendanceController = require('../controllers/attendanceController');
 
-// هذا الرابط ستطلبه واجهة React لجلب الجدول
+// مسارات السجل والتقارير
 router.get('/daily', attendanceController.getDailyLog);
-router.get('/policies', attendanceController.getPolicies);
-router.put('/policies', attendanceController.updatePolicies);
 router.get('/report', attendanceController.getEmployeeReport);
-// أضف هذه الأسطر مع مسارات الـ API الخاصة بك
+
+// مسارات الداشبورد والأجهزة
 router.get('/zk-devices', attendanceController.getAllDevices);
 router.get('/stats', attendanceController.getDashboardStats);
+
+// 🚀 مسارات الإجراءات الإدارية (الجديدة)
+router.put('/excuse-delay', attendanceController.excuseDelay);
+router.post('/grant-leave', attendanceController.grantLeave);
+
+// مسارات سياسات الدوام
+router.route("/policies/full")
+  .get(attendanceController.getFullPolicies)
+  .put(attendanceController.updateFullPolicies);
 
 module.exports = router;
