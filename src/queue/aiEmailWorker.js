@@ -1,11 +1,9 @@
-// workers/aiEmailWorker.js
 const { Worker } = require("bullmq");
 const { PrismaClient } = require("@prisma/client");
 const { GoogleGenAI } = require("@google/genai");
 const { z } = require("zod");
 
-// 💡 استيراد الاتصال الموحد للـ Redis
-const { connection } = require("./aiQueue"); // ⚠️ عدل المسار
+const { connection } = require("./aiQueue");
 
 const prisma = new PrismaClient();
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
@@ -23,14 +21,12 @@ const EmailAISchema = z.object({
   sectorName: z.string().nullable().catch(null),
 });
 
-console.log("👷‍♂️ [AI Email Worker] جاهز للعمل على الطابور الموحد...");
+console.log("👷‍♂️ [AI Email Worker] جاهز للعمل على طابور الإيميلات المستقل...");
 
-// 💡 إنشاء الـ Worker على نفس اسم الطابور الموحد
+// 🚀 تغيير اسم الطابور هنا ليكون مستقلاً
 const aiEmailWorker = new Worker(
-  "AI_PROCESSING_QUEUE", 
+  "EMAIL_AI_QUEUE",
   async (job) => {
-    
-    // 💡 التحقق من اسم المهمة (حتى لا يتداخل مع مهام AI أخرى مستقبلاً)
     if (job.name === "analyze-email") {
       const { dbId, subject, body } = job.data;
       console.log(`🤖 [Worker] جاري تحليل الرسالة [${dbId}]...`);
@@ -53,7 +49,10 @@ const aiEmailWorker = new Worker(
           config: { temperature: 0.0, responseMimeType: "application/json" },
         });
 
-        const cleanJson = aiResponse.text.replace(/```json/gi, "").replace(/```/g, "").trim();
+        const cleanJson = aiResponse.text
+          .replace(/```json/gi, "")
+          .replace(/```/g, "")
+          .trim();
         const parsedData = JSON.parse(cleanJson);
         const validatedData = EmailAISchema.parse(parsedData);
 
@@ -64,7 +63,12 @@ const aiEmailWorker = new Worker(
             where: {
               OR: [
                 { transactionCode: { contains: validatedData.reqNumber } },
-                { notes: { path: ["refs", "baladyNumber"], equals: validatedData.reqNumber } },
+                {
+                  notes: {
+                    path: ["refs", "baladyNumber"],
+                    equals: validatedData.reqNumber,
+                  },
+                },
               ],
             },
           });
@@ -86,12 +90,15 @@ const aiEmailWorker = new Worker(
 
         console.log(`✅ [Worker] تمت عملية التحليل بنجاح للرسالة [${dbId}]`);
       } catch (err) {
-        console.error(`❌ [Worker] خطأ في تحليل الرسالة [${dbId}]:`, err.message);
+        console.error(
+          `❌ [Worker] خطأ في تحليل الرسالة [${dbId}]:`,
+          err.message,
+        );
         throw err;
       }
     }
   },
-  { connection, concurrency: 2 } // 💡 استخدام نفس اتصال IORedis الخاص بك
+  { connection, concurrency: 2 },
 );
 
 module.exports = aiEmailWorker;

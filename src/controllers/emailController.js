@@ -6,7 +6,7 @@ const prisma = new PrismaClient();
 const { OpenAI } = require("openai");
 const { GoogleGenAI } = require("@google/genai");
 
-const { aiQueue } = require("../queue/aiQueue");
+const { emailAiQueue } = require("../queue/aiQueue");
 
 const { z } = require("zod");
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
@@ -131,7 +131,7 @@ exports.analyzeEmail = async (req, res) => {
     }
 
     // 💡 🚀 بدلاً من تحليلها فوراً وتجميد الشاشة، نضعها في الطابور
-    await aiQueue.add("analyze-email", {
+    await emailAiQueue.add("analyze-email", {
       dbId: message.id,
       subject: message.subject,
       body: message.body || message.text || ""
