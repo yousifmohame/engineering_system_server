@@ -725,3 +725,70 @@ exports.aiAnalyzeFile = async (req, res) => {
     res.status(500).json({ success: false, message: "فشل التحليل الذكي" });
   }
 };
+
+// 🚀 رفع ملف فردي وفحصه (Upload Temp)
+exports.uploadTempFile = async (req, res) => {
+  try {
+    const { shortLink } = req.params;
+    const fileRequest = await prisma.fileRequest.findUnique({ where: { shortLink } });
+    if (!fileRequest || fileRequest.status !== "نشط") return res.status(400).json({ success: false, message: "الرابط غير صالح" });
+    if (!req.file) return res.status(400).json({ success: false, message: "لم يتم استلام أي ملف" });
+
+    const file = req.file;
+
+    // 🛡️ الفحص الأمني عبر ClamAV
+    if (clamscan) {
+      const scanResult = await clamscan.isInfected(file.path);
+      if (scanResult.isInfected) {
+        return res.status(406).json({ success: false, message: "اكتشاف تهديد أمني! تم حظر الملف." });
+      }
+    }
+
+    // حفظ الملف في الداتا بيز كـ (مبدئي / قيد الانتظار) بدون بيانات المرسل حتى الآن
+    const newFile = await prisma.receivedFile.create({
+      data: {
+        requestId: fileRequest.id,
+        fileName: file.filename,
+        originalName: file.originalname,
+        fileSize: file.size,
+        fileType: file.mimetype,
+        filePath: `/uploads/transfer-center/${file.filename}`,
+        isSafe: true, 
+      }
+    });
+
+    res.status(200).json({ success: true, data: { id: newFile.id } });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "فشل في معالجة الملف" });
+  }
+};
+
+// 🚀 الاعتماد النهائي وإرفاق بيانات العميل
+exports.finalizeUpload = async (req, res) => {
+  try {
+    const { shortLink } = req.params;
+    const { fileIds, senderName, senderMobile, senderEmail, senderNote } = req.body;
+
+    const fileRequest = await prisma.fileRequest.findUnique({ where: { shortLink } });
+    if (!fileRequest) return res.status(400).json({ success: false, message: "الرابط غير صالح" });
+
+    // تحديث كل الملفات التي تم رفعها مسبقاً ببيانات المرسل
+    if (fileIds && fileIds.length > 0) {
+      await prisma.receivedFile.updateMany({
+        where: { id: { in: fileIds } },
+        data: { senderName, senderMobile, senderEmail, senderNote }
+      });
+
+      // زيادة عداد الرفع للرابط
+      await prisma.fileRequest.update({
+        where: { id: fileRequest.id },
+        data: { uploadCount: { increment: fileIds.length } }
+      });
+    }
+
+    await logAction("إرسال ملفات مؤكدة", senderName || "عميل", `تم تأكيد إرسال ${fileIds.length} ملفات لطلب #${shortLink}`);
+    res.status(200).json({ success: true, message: "تم الاعتماد بنجاح" });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "فشل اعتماد الطلب" });
+  }
+};

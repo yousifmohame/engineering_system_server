@@ -3196,9 +3196,10 @@ model FileRequest {
   disclaimerText String? @db.Text
 
   // حالة الرابط
-  shortLink String @unique
-  status    String @default("نشط") // نشط، منتهي، مغلق
-  viewCount Int    @default(0)
+  shortLink   String @unique
+  status      String @default("نشط") // نشط، منتهي، مغلق
+  viewCount   Int    @default(0)
+  uploadCount Int    @default(0)
 
   createdBy String   @default("مدير النظام")
   createdAt DateTime @default(now())
@@ -3848,17 +3849,18 @@ model ZkDevice {
 
 // 💡 سجل الحضور والانصراف
 model AttendanceLog {
-  id          String   @id @default(uuid())
-  employeeId  String 
-  deviceUid   String 
-  punchTime   DateTime 
-  type        String 
+  id         String   @id @default(uuid())
+  employeeId String
+  deviceUid  String
+  punchTime  DateTime
+  type       String
 
   // 🚀 الحقول الجديدة لإدارة تجاوز التأخير
   isExcused    Boolean @default(false)
   excuseReason String?
 
-  employee    Employee @relation(fields: [employeeId], references: [id])
+  employee Employee @relation(fields: [employeeId], references: [id])
+
   @@unique([employeeId, punchTime])
 }
 

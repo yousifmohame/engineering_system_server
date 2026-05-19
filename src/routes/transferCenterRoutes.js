@@ -56,7 +56,8 @@ router.post("/send-notification", transferController.sendNotification);
 router.post("/ai/rephrase", transferController.aiRephrase);
 router.post("/ai/analyze/:fileId", transferController.aiAnalyzeFile);
 
-
+router.post("/upload-temp/:shortLink", upload.single('file'), transferController.uploadTempFile);
+router.post("/finalize/:shortLink", transferController.finalizeUpload);
 // ===================================
 // 🌐 مسارات العميل الخارجي (Public)
 // ===================================
