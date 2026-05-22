@@ -3884,3 +3884,99 @@ model DeviceStamp {
   // (اختياري) يمكنك ربطها بجدول الأجهزة إذا أردت
   // device     Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
 }
+
+// 1. القالب الرئيسي (الموحد)
+model DocumentTemplate {
+  id                     String    @id @default(uuid())
+  title                  String
+  code                   String    @unique
+  internalCode           String?
+  dueDate                DateTime?
+  pageSize               String    @default("A4")
+  orientation            String    @default("portrait")
+  showPageNumber         Boolean   @default(false)
+  showDate               Boolean   @default(false)
+  hideTableHeader        Boolean   @default(false)
+  sourceType             String    @default("system")
+  category               String    @default("document")
+  securityLevel          String    @default("public")
+  requiresApproval       Boolean   @default(false)
+  preventPrintUnapproved Boolean   @default(false)
+  maxFileSize            Int       @default(10)
+  allowMultiplePages     Boolean   @default(true)
+  allowedSizes           Json?
+  allowedOrientations    Json?
+  allowedExtensions      Json?
+  aiEnabled              Boolean   @default(true)
+  readinessLevel         String    @default("مكتمل")
+  status                 String    @default("نشطة")
+  slaStages              Json?
+  blocks                 Json?
+  rules                  Json?
+  obligations            Json?
+  notes                  Json?
+  exceptions             Json?
+  price                  Float     @default(0)
+  duration               Int       @default(0)
+  internalNotes          String?   @db.Text
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  // علاقة بالخدمات
+  serviceRequirements ServiceDocRequirement[]
+}
+
+// 2. الخدمات
+model Service {
+  id             String   @id @default(uuid())
+  name           String
+  code           String   @unique
+  pricingModel   String
+  price          Float    @default(0)
+  duration       Int      @default(0)
+  mainCategory   String?
+  subCategory    String?
+  description    String?  @db.Text
+  inclusions     Json?
+  exclusions     Json?
+  deliverables   Json?
+  tags           Json?
+  targetAudience Json?
+  isActive       Boolean  @default(true)
+  visibility     String   @default("public")
+  slaHours       Int      @default(24)
+  internalNotes  String?  @db.Text
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  requiredDocs ServiceDocRequirement[]
+  stages       ServiceStage[]
+  checklists   ServiceChecklist[]
+}
+
+// 3. جداول العلاقات
+model ServiceDocRequirement {
+  serviceId          String
+  documentTemplateId String
+
+  service          Service          @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  documentTemplate DocumentTemplate @relation(fields: [documentTemplateId], references: [id], onDelete: Cascade)
+
+  @@id([serviceId, documentTemplateId])
+}
+
+model ServiceStage {
+  id        String  @id @default(uuid())
+  serviceId String
+  name      String
+  order     Int     @default(0)
+  service   Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+}
+
+model ServiceChecklist {
+  id          String  @id @default(uuid())
+  serviceId   String
+  task        String
+  isMandatory Boolean @default(true)
+  service     Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+}
