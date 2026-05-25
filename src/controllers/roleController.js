@@ -238,54 +238,32 @@ const getRoleById = async (req, res) => {
   }
 };
 
-// ===============================================
-// 6. تحديث صلاحيات دور معين
 // PUT /api/roles/:id/permissions
-// ===============================================
 const updateRolePermissions = async (req, res) => {
   try {
-    const { id } = req.params;
-    const { permissionsData } = req.body;
+    const roleId = req.params.id;
+    const { permissionIds } = req.body; // مصفوفة الـ IDs القادمة من الواجهة
 
-    if (!permissionsData || !Array.isArray(permissionsData)) {
-      await prisma.jobRole.update({
-        where: { id },
-        data: { permissions: { set: [] } },
-      });
-      return res
-        .status(200)
-        .json({ success: true, message: "تم تفريغ الصلاحيات" });
+    if (!Array.isArray(permissionIds)) {
+      return res.status(400).json({ message: "يجب إرسال مصفوفة بصيغة permissionIds" });
     }
 
-    for (const p of permissionsData) {
-      await prisma.permission.upsert({
-        where: { code: p.code },
-        update: {},
-        create: {
-          code: p.code,
-          name: p.name,
-          screenName: p.screenName,
-          tabName: p.tabName,
-          level: p.level || "action",
-          status: "active",
-        },
-      });
-    }
-
+    // تحديث الدور: نقوم بمسح الصلاحيات القديمة (set) وربط الجديدة في عملية واحدة
     const updatedRole = await prisma.jobRole.update({
-      where: { id: id },
+      where: { id: roleId },
       data: {
         permissions: {
-          set: permissionsData.map((p) => ({ code: p.code })),
-        },
+          set: permissionIds.map(id => ({ id }))
+        }
       },
-      include: { permissions: true },
+      include: { permissions: true } // إرجاع الدور مع صلاحياته الجديدة
     });
 
-    res.status(200).json({ success: true, data: updatedRole.permissions });
+    res.status(200).json({ message: "تم تحديث مصفوفة الصلاحيات بنجاح", role: updatedRole });
+
   } catch (error) {
-    console.error("Update Role Error:", error);
-    res.status(500).json({ message: "خطأ في تحديث الصلاحيات" });
+    console.error(error);
+    res.status(500).json({ message: "خطأ في خادم قاعدة البيانات" });
   }
 };
 

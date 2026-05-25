@@ -361,6 +361,13 @@ model PermissionGroup {
   name        String
   description String?
 
+  type String @default("sub_module") // لتحديد ما إذا كان "module" أو "sub_module"
+
+  // 1. العلاقات الذاتية لبناء الشجرة (Self-Relation)
+  parentId String? // معرف الجروب الأب (إن وجد)
+  parent   PermissionGroup?  @relation("GroupHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
+  children PermissionGroup[] @relation("GroupHierarchy")
+
   permissions Permission[] @relation("GroupToPermission")
 
   createdAt DateTime @default(now())
