@@ -2,151 +2,116 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
 // =================================================================
-// 1. جلب الهيكل الشجري بالكامل (Modules -> Sub-Modules -> Permissions)
-// GET /api/permissions-tree
+// 1. جلب الهيكل الهرمي للصلاحيات (شجرة الشاشات والعمليات)
+// GET /api/permissions/tree
 // =================================================================
 const getPermissionTree = async (req, res) => {
   try {
-    // 1. جلب جميع الجروبات والصلاحيات المرتبطة بها
-    const allGroups = await prisma.permissionGroup.findMany({
-      include: {
-        permissions: {
-          select: { id: true, name: true, code: true, type: true }
-        }
-      }
+    // 1. جلب كل الصلاحيات من جدول Permission فقط
+    const allPermissions = await prisma.permission.findMany({
+      orderBy: { name: 'asc' } // ترتيب أبجدي لتسهيل القراءة
     });
 
-    // 2. دالة برمجية لبناء الشجرة تراجعياً (Recursive)
+    // 2. دالة البناء التراجعي (لربط الأبناء بالآباء)
     const buildTree = (parentId = null) => {
-      return allGroups
-        .filter(group => group.parentId === parentId)
-        .map(group => {
-          // جلب الأبناء (جروبات فرعية)
-          const childrenGroups = buildTree(group.id);
-          
-          // تحويل الصلاحيات لتطابق شكل الـ Node في الـ Frontend
-          const permissionsNodes = group.permissions.map(perm => ({
-            id: perm.id,
-            name: perm.name,
-            code: perm.code,
-            type: 'permission'
-          }));
-
-          return {
-            id: group.id,
-            name: group.name,
-            type: group.type,
-            // ندمج الجروبات الفرعية مع الصلاحيات الفردية بداخل هذا الجروب
-            children: [...childrenGroups, ...permissionsNodes]
-          };
-        });
+      return allPermissions
+        // إذا كان parentId الخاص بالصلاحية يطابق الـ parentId المطلوب
+        .filter(p => p.parentId === parentId) 
+        .map(p => ({
+          id: p.id,
+          name: p.name,
+          code: p.code,
+          parentId: p.parentId,
+          type: 'permission', // لتتوافق مع الواجهة الأمامية
+          children: buildTree(p.id) // استدعاء ذاتي لجلب أبناء هذه الصلاحية
+        }));
     };
 
+    // 3. بناء الشجرة ابتداءً من العناصر الجذرية (التي parentId لها = null)
     const tree = buildTree(null);
-    res.status(200).json(tree);
 
+    res.status(200).json(tree);
   } catch (error) {
-    console.error("خطأ في جلب شجرة الصلاحيات:", error);
-    res.status(500).json({ message: 'خطأ في خادم قاعدة البيانات' });
+    console.error("Tree Fetch Error:", error);
+    res.status(500).json({ message: 'خطأ في جلب الهيكل الهرمي للصلاحيات' });
   }
 };
 
 // =================================================================
-// 2. حفظ ومزامنة الهيكل الشجري (حفظ التعديلات والجروبات الجديدة)
-// POST /api/permissions-tree/sync
+// 2. حفظ الهيكل ومزامنة السحب والإفلات (إضافة، تعديل، ونقل)
+// POST /api/permissions/tree/sync
 // =================================================================
 const syncPermissionTree = async (req, res) => {
-  const { tree } = req.body; // مصفوفة الشجرة القادمة من الـ Frontend
+  const { tree } = req.body;
 
   if (!tree || !Array.isArray(tree)) {
     return res.status(400).json({ message: 'البيانات المرسلة غير صالحة' });
   }
 
   try {
-    // نستخدم Transaction لضمان أنه إذا فشل جزء، يتراجع عن كل شيء
     await prisma.$transaction(async (tx) => {
-      
-      // مصفوفة لتتبع الـ IDs الصالحة التي تم إرسالها لتجنب حذفها
-      const activeGroupIds = [];
+      const activePermissionIds = [];
 
-      // دالة تراجعية لمعالجة وحفظ كل عقدة (Node)
+      // دالة لمعالجة وحفظ كل عقدة (صلاحية/شاشة)
       const processNode = async (node, parentId = null) => {
-        // إذا كانت العقدة عبارة عن صلاحية (لا نحتاج لإنشائها هنا، بل نربطها فقط)
-        if (node.type === 'permission') return;
-
-        // إذا كانت العقدة جروب (Module أو Sub-Module)
-        let groupId = node.id;
+        let permId = node.id;
         
-        // التحقق مما إذا كان الجروب جديداً (تم إنشاؤه في الـ Frontend بـ ID مؤقت مثل sub-123)
-        const isNewGroup = groupId.startsWith('sub-') || groupId.startsWith('mod-');
+        // التحقق هل هذا العنصر تم إنشاؤه للتو من الواجهة الأمامية؟
+        const isNewNode = String(permId).startsWith('sub-') || String(permId).startsWith('mod-');
 
-        let savedGroup;
-        if (isNewGroup) {
-          // إنشاء جروب جديد
-          savedGroup = await tx.permissionGroup.create({
+        if (isNewNode) {
+          // إذا كانت شاشة/صلاحية جديدة، نولد لها كود فريد ونحفظها في جدول Permission
+          const uniqueCode = `PERM_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+          
+          const newPerm = await tx.permission.create({
             data: {
               name: node.name,
-              type: node.type || 'sub_module',
+              code: uniqueCode,
+              level: 'screen', // مستوى افتراضي
+              parentId: parentId, 
+              status: 'active'
+            }
+          });
+          permId = newPerm.id;
+        } else {
+          // إذا كانت موجودة، نقوم بتحديث اسمها ونقلها (تغيير الـ parentId الخاص بها)
+          await tx.permission.update({
+            where: { id: permId },
+            data: {
+              name: node.name,
               parentId: parentId
             }
           });
-          groupId = savedGroup.id; // استبدال الـ ID المؤقت بالـ ID الحقيقي من قاعدة البيانات
-        } else {
-          // تحديث جروب موجود (تغيير اسمه أو تغيير الأب الخاص به - النقل)
-          savedGroup = await tx.permissionGroup.update({
-            where: { id: groupId },
-            data: {
-              name: node.name,
-              parentId: parentId,
-              // تصفير الصلاحيات المرتبطة به تمهيداً لربطها من جديد بناءً على الشجرة
-              permissions: { set: [] } 
-            }
-          });
         }
 
-        activeGroupIds.push(groupId);
+        activePermissionIds.push(permId);
 
-        // فرز الأبناء لمعرفة الصلاحيات المباشرة داخل هذا الجروب
-        const childPermissions = (node.children || []).filter(c => c.type === 'permission');
-        const childGroups = (node.children || []).filter(c => c.type !== 'permission');
-
-        // ربط الصلاحيات بهذا الجروب
-        if (childPermissions.length > 0) {
-          await tx.permissionGroup.update({
-            where: { id: groupId },
-            data: {
-              permissions: {
-                connect: childPermissions.map(p => ({ id: p.id }))
-              }
-            }
-          });
-        }
-
-        // معالجة الجروبات الفرعية بشكل تراجعي (Recursion)
-        for (const childGroup of childGroups) {
-          await processNode(childGroup, groupId);
+        // معالجة الأبناء بداخل هذه الصلاحية
+        const children = node.children || [];
+        for (const child of children) {
+          await processNode(child, permId);
         }
       };
 
-      // 1. بدء المعالجة من الجذور (Root Nodes)
+      // بدء المعالجة من الجذور
       for (const rootNode of tree) {
         await processNode(rootNode, null);
       }
 
-      // 2. تنظيف البيانات: حذف الجروبات التي تم مسحها من الواجهة ولم تعد موجودة في الشجرة
-      await tx.permissionGroup.deleteMany({
+      // مسح الصلاحيات التي تم حذفها من الشجرة نهائياً
+      await tx.permission.deleteMany({
         where: {
-          id: { notIn: activeGroupIds }
+          id: { notIn: activePermissionIds }
         }
       });
 
     });
 
-    res.status(200).json({ message: 'تم بناء وحفظ الهيكل الشجري بنجاح' });
+    res.status(200).json({ message: 'تم حفظ الهيكل الهرمي للصلاحيات بنجاح' });
 
   } catch (error) {
-    console.error("خطأ في حفظ الشجرة:", error);
-    res.status(500).json({ message: 'خطأ أثناء مزامنة الهيكل الشجري' });
+    console.error("Tree Sync Error:", error);
+    res.status(500).json({ message: 'خطأ أثناء مزامنة الهيكل الهرمي' });
   }
 };
 

@@ -339,6 +339,10 @@ model Permission {
   actionType  String?
   status      String  @default("active")
 
+  parentId String?
+  parent   Permission?  @relation("PermissionHierarchy", fields: [parentId], references: [id])
+  children Permission[] @relation("PermissionHierarchy")
+
   frozenType   String?
   frozenDate   DateTime?
   frozenUntil  DateTime?
