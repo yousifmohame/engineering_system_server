@@ -7,11 +7,121 @@ const bcrypt = require("bcryptjs");
 // 1. جلب الموظف الحالي (من الـ Token)
 // GET /api/employees/me
 // ===============================================
-const getMe = (req, res) => {
-  if (req.user) {
-    res.status(200).json(req.user);
-  } else {
-    res.status(404).json({ message: "لم يتم العثور على الموظف" });
+const getMe = async (req, res) => {
+  try {
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({ message: "غير مصرح لك بالوصول" });
+    }
+
+    // جلب بيانات الموظف الحقيقية من قاعدة البيانات لضمان تحديثها
+    const employee = await prisma.employee.findUnique({
+      where: { id: req.user.id },
+      include: {
+        roles: true,
+      },
+    });
+
+    if (!employee) {
+      return res.status(404).json({ message: "لم يتم العثور على الموظف" });
+    }
+
+    // إزالة كلمة المرور المشفرة قبل إرسال البيانات للواجهة لدواعي أمنية
+    delete employee.password;
+
+    // إضافة رصيد إجازات افتراضي (إذا لم يكن لديك حقل مخصص له في الـ Schema)
+    employee.leaveBalance = 21;
+
+    res.status(200).json(employee);
+  } catch (error) {
+    console.error("Error fetching current employee:", error);
+    res.status(500).json({ message: "خطأ في الخادم أثناء جلب بياناتك" });
+  }
+};
+// ===============================================
+// 1. ✅ دالة إنشاء طلب الإجازة المصححة (تستخدم النموذج الصحيح وتستبعد حقل days)
+// POST /api/employees/:id/leave-requests
+// ===============================================
+const createEmployeeLeaveRequest = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { type, startDate, endDate, reason } = req.body;
+
+    if (!type || !startDate || !endDate) {
+      return res.status(400).json({ message: "الرجاء إدخال نوع الإجازة وتاريخ البدء والانتهاء" });
+    }
+
+    const employee = await prisma.employee.findUnique({ where: { id } });
+    if (!employee) return res.status(404).json({ message: "الموظف غير موجود" });
+
+    // إنشاء السجل في جدول EmployeeLeave المعتمد في الـ Schema الخاص بك
+    const newLeave = await prisma.employeeLeave.create({
+      data: {
+        employeeId: id,
+        type,
+        startDate: new Date(startDate),
+        endDate: new Date(endDate),
+        reason: reason || null,
+        status: "PENDING", // حالة افتراضية قيد الانتظار
+      },
+    });
+
+    res.status(201).json({ message: "تم رفع طلب الإجازة بنجاح", leaveRequest: newLeave });
+  } catch (error) {
+    console.error("Error creating leave request:", error);
+    res.status(500).json({ message: "خطأ في الخادم أثناء معالجة الطلب" });
+  }
+};
+
+// ===============================================
+// 2. 🚀 جديد: جلب جميع طلبات الإجازات لجميع الموظفين (لوحة تحكم HR)
+// GET /api/employees/all/leave-requests
+// ===============================================
+const getAllLeaveRequests = async (req, res) => {
+  try {
+    const leaveRequests = await prisma.employeeLeave.findMany({
+      include: {
+        employee: {
+          select: {
+            id: true,
+            employeeCode: true,
+            name: true,
+            position: true,
+            department: true,
+          }
+        }
+      },
+      orderBy: { createdAt: "desc" }
+    });
+    res.status(200).json(leaveRequests);
+  } catch (error) {
+    console.error("Error fetching all leaves:", error);
+    res.status(500).json({ message: "خطأ في الخادم أثناء جلب طلبات الإجازات" });
+  }
+};
+
+
+// ===============================================
+// 3. 🚀 جديد: تحديث حالة الطلب من قبل الإدارة (اعتماد / رفض)
+// PUT /api/employees/leave-requests/:leaveId/status
+// ===============================================
+const updateLeaveRequestStatus = async (req, res) => {
+  try {
+    const { leaveId } = req.params;
+    const { status } = req.body; // EXPECTS: 'APPROVED' or 'REJECTED'
+
+    if (!["APPROVED", "REJECTED", "PENDING"].includes(status)) {
+      return res.status(400).json({ message: "حالة الطلب غير صالحة" });
+    }
+
+    const updatedLeave = await prisma.employeeLeave.update({
+      where: { id: leaveId },
+      data: { status }
+    });
+
+    res.status(200).json({ message: "تم تحديث حالة طلب الإجازة بنجاح", leave: updatedLeave });
+  } catch (error) {
+    console.error("Error updating leave status:", error);
+    res.status(500).json({ message: "خطأ في الخادم أثناء تحديث الطلب" });
   }
 };
 
@@ -170,12 +280,10 @@ const createEmployee = async (req, res) => {
     });
 
     if (employeeExists) {
-      return res
-        .status(400)
-        .json({
-          message:
-            "موظف مسجل بالفعل بنفس رقم الهوية، الإيميل، الجوال، أو الرقم الوظيفي",
-        });
+      return res.status(400).json({
+        message:
+          "موظف مسجل بالفعل بنفس رقم الهوية، الإيميل، الجوال، أو الرقم الوظيفي",
+      });
     }
 
     if (fingerprintId && String(fingerprintId).trim() !== "") {
@@ -286,6 +394,10 @@ const createEmployee = async (req, res) => {
 // 4. تحديث بيانات موظف
 // PUT /api/employees/:id
 // ===============================================
+// ===============================================
+// 4. تحديث بيانات موظف (يدعم التحديث الجزئي بأمان)
+// PUT /api/employees/:id
+// ===============================================
 const updateEmployee = async (req, res) => {
   try {
     const { id } = req.params;
@@ -307,6 +419,7 @@ const updateEmployee = async (req, res) => {
       isAgeVisible,
       isInternalTitleVisible,
       birthDate,
+      email, // 👈 تمت إضافة الإيميل هنا
       phone,
       position,
       qiwaPosition,
@@ -340,7 +453,8 @@ const updateEmployee = async (req, res) => {
       password,
     } = req.body;
 
-    if (fingerprintId && String(fingerprintId).trim() !== "") {
+    // 1. التحقق من رقم البصمة إذا تم إرساله
+    if (fingerprintId !== undefined && String(fingerprintId).trim() !== "") {
       const fingerprintExists = await prisma.employee.findFirst({
         where: { fingerprintId: String(fingerprintId).trim(), id: { not: id } },
       });
@@ -351,37 +465,14 @@ const updateEmployee = async (req, res) => {
       }
     }
 
-    const fullNameAr =
-      name ||
-      [firstNameAr, secondNameAr, thirdNameAr, fourthNameAr]
-        .filter(Boolean)
-        .join(" ");
-    const fullNameEn =
-      nameEn ||
-      [firstNameEn, secondNameEn, thirdNameEn, fourthNameEn]
-        .filter(Boolean)
-        .join(" ");
-
+    // 2. تجميع البيانات الأساسية للتحديث (Prisma يتجاهل أي حقل قيمته undefined تلقائياً)
     const updateData = {
       employeeCode,
-      fingerprintId:
-        fingerprintId && String(fingerprintId).trim() !== ""
-          ? String(fingerprintId).trim()
-          : null,
-      name: fullNameAr,
-      nameEn: fullNameEn,
-      firstNameAr,
-      secondNameAr,
-      thirdNameAr,
-      fourthNameAr,
-      firstNameEn,
-      secondNameEn,
-      thirdNameEn,
-      fourthNameEn,
       profilePicture,
       isPhotoVisible,
       isAgeVisible,
       isInternalTitleVisible,
+      email, // 👈 سيتم تحديث الإيميل الآن
       phone,
       position,
       qiwaPosition,
@@ -403,32 +494,66 @@ const updateEmployee = async (req, res) => {
       additionalNumber,
       cityAr,
       cityEn,
-
-      // 🚀 إعدادات الدوام الجديدة
       shiftType,
       shiftStartTime,
       shiftEndTime,
       customWorkingDays,
-      requiredDailyHours: requiredDailyHours
-        ? parseFloat(requiredDailyHours)
-        : undefined,
     };
 
-    if (birthDate) updateData.birthDate = new Date(birthDate);
-    if (hireDate) updateData.hireDate = new Date(hireDate);
-    if (actualStartDate) updateData.actualStartDate = new Date(actualStartDate);
+    // 3. 🚨 الحل الجذري لمشكلة حذف الاسم: تحديث الاسم فقط إذا تم إرساله فعلياً من الواجهة
+    if (name !== undefined || firstNameAr !== undefined) {
+      const computedNameAr =
+        name ||
+        [firstNameAr, secondNameAr, thirdNameAr, fourthNameAr]
+          .filter(Boolean)
+          .join(" ");
+      if (computedNameAr.trim() !== "") updateData.name = computedNameAr;
+    }
+
+    if (nameEn !== undefined || firstNameEn !== undefined) {
+      const computedNameEn =
+        nameEn ||
+        [firstNameEn, secondNameEn, thirdNameEn, fourthNameEn]
+          .filter(Boolean)
+          .join(" ");
+      if (computedNameEn.trim() !== "") updateData.nameEn = computedNameEn;
+    }
+
+    if (fingerprintId !== undefined) {
+      updateData.fingerprintId =
+        String(fingerprintId).trim() !== ""
+          ? String(fingerprintId).trim()
+          : null;
+    }
+
+    // 4. معالجة التواريخ والأرقام بأمان
+    if (birthDate !== undefined)
+      updateData.birthDate = birthDate ? new Date(birthDate) : null;
+    if (hireDate !== undefined)
+      updateData.hireDate = hireDate ? new Date(hireDate) : null;
+    if (actualStartDate !== undefined)
+      updateData.actualStartDate = actualStartDate
+        ? new Date(actualStartDate)
+        : null;
     if (baseSalary !== undefined)
       updateData.baseSalary = baseSalary ? parseFloat(baseSalary) : null;
+    if (requiredDailyHours !== undefined)
+      updateData.requiredDailyHours = requiredDailyHours
+        ? parseFloat(requiredDailyHours)
+        : undefined;
 
+    // 5. تحديث وتشفير كلمة المرور في حال تم طلب تغييرها
     if (password && password.trim() !== "") {
       const salt = await bcrypt.genSalt(10);
       updateData.password = await bcrypt.hash(password, salt);
     }
 
+    // 6. تحديث الأدوار (الصلاحيات) إن وجدت
     if (roleIds && Array.isArray(roleIds)) {
       updateData.roles = { set: roleIds.map((roleId) => ({ id: roleId })) };
     }
 
+    // 7. تنفيذ التحديث في قاعدة البيانات
     const updatedEmployee = await prisma.employee.update({
       where: { id: id },
       data: updateData,
@@ -441,7 +566,9 @@ const updateEmployee = async (req, res) => {
     if (error.code === "P2025")
       return res.status(404).json({ message: "الموظف غير موجود" });
     console.error(error);
-    res.status(500).json({ message: "خطأ في الخادم" });
+    res
+      .status(500)
+      .json({ message: "خطأ في الخادم أثناء تحديث بيانات الموظف" });
   }
 };
 
@@ -620,26 +747,35 @@ const getEmployeeAttendance = async (req, res) => {
     });
     res.status(200).json(attendanceRecords);
   } catch (error) {
-    res
-      .status(500)
-      .json({
-        message: "Error fetching attendance records",
-        error: error.message,
-      });
+    res.status(500).json({
+      message: "Error fetching attendance records",
+      error: error.message,
+    });
   }
 };
 
+// ===============================================
+// جلب إجازات موظف محدد (تُستخدم في بوابة الموظف)
+// GET /api/employees/:id/leave-requests
+// ===============================================
 const getEmployeeLeaveRequests = async (req, res) => {
   try {
-    const leaveRequests = await prisma.employeeLeaveRequest.findMany({
-      where: { employeeId: req.params.id },
-      orderBy: { startDate: "desc" },
+    const { id } = req.params;
+
+    // جلب الإجازات من جدول employeeLeave الخاصة بهذا الموظف فقط
+    const leaveRequests = await prisma.employeeLeave.findMany({
+      where: { 
+        employeeId: id 
+      },
+      orderBy: { 
+        createdAt: "desc" // ترتيب من الأحدث للأقدم
+      },
     });
+
     res.status(200).json(leaveRequests);
   } catch (error) {
-    res
-      .status(500)
-      .json({ message: "Error fetching leave requests", error: error.message });
+    console.error("Error fetching employee leave requests:", error);
+    res.status(500).json({ message: "خطأ في الخادم أثناء جلب أرشيف الإجازات" });
   }
 };
 
@@ -751,12 +887,10 @@ const updateEmployeeStatus = async (req, res) => {
     });
     res.status(200).json(updatedEmployee);
   } catch (error) {
-    res
-      .status(500)
-      .json({
-        message: "Error updating employee status",
-        error: error.message,
-      });
+    res.status(500).json({
+      message: "Error updating employee status",
+      error: error.message,
+    });
   }
 };
 
@@ -838,10 +972,11 @@ const getEmployeesWithStats = async (req, res) => {
   }
 };
 
-
-
 module.exports = {
   getMe,
+  createEmployeeLeaveRequest,
+  getAllLeaveRequests,
+  updateLeaveRequestStatus,
   getAllEmployees,
   createEmployee,
   updateEmployee,
@@ -857,5 +992,5 @@ module.exports = {
   updateEmployeeStatus,
   updateEmployeePromotion,
   getEmployeesWithStats,
-  getEmployeeAttendanceAnalysis, // 👈 تصدير الدالة الذكية الجديدة
+  getEmployeeAttendanceAnalysis,
 };

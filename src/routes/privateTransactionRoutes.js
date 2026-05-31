@@ -77,6 +77,7 @@ const {
   addAuthorityNote,
   updateAuthorityNote,
   deleteAuthorityNote,
+  getPrivateTransactionById
 } = require("../controllers/privateTransactionController");
 
 router.use(protect);
@@ -95,6 +96,7 @@ router.post("/:id/agents", assignAgentToTransaction);
 
 router.post("/:id/status", uploadStatusNote.any(), updateTransactionStatus);
 router.put("/:id", uploadTransaction.any(), updatePrivateTransaction);
+router.get("/:id", getPrivateTransactionById);
 router.delete("/:id", deletePrivateTransaction);
 router.patch("/:id/toggle-freeze", toggleFreezeTransaction);
 router.post("/:id/expenses", addPrivateExpense);

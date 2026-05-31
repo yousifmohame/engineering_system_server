@@ -240,36 +240,44 @@ const createPrivateTransaction = async (req, res) => {
         title: txTitle,
         category: transactionType || "غير محدد",
         complexity: surveyType || "بدون رفع",
-
         source: source || "مكتب ديتيلز",
-        // 👇 2. حفظ مصدر المعاملة المرتبط بجدول الأشخاص
-        sourcePersonId: sourcePersonId || undefined,
-
         status: "in_progress",
         createdBy: addedBy || "مدير النظام",
 
-        clientId: finalClientId,
+        // 👑 1. الربط الاحترافي للعميل الرئيسي (المالك)
+        client: {
+          connect: { id: finalClientId },
+        },
         clientType: clientType || null,
         ownerNames: ownerName || null,
         ownerIds: ownerIdNumber || null,
 
-        designerOfficeId: designerOffice || undefined,
-        supervisorOfficeId: supervisorOffice || undefined,
-
-        // 👇 3. حفظ حالة الاتفاقية
-        hasAgreement: hasAgreement || false,
-
-        // 💡 👈 إنشاء الروابط في الجدول الوسيط للملاك
+        // 👑 2. الربط الاحترافي لجدول الملاك المتعددين (TransactionOwner)
         ownersList: {
           create: detailedOwnersList.map((owner) => ({
-            clientId: owner.clientId || finalClientId, // تأكيد وجود ID
-            // ownerName: owner.ownerName,
+            // بدلاً من كتابة clientId مباشرة، نستخدم العميل ككائن متصل
+            client: {
+              connect: { id: owner.clientId || finalClientId },
+            },
             idNumber: owner.idNumber || null,
             isPrimary: owner.isPrimary || false,
           })),
         },
 
-        districtId: districtId || null,
+        // 👑 3. تطبيق الربط الاحترافي لبقية العلاقات (إن وجدت)
+        ...(sourcePersonId && {
+          sourcePerson: { connect: { id: sourcePersonId } },
+        }),
+        ...(districtId && {
+          districtNode: { connect: { id: districtId } },
+        }),
+
+        // ----------------------------------------------------
+        // باقي الحقول النصية والرقمية تبقى كما هي
+        // ----------------------------------------------------
+        designerOfficeId: designerOffice || undefined,
+        supervisorOfficeId: supervisorOffice || undefined,
+        hasAgreement: hasAgreement || false,
         districtName: district || null,
         sector: sector || null,
         planNumber: plan || null,
@@ -277,26 +285,21 @@ const createPrivateTransaction = async (req, res) => {
         landArea: landArea ? parseFloat(landArea) : null,
         oldDeed: oldDeed || null,
 
-        // الحقول القديمة (في حال كان هناك اعتماد عليها)
         serviceNo: serviceNo || null,
         requestNo: requestNo || null,
         licenseNo: licenseNo || null,
 
-        // 👇 4. تخزين الحقول الجديدة المفصلة (الخدمة، الطلب، الرخصة)
         serviceNumber: serviceNumber || null,
         serviceYear: serviceYear || null,
         serviceDate: serviceDate ? new Date(serviceDate) : null,
-
         requestNumber: requestNumber || null,
         requestYear: requestYear || null,
         requestDate: requestDate ? new Date(requestDate) : null,
-
         electronicLicenseNumber: electronicLicenseNumber || null,
         electronicLicenseHijriYear: electronicLicenseHijriYear || null,
         electronicLicenseDate: electronicLicenseDate
           ? new Date(electronicLicenseDate)
           : null,
-        // 👆 =========================================================
 
         totalFees: parsedTotalFees,
         paidAmount: parsedFirstPayment,
@@ -319,23 +322,32 @@ const createPrivateTransaction = async (req, res) => {
           ? receivedAttachmentsList
           : [],
 
-        brokerId: brokerId || null,
-        agentId: followUpAgentId || null,
-        stakeholderId: stakeholderId || null,
-        receiverId: receiverId || null,
-        engOfficeBrokerId: engOfficeBrokerId || null,
+        // 👑 4. الربط الاحترافي لقائمة الوسطاء الماليين (إن وجد وسيط)
+        ...(brokerId && {
+          brokersList: {
+            create: [
+              {
+                broker: { connect: { id: brokerId } }, // ربط احترافي
+                fees: mediatorFees ? parseFloat(mediatorFees) : 0,
+              },
+            ],
+          },
+        }),
 
-        brokersList: brokerId
-          ? {
-              create: [
-                {
-                  brokerId: brokerId,
-                  fees: mediatorFees ? parseFloat(mediatorFees) : 0,
-                },
-              ],
-            }
-          : undefined,
+        // ✅ الربط الاحترافي والآمن لمعرفات الأشخاص (Relations Connect)
+        ...(brokerId ? { broker: { connect: { id: brokerId } } } : {}),
+        ...(followUpAgentId
+          ? { agent: { connect: { id: followUpAgentId } } }
+          : {}),
+        ...(stakeholderId
+          ? { stakeholder: { connect: { id: stakeholderId } } }
+          : {}),
+        ...(receiverId ? { receiver: { connect: { id: receiverId } } } : {}),
+        ...(engOfficeBrokerId
+          ? { engOfficeBroker: { connect: { id: engOfficeBrokerId } } }
+          : {}),
 
+        // معالجة الملاحظات (JSON)
         notes: {
           internalName: internalName || null,
           isInternalNameHidden: isInternalNameHidden || false,
@@ -718,7 +730,8 @@ const getPrivateTransactions = async (req, res) => {
         logs: notes?.logs || [],
         isOnAxis: tx.isOnAxis || notes?.refs?.isOnAxis || "لا",
         streetName: tx.streetName || notes?.refs?.streetName || "",
-        officialMapLink: tx.officialMapLink || notes?.refs?.officialMapLink || "",
+        officialMapLink:
+          tx.officialMapLink || notes?.refs?.officialMapLink || "",
       };
     });
 
@@ -2010,6 +2023,36 @@ const deleteAuthorityNote = async (req, res) => {
   }
 };
 
+// ===============================================
+// جلب معاملة محددة بالـ ID مع كافة تفاصيلها (للتعبئة التلقائية)
+// GET /api/private-transactions/:id
+// ===============================================
+const getPrivateTransactionById = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const transaction = await prisma.privateTransaction.findUnique({
+      where: { id },
+      include: {
+        // ✅ تضمين بيانات العميل
+        client: true,
+        // ✅ تضمين الحي 
+        districtNode: true,
+        // ❌ تم حذف transactionType لأنه غير موجود في هذا الجدول
+      },
+    });
+
+    if (!transaction) {
+      return res.status(404).json({ message: "المعاملة غير موجودة في النظام" });
+    }
+
+    res.status(200).json({ data: transaction });
+  } catch (error) {
+    console.error("Error fetching private transaction by ID:", error);
+    res.status(500).json({ message: "خطأ داخلي في الخادم أثناء جلب المعاملة" });
+  }
+};
+
 module.exports = {
   createPrivateTransaction,
   getPrivateTransactions,
@@ -2033,4 +2076,5 @@ module.exports = {
   addAuthorityNote,
   updateAuthorityNote,
   deleteAuthorityNote,
+  getPrivateTransactionById,
 };

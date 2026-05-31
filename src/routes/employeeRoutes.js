@@ -1,7 +1,7 @@
 // routes/employeeRoutes.js
 const express = require("express");
 const router = express.Router();
-
+const { protect } = require("../middleware/authMiddleware");
 const {
   getMe,
   getAllEmployees,
@@ -10,6 +10,9 @@ const {
   getEmployeeAttachments,
   getEmployeeAttendance,
   getEmployeeLeaveRequests,
+  createEmployeeLeaveRequest,
+  getAllLeaveRequests,
+  updateLeaveRequestStatus,
   getEmployeeSkills,
   getEmployeeCertifications,
   getEmployeeEvaluations,
@@ -25,7 +28,10 @@ const {
 
 router.route("/").get(getAllEmployees).post(createEmployee);
 router.get("/with-stats", getEmployeesWithStats);
-router.route("/me").get(getMe);
+router.route("/me").get(protect, getMe);
+// أضف هذه المسارات البرمجية الجديدة مع تفعيل حماية الـ Middleware
+router.get("/all/leave-requests", protect, getAllLeaveRequests);
+router.put("/leave-requests/:leaveId/status", protect, updateLeaveRequestStatus);
 router.route("/:id").put(updateEmployee).delete(deleteEmployee);
 
 router.get("/:id/attendance", getEmployeeAttendance);
@@ -34,6 +40,8 @@ router.get("/:id/attendance", getEmployeeAttendance);
 router.get("/:id/attendance-analysis", getEmployeeAttendanceAnalysis);
 
 router.get("/:id/leave-requests", getEmployeeLeaveRequests);
+router.post("/:id/leave-requests", createEmployeeLeaveRequest);
+
 router.get("/:id/skills", getEmployeeSkills);
 router.get("/:id/certifications", getEmployeeCertifications);
 router.get("/:id/evaluations", getEmployeeEvaluations);

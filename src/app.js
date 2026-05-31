@@ -267,9 +267,19 @@ app.use("/api/attendance", attendanceRoutes);
 
 const ServicesRoutes = require("./routes/serviceRoutes");
 app.use("/api/services", ServicesRoutes);
+
 const documentTemplateRoutes= require('./routes/documentTemplateRoutes')
 app.use('/api/doc-templates',documentTemplateRoutes);
 
+const payrollRoutes = require('./routes/payrollRoutes');
+app.use('/api/payrolls', payrollRoutes);
+
+const technicalReportRoutes = require('./routes/technicalReportRoutes');
+app.use('/api/technical-reports', technicalReportRoutes);
+
+// ==================================================
+// مسار اختبار السيرفر (يمكن حذفه لاحقاً)
+// ==================================================
 // فحص صحة السيرفر
 app.get("/", (req, res) => {
   res.json({ status: "Online", message: "Engineering System API v1" });
