@@ -22,7 +22,8 @@ const {
   updateEmployeePromotion,
   createEmployee,
   getEmployeesWithStats,
-  getEmployeeAttendanceAnalysis, // 👈 تم استيراد الدالة الذكية الجديدة
+  getEmployeeAttendanceAnalysis,
+  getEmployeeById,
   
 } = require("../controllers/employeeController");
 
@@ -32,7 +33,10 @@ router.route("/me").get(protect, getMe);
 // أضف هذه المسارات البرمجية الجديدة مع تفعيل حماية الـ Middleware
 router.get("/all/leave-requests", protect, getAllLeaveRequests);
 router.put("/leave-requests/:leaveId/status", protect, updateLeaveRequestStatus);
-router.route("/:id").put(updateEmployee).delete(deleteEmployee);
+router.route("/:id")
+  .get(getEmployeeById) // 👈 تم إضافة هذا
+  .put(updateEmployee)
+  .delete(deleteEmployee);
 
 router.get("/:id/attendance", getEmployeeAttendance);
 

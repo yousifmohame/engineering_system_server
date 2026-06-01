@@ -972,6 +972,58 @@ const getEmployeesWithStats = async (req, res) => {
   }
 };
 
+// ===============================================
+// جلب تفاصيل موظف محدد بواسطة المعرف (ID)
+// GET /api/employees/:id
+// ===============================================
+const getEmployeeById = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const employee = await prisma.employee.findUnique({
+      where: { id },
+      include: {
+        roles: {
+          include: {
+            permissions: true // جلب الصلاحيات المرتبطة بالأدوار
+          }
+        },
+        specialPermissions: true, // جلب الصلاحيات الخاصة إن وجدت
+      },
+    });
+
+    if (!employee) {
+      return res.status(404).json({ message: "الموظف غير موجود" });
+    }
+
+    // إزالة الباسورد لأسباب أمنية
+    delete employee.password;
+
+    // استخراج جميع الصلاحيات في مصفوفة واحدة مسطحة لتسهيل التعامل في الواجهة الأمامية
+    const allPermissions = new Map();
+    
+    if (employee.roles) {
+      employee.roles.forEach(role => {
+        if (role.permissions) {
+          role.permissions.forEach(perm => allPermissions.set(perm.id, perm));
+        }
+      });
+    }
+
+    if (employee.specialPermissions) {
+      employee.specialPermissions.forEach(perm => allPermissions.set(perm.id, perm));
+    }
+
+    // إضافة حقل 'permissions' يحتوي على جميع الصلاحيات
+    employee.permissions = Array.from(allPermissions.values());
+
+    res.status(200).json({ data: employee });
+  } catch (error) {
+    console.error("Error fetching employee by ID:", error);
+    res.status(500).json({ message: "خطأ في الخادم أثناء جلب بيانات الموظف" });
+  }
+};
+
 module.exports = {
   getMe,
   createEmployeeLeaveRequest,
@@ -993,4 +1045,5 @@ module.exports = {
   updateEmployeePromotion,
   getEmployeesWithStats,
   getEmployeeAttendanceAnalysis,
+  getEmployeeById,
 };
