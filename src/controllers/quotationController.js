@@ -35,6 +35,9 @@ const generateSecurityData = (quoteNumber) => {
 // ===============================================
 // 1. إنشاء عرض سعر (محدث ومصحح لخطأ Prisma + زيادة عداد النموذج)
 // ===============================================
+// ===============================================
+// 1. إنشاء عرض سعر (مع دعم الضريبة المخصصة لكل بند)
+// ===============================================
 const createQuotation = async (req, res) => {
   try {
     const data = req.body;
@@ -47,7 +50,10 @@ const createQuotation = async (req, res) => {
 
     const quotationNumber = await generateQuotationNumber();
 
+    // 👇 متغيرات حساب الإجماليات
     let calcSubtotal = 0;
+    let calcTaxAmount = 0;
+
     const itemsToCreate = (data.items || []).map((item, index) => {
       const lineTotal = parseFloat(item.qty) * parseFloat(item.price);
       let lineDiscount =
@@ -57,6 +63,12 @@ const createQuotation = async (req, res) => {
 
       const subtotal = Math.max(0, lineTotal - lineDiscount);
       calcSubtotal += subtotal;
+
+      // 👇 حساب ضريبة هذا البند تحديداً
+      const itemTaxRate =
+        item.taxRate !== undefined ? parseFloat(item.taxRate) / 100 : 0.15;
+      const itemTaxAmount = subtotal * itemTaxRate;
+      calcTaxAmount += itemTaxAmount; // تجميع الضريبة الكلية
 
       return {
         order: index + 1,
@@ -68,12 +80,15 @@ const createQuotation = async (req, res) => {
         discount: parseFloat(item.discount) || 0,
         discountType: item.discountType || "PERCENTAGE",
         subtotal: subtotal,
+        taxRate: itemTaxRate, // حفظ نسبة ضريبة البند
+        taxAmount: itemTaxAmount, // حفظ قيمة ضريبة البند
       };
     });
 
-    const taxRateFloat = parseFloat(data.taxRate || 15) / 100;
-    const calcTaxAmount = calcSubtotal * taxRateFloat;
     const calcTotal = calcSubtotal + calcTaxAmount;
+
+    // نسبة الضريبة العامة (كمرجعية للجدول الرئيسي)
+    const globalTaxRateFloat = parseFloat(data.taxRate || 15) / 100;
 
     let securityData = {};
     const stampType = data.stampType || "NONE";
@@ -88,7 +103,6 @@ const createQuotation = async (req, res) => {
     // 🔥 الحماية الأمنية: التحقق من وجود نوع المعاملة في الداتا بيز قبل الربط
     let validTransactionTypeId = undefined;
     if (data.transactionTypeId && data.transactionTypeId.length > 20) {
-      // الـ CUID عادة يكون طويل
       const existingType = await prisma.transactionType.findUnique({
         where: { id: data.transactionTypeId },
       });
@@ -110,7 +124,6 @@ const createQuotation = async (req, res) => {
           ? { connect: { id: data.meetingId } }
           : undefined,
 
-        // 👉 استخدام الـ ID الموثوق فقط
         transactionType: validTransactionTypeId
           ? { connect: { id: validTransactionTypeId } }
           : undefined,
@@ -127,8 +140,9 @@ const createQuotation = async (req, res) => {
         licenseNumber: data.licenseNumber || null,
         licenseYear: data.licenseYear || null,
 
+        // 👇 تسجيل الإجماليات
         subtotal: calcSubtotal,
-        taxRate: taxRateFloat,
+        taxRate: globalTaxRateFloat,
         officeTaxBearing: parseInt(data.officeTaxBearing) || 0,
         taxAmount: calcTaxAmount,
         total: calcTotal,
@@ -171,19 +185,16 @@ const createQuotation = async (req, res) => {
     // =========================================================
     if (data.templateId) {
       try {
-        // ابحث باستخدام code لأن الـ templateId القادم من الواجهة غالباً يكون هو الـ code
         const templateExists = await prisma.quotationTemplate.findUnique({
           where: { code: data.templateId },
         });
 
-        // إذا كان النموذج موجوداً، قم بزيادة العداد بمقدار 1
         if (templateExists) {
           await prisma.quotationTemplate.update({
             where: { code: data.templateId },
             data: { usesCount: { increment: 1 } },
           });
         } else {
-          // في حال كانت الواجهة ترسل الـ CUID الأصلي بدلاً من الـ code
           await prisma.quotationTemplate.update({
             where: { id: data.templateId },
             data: { usesCount: { increment: 1 } },
@@ -191,7 +202,6 @@ const createQuotation = async (req, res) => {
         }
       } catch (templateError) {
         console.error("Failed to increment template usesCount:", templateError);
-        // الخطأ هنا لا يوقف عملية إنشاء عرض السعر (Non-blocking)
       }
     }
 
@@ -207,7 +217,7 @@ const createQuotation = async (req, res) => {
 };
 
 // ===============================================
-// 2. تحديث عرض سعر (محدث ومصحح لخطأ Prisma)
+// 2. تحديث عرض سعر (مع دعم الضريبة المخصصة لكل بند)
 // ===============================================
 const updateQuotation = async (req, res) => {
   try {
@@ -247,7 +257,6 @@ const updateQuotation = async (req, res) => {
       expiryDate.setDate(expiryDate.getDate() + validityDays);
     }
 
-    // 🔥 الحماية الأمنية للـ TransactionType في حالة التحديث
     let validTransactionTypeId = undefined;
     if (data.transactionTypeId && data.transactionTypeId.length > 20) {
       const existingType = await prisma.transactionType.findUnique({
@@ -289,7 +298,6 @@ const updateQuotation = async (req, res) => {
       validityDays,
       expiryDate,
 
-      // 👉 الربط الآمن
       ...(validTransactionTypeId && {
         transactionType: { connect: { id: validTransactionTypeId } },
       }),
@@ -312,14 +320,18 @@ const updateQuotation = async (req, res) => {
         let calcSubtotal = existingQuote.subtotal;
         let calcTaxAmount = existingQuote.taxAmount;
         let calcTotal = existingQuote.total;
-        let taxRateFloat =
+        let globalTaxRateFloat =
           data.taxRate !== undefined
             ? parseFloat(data.taxRate) / 100
             : existingQuote.taxRate;
 
         if (data.items) {
           await tx.quotationItem.deleteMany({ where: { quotationId: id } });
+
+          // 👇 تصفير الحسابات لحسابها بدقة من البنود الجديدة
           calcSubtotal = 0;
+          calcTaxAmount = 0;
+
           const itemsToCreate = data.items.map((item, index) => {
             const lineTotal = parseFloat(item.qty) * parseFloat(item.price);
             let lineDiscount =
@@ -329,6 +341,14 @@ const updateQuotation = async (req, res) => {
 
             const subtotal = Math.max(0, lineTotal - lineDiscount);
             calcSubtotal += subtotal;
+
+            // 👇 حساب ضريبة هذا البند
+            const itemTaxRate =
+              item.taxRate !== undefined
+                ? parseFloat(item.taxRate) / 100
+                : 0.15;
+            const itemTaxAmount = subtotal * itemTaxRate;
+            calcTaxAmount += itemTaxAmount; // تجميع الضريبة
 
             return {
               quotationId: id,
@@ -342,10 +362,11 @@ const updateQuotation = async (req, res) => {
               discount: parseFloat(item.discount) || 0,
               discountType: item.discountType || "PERCENTAGE",
               subtotal: subtotal,
+              taxRate: itemTaxRate, // حفظ نسبة البند
+              taxAmount: itemTaxAmount, // حفظ قيمة الضريبة للبند
             };
           });
 
-          calcTaxAmount = calcSubtotal * taxRateFloat;
           calcTotal = calcSubtotal + calcTaxAmount;
 
           if (itemsToCreate.length > 0) {
@@ -372,7 +393,7 @@ const updateQuotation = async (req, res) => {
           data: {
             ...baseUpdateData,
             subtotal: calcSubtotal,
-            taxRate: taxRateFloat,
+            taxRate: globalTaxRateFloat,
             taxAmount: calcTaxAmount,
             total: calcTotal,
           },

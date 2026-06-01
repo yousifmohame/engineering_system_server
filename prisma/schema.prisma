@@ -1026,6 +1026,9 @@ model QuotationItem {
 
   subtotal Float
 
+  taxRate   Float @default(0.15) // نسبة الضريبة (0.15 أو 0)
+  taxAmount Float @default(0) // قيمة الضريبة لهذا البند
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
