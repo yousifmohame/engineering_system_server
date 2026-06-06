@@ -6,7 +6,7 @@ const fs = require("fs");
 const transferController = require("../controllers/transferCenterController");
 
 // إعداد مجلد حفظ الملفات
-const uploadDir = path.join(__dirname, '../../public/uploads/transfer-center');
+const uploadDir = path.join(__dirname, '../../uploads/transfer-center');
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
@@ -17,12 +17,16 @@ const storage = multer.diskStorage({
     cb(null, uploadDir);
   },
   filename: (req, file, cb) => {
+    // 💡 الحل الجذري: إصلاح ترميز اللغة العربية في اسم الملف لمنع تلف الملفات
+    file.originalname = Buffer.from(file.originalname, 'latin1').toString('utf8');
+    
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    // الآن سيتم استخراج الامتداد بشكل صحيح لأن الاسم أصبح سليماً
     cb(null, uniqueSuffix + path.extname(file.originalname));
   }
 });
-const upload = multer({ storage: storage, limits: { fileSize: 50 * 1024 * 1024 } }); // أقصى حجم 50MB
 
+const upload = multer({ storage: storage, limits: { fileSize: 50 * 1024 * 1024 } }); // أقصى حجم 50MB
 
 // ===================================
 // 🌐 مسارات الإدارة الداخلية (الداشبورد)
