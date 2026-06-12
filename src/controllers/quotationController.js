@@ -771,8 +771,8 @@ const generatePdfPreview = async (req, res) => {
     }
 
     // 💡 هام: يجب استخدام روابط كاملة للصور في السيرفر
-    const logoUrl = "https://details-worksystem1.com/logo.jpeg"; // ضع الرابط الحقيقي لشعار مكتبك هنا
-    const bgUrl = "https://details-worksystem1.com/safe_background/1.png"; // خلفية الورق
+    const logoUrl = "https://details-worksystem1.com/logo.svg"; // ضع الرابط الحقيقي لشعار مكتبك هنا
+    const bgUrl = "https://details-worksystem1.com/safe_background/1.webp"; // خلفية الورق
 
     const htmlContent = `
       <!DOCTYPE html>
