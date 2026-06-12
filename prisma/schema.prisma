@@ -998,8 +998,24 @@ model Quotation {
   handlingMethod HandlingMethod @default(DIRECT)
 
   // الحالة والربط
-  status   QuotationStatus @default(DRAFT)
-  contract Contract?
+  status            QuotationStatus @default(DRAFT)
+  contract          Contract?
+  // إضافة حقول لتمثيل العميل والتفويض
+  clientType        String? // فرد، شركة، ورثة، وقف، حكومي...
+  signatureMethod   String? // المالك بنفسه، وكيل، مفوض إداري...
+  repName           String? // اسم الممثل/المفوض
+  repIdNumber       String? // رقم هوية الممثل
+  repPhone          String? // جوال الممثل
+  repCapacity       String? // صفته (مدير، وكيل، ناظر...)
+  authDocType       String? // نوع مستند التفويض (وكالة، قرار...)
+  authDocNumber     String? // رقم المستند
+  authDocDate       DateTime? // تاريخ المستند
+  authDocIssuer     String? // الجهة المصدرة
+  isAuthDocAttached Boolean         @default(false)
+
+  // إضافة حقول لدعم العروض التكميلية والبديلة
+  quotationCategory String  @default("ORIGINAL") // ORIGINAL, SUPPLEMENTARY, REVISED...
+  parentQuotationId String? // لربط العرض التكميلي بالعرض الأصلي
 
   qrCodeData String?
 

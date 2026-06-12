@@ -13,7 +13,8 @@ const {
   getQuotationStats,
   recordPayment,
   stampQuotation,
-  signQuotation
+  signQuotation,
+  generatePdfPreview
 } = require('../controllers/quotationController');
 
 // حماية جميع مسارات عروض الأسعار
@@ -26,6 +27,7 @@ router.route('/')
   .post(createQuotation);
 
 router.get('/stats', getQuotationStats);
+router.post('/generate-pdf', generatePdfPreview);
 
 router.post('/:id/payments', recordPayment);
 router.patch('/:id/stamp', stampQuotation);
