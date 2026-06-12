@@ -1,8 +1,8 @@
 // src/controllers/quotationController.js
 const prisma = require("../utils/prisma");
 const crypto = require("crypto");
-const axios = require('axios');
-const FormData = require('form-data');
+const axios = require("axios");
+const FormData = require("form-data");
 // ==========================================
 // دالة مساعدة: توليد رقم عرض السعر (QT-YY-MM-####)
 // ==========================================
@@ -730,42 +730,80 @@ const signQuotation = async (req, res) => {
 const generatePdfPreview = async (req, res) => {
   try {
     const data = req.body;
-    
+
     // استخراج المتغيرات لسهولة الاستخدام
     const {
-      transactionType, licenseNumber, licenseYear, serviceNumber, serviceYear,
-      clientTitle, clientNameForPreview, clientCodeForPreview, showClientCode,
-      showPropertyCode, propertyCodeForPreview, termsText, items = [],
-      subtotal = 0, taxAmount = 0, grandTotal = 0, officeTaxBearing = 0,
-      paymentsList = [], showQuantity = false, plots = [], boundaries = [],
-      employeeName = "إدارة المشاريع وعقود العملاء", employeeId = "SYS-109",
-      taxRate = 15, acceptedMethods = [], missingDocs = "", showMissingDocs = false,
-      deedNumber, clientType = "فرد", signatureMethod = "SELF",
-      repName, repIdNumber, repPhone, repCapacity, authDocType,
-      authDocNumber, authDocDate, issueDate
+      transactionType,
+      licenseNumber,
+      licenseYear,
+      serviceNumber,
+      serviceYear,
+      clientTitle,
+      clientNameForPreview,
+      clientCodeForPreview,
+      showClientCode,
+      showPropertyCode,
+      propertyCodeForPreview,
+      termsText,
+      items = [],
+      subtotal = 0,
+      taxAmount = 0,
+      grandTotal = 0,
+      officeTaxBearing = 0,
+      paymentsList = [],
+      showQuantity = false,
+      plots = [],
+      boundaries = [],
+      employeeName = "إدارة المشاريع وعقود العملاء",
+      employeeId = "SYS-109",
+      taxRate = 15,
+      acceptedMethods = [],
+      missingDocs = "",
+      showMissingDocs = false,
+      deedNumber,
+      clientType = "فرد",
+      signatureMethod = "SELF",
+      repName,
+      repIdNumber,
+      repPhone,
+      repCapacity,
+      authDocType,
+      authDocNumber,
+      authDocDate,
+      issueDate,
     } = data;
 
     // الحسابات والتنسيقات
-    const referenceNumber = data.referenceNumber || `QT-${Date.now().toString().slice(-5)}`;
-    const formatCurrency = (value) => Number(value || 0).toLocaleString("ar-SA", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const referenceNumber =
+      data.referenceNumber || `QT-${Date.now().toString().slice(-5)}`;
+    const formatCurrency = (value) =>
+      Number(value || 0).toLocaleString("ar-SA", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
     const calculatedOfficeDiscount = (taxAmount * officeTaxBearing) / 100;
-    const finalPayable = (grandTotal || (subtotal + taxAmount)) - calculatedOfficeDiscount;
-    
-    const displayIssueDate = issueDate ? new Date(issueDate).toLocaleDateString('ar-SA') : new Date().toLocaleDateString('ar-SA');
+    const finalPayable =
+      (grandTotal || subtotal + taxAmount) - calculatedOfficeDiscount;
+
+    const displayIssueDate = issueDate
+      ? new Date(issueDate).toLocaleDateString("ar-SA")
+      : new Date().toLocaleDateString("ar-SA");
 
     // بناء النص التمهيدي
     let introText = `إشارة إلى طلبكم بخصوص تقديم عرض سعر خدمات (${transactionType || "الخدمات الهندسية والاستشارية"})`;
-    if (showPropertyCode && propertyCodeForPreview) introText += ` لقطعة الأرض أو الملف رقم (${propertyCodeForPreview})`;
-    introText += "، فإنه يسرنا تقديم العرض المالي والفني لإنهاء الأعمال المطلوبة وفقاً لنطاق العمل والاشتراطات والملاحظات التالية:";
+    if (showPropertyCode && propertyCodeForPreview)
+      introText += ` لقطعة الأرض أو الملف رقم (${propertyCodeForPreview})`;
+    introText +=
+      "، فإنه يسرنا تقديم العرض المالي والفني لإنهاء الأعمال المطلوبة وفقاً لنطاق العمل والاشتراطات والملاحظات التالية:";
 
     // بناء نص تمثيل العميل
-    let repTextHtml = '';
+    let repTextHtml = "";
     if (signatureMethod !== "SELF") {
-      repTextHtml = `ويمثل العميل (${(clientType||'').replace("_", " ")}) بالتوقيع والاعتماد على هذا العرض السيد/ة: ${repName || "........................"}`;
+      repTextHtml = `ويمثل العميل (${(clientType || "").replace("_", " ")}) بالتوقيع والاعتماد على هذا العرض السيد/ة: ${repName || "........................"}`;
       if (repIdNumber) repTextHtml += `، (هوية رقم: ${repIdNumber})`;
       if (repCapacity) repTextHtml += `، بصفته: ${repCapacity}`;
       if (authDocType || authDocNumber) {
-        repTextHtml += `، بموجب ${authDocType || ''} ${authDocNumber ? `رقم (${authDocNumber})` : ''} ${authDocDate ? `وتاريخ ${new Date(authDocDate).toLocaleDateString('ar-SA')}` : ''}`;
+        repTextHtml += `، بموجب ${authDocType || ""} ${authDocNumber ? `رقم (${authDocNumber})` : ""} ${authDocDate ? `وتاريخ ${new Date(authDocDate).toLocaleDateString("ar-SA")}` : ""}`;
       }
       repTextHtml += ".";
     }
@@ -842,10 +880,14 @@ const generatePdfPreview = async (req, res) => {
                   <td style="border: none; text-align: right; border-bottom: 1px dashed #cbd5e1; padding: 8px 0;"><span style="color: #64748b;">رقم المرجع:</span> <span style="color: #0f172a; font-weight: 900;">${referenceNumber}</span></td>
                   <td style="border: none; text-align: right; border-bottom: 1px dashed #cbd5e1; padding: 8px 0;"><span style="color: #64748b;">تاريخ الإصدار:</span> <span style="color: #0f172a;">${displayIssueDate}</span></td>
                 </tr>
-                ${propertyCodeForPreview ? `
+                ${
+                  propertyCodeForPreview
+                    ? `
                 <tr>
                   <td colspan="2" style="border: none; text-align: right; border-bottom: 1px dashed #cbd5e1; padding: 8px 0;"><span style="color: #64748b;">المشروع/الملكية:</span> <span style="color: #0f172a; font-weight: 900;">${propertyCodeForPreview}</span></td>
-                </tr>` : ''}
+                </tr>`
+                    : ""
+                }
               </table>
             </div>
             
@@ -906,10 +948,14 @@ const generatePdfPreview = async (req, res) => {
 
                   <div class="avoid-break" style="margin-bottom: 24px;">
                     <h4 style="margin: 0 0 16px 0; font-size: 13px; font-weight: 900; color: #123f59;">${clientTitle} ${clientNameForPreview}</h4>
-                    ${repTextHtml ? `
+                    ${
+                      repTextHtml
+                        ? `
                     <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; margin-bottom: 16px; font-size: 12px; font-weight: bold; color: #334155;">
                       ⚖️ ${repTextHtml}
-                    </div>` : ''}
+                    </div>`
+                        : ""
+                    }
                     <p style="margin: 0 0 12px 0; font-size: 12px; font-weight: 900; color: #123f59;">السلام عليكم ورحمة الله وبركاته ،،,</p>
                     <p style="margin: 0; font-size: 12px; font-weight: bold; color: #475569; line-height: 2;">${introText}</p>
                   </div>
@@ -919,7 +965,7 @@ const generatePdfPreview = async (req, res) => {
                     <table style="border: 1px solid #123f59; font-size: 11px; font-weight: bold; margin-bottom: 0;">
                       <tr>
                         <td style="background: #f8fafc; width: 25%; border: 1px solid #123f5944;">تصنيف العميل الكياني</td>
-                        <td style="width: 25%; border: 1px solid #123f5944;">${(clientType||'').replace("_", " ")}</td>
+                        <td style="width: 25%; border: 1px solid #123f5944;">${(clientType || "").replace("_", " ")}</td>
                         <td style="background: #f8fafc; width: 25%; border: 1px solid #123f5944;">اسم المالك المسجل</td>
                         <td style="width: 25%; border: 1px solid #123f5944; font-weight: 900; color: #123f59;">${clientNameForPreview}</td>
                       </tr>
@@ -936,7 +982,9 @@ const generatePdfPreview = async (req, res) => {
                     </table>
                   </div>
 
-                  ${signatureMethod !== "SELF" ? `
+                  ${
+                    signatureMethod !== "SELF"
+                      ? `
                   <div class="avoid-break" style="margin-bottom: 24px;">
                     <div class="section-title">ثانياً: بيانات التمثيل النظامي والمفوض بالتوقيع الشرعي</div>
                     <table style="border: 1px solid #123f59; font-size: 11px; font-weight: bold; margin-bottom: 0;">
@@ -956,10 +1004,12 @@ const generatePdfPreview = async (req, res) => {
                         <td style="background: #f8fafc; border: 1px solid #123f5944;">نوع مستند التفويض</td>
                         <td style="border: 1px solid #123f5944;">${authDocType || "---"}</td>
                         <td style="background: #f8fafc; border: 1px solid #123f5944;">توثيق الصك</td>
-                        <td style="border: 1px solid #123f5944; color: #164e63;">${authDocNumber ? `رقم: ${authDocNumber}` : "---"} ${authDocDate ? `بتاريخ: ${new Date(authDocDate).toLocaleDateString('ar-SA')}` : ""}</td>
+                        <td style="border: 1px solid #123f5944; color: #164e63;">${authDocNumber ? `رقم: ${authDocNumber}` : "---"} ${authDocDate ? `بتاريخ: ${new Date(authDocDate).toLocaleDateString("ar-SA")}` : ""}</td>
                       </tr>
                     </table>
-                  </div>` : ''}
+                  </div>`
+                      : ""
+                  }
 
                   <div class="avoid-break" style="margin-bottom: 24px;">
                     <div class="section-title">${signatureMethod !== "SELF" ? "ثالثاً" : "ثانياً"}: بيانات المشروع والملكية العقارية</div>
@@ -970,17 +1020,23 @@ const generatePdfPreview = async (req, res) => {
                         <td style="background: #f8fafc; width: 25%; border: 1px solid #123f5944;">كود الأرشفة</td>
                         <td style="width: 25%; border: 1px solid #123f5944;">${propertyCodeForPreview || "---"}</td>
                       </tr>
-                      ${(licenseNumber || serviceNumber) ? `
+                      ${
+                        licenseNumber || serviceNumber
+                          ? `
                       <tr>
                         <td style="background: #f8fafc; border: 1px solid #123f5944;">رقم رخصة البناء</td>
                         <td style="border: 1px solid #123f5944;">${licenseNumber ? `${licenseNumber} لعام ${licenseYear}هـ` : "---"}</td>
                         <td style="background: #f8fafc; border: 1px solid #123f5944;">رقم معاملة البلدي</td>
                         <td style="border: 1px solid #123f5944;">${serviceNumber ? `${serviceNumber} لعام ${serviceYear}هـ` : "---"}</td>
-                      </tr>` : ''}
+                      </tr>`
+                          : ""
+                      }
                     </table>
                   </div>
 
-                  ${plots && plots.length > 0 ? `
+                  ${
+                    plots && plots.length > 0
+                      ? `
                   <div class="avoid-break" style="margin-bottom: 24px;">
                     <table style="border: 1px solid #123f59; font-size: 11px; margin-bottom: 0;">
                       <thead style="background-color: #123f59; color: #fff;">
@@ -989,12 +1045,25 @@ const generatePdfPreview = async (req, res) => {
                         </tr>
                       </thead>
                       <tbody style="font-weight: bold;">
-                        ${plots.map((plot) => {
-                          const n = boundaries.find(b => b.direction === "شمال" && b.plotId === plot.id);
-                          const s = boundaries.find(b => b.direction === "جنوب" && b.plotId === plot.id);
-                          const e = boundaries.find(b => b.direction === "شرق" && b.plotId === plot.id);
-                          const w = boundaries.find(b => b.direction === "غرب" && b.plotId === plot.id);
-                          return `
+                        ${plots
+                          .map((plot) => {
+                            const n = boundaries.find(
+                              (b) =>
+                                b.direction === "شمال" && b.plotId === plot.id,
+                            );
+                            const s = boundaries.find(
+                              (b) =>
+                                b.direction === "جنوب" && b.plotId === plot.id,
+                            );
+                            const e = boundaries.find(
+                              (b) =>
+                                b.direction === "شرق" && b.plotId === plot.id,
+                            );
+                            const w = boundaries.find(
+                              (b) =>
+                                b.direction === "غرب" && b.plotId === plot.id,
+                            );
+                            return `
                           <tr>
                             <td style="border: 1px solid #123f5944;">${plot.plotNumber || "---"}</td>
                             <td style="border: 1px solid #123f5944;">${plot.area || "---"} م²</td>
@@ -1003,10 +1072,13 @@ const generatePdfPreview = async (req, res) => {
                             <td style="border: 1px solid #123f5944;">${e?.length || 0} م</td>
                             <td style="border: 1px solid #123f5944;">${w?.length || 0} م</td>
                           </tr>`;
-                        }).join('')}
+                          })
+                          .join("")}
                       </tbody>
                     </table>
-                  </div>` : ''}
+                  </div>`
+                      : ""
+                  }
 
                   <div class="avoid-break" style="margin-bottom: 24px;">
                     <div class="section-title">${signatureMethod !== "SELF" ? "رابعاً" : "ثالثاً"}: نطاق الأعمال وقائمة التكاليف المالية</div>
@@ -1015,46 +1087,59 @@ const generatePdfPreview = async (req, res) => {
                         <tr>
                           <th style="width: 5%;">م</th>
                           <th style="text-align: right;">وصف الخدمة الاستشارية / نطاق العمل</th>
-                          ${showQuantity ? `<th style="width: 10%;">الكمية</th>` : ''}
+                          ${showQuantity ? `<th style="width: 10%;">الكمية</th>` : ""}
                           <th style="width: 15%;">الفئة (ر.س)</th>
                           <th style="width: 20%;">الإجمالي</th>
                         </tr>
                       </thead>
                       <tbody style="font-weight: bold;">
-                        ${items.map((item, index) => {
-                          const rowTotal = Math.max(0, (item.qty || item.quantity || 1) * (item.price || item.unitPrice || 0) - (item.discount || 0));
-                          return `
+                        ${items
+                          .map((item, index) => {
+                            const rowTotal = Math.max(
+                              0,
+                              (item.qty || item.quantity || 1) *
+                                (item.price || item.unitPrice || 0) -
+                                (item.discount || 0),
+                            );
+                            return `
                           <tr class="avoid-break">
                             <td style="border: 1px solid #123f5944;">${index + 1}</td>
                             <td style="text-align: right; border: 1px solid #123f5944; line-height: 1.5;">${item.title}</td>
-                            ${showQuantity ? `<td style="border: 1px solid #123f5944;">${item.qty || item.quantity || 1} ${item.unit || ''}</td>` : ''}
+                            ${showQuantity ? `<td style="border: 1px solid #123f5944;">${item.qty || item.quantity || 1} ${item.unit || ""}</td>` : ""}
                             <td style="border: 1px solid #123f5944;">${formatCurrency(item.price || item.unitPrice)}</td>
                             <td style="border: 1px solid #123f5944; color: #123f59;">${formatCurrency(rowTotal)}</td>
                           </tr>`;
-                        }).join('')}
+                          })
+                          .join("")}
                         
                         <tr style="background-color: #f8fafc;">
-                          <td colspan="${showQuantity ? '4' : '3'}" style="text-align: left; border: 1px solid #123f5944;">المجموع الفرعي</td>
+                          <td colspan="${showQuantity ? "4" : "3"}" style="text-align: left; border: 1px solid #123f5944;">المجموع الفرعي</td>
                           <td style="border: 1px solid #123f5944; font-weight: 900;">${formatCurrency(subtotal)}</td>
                         </tr>
                         <tr>
-                          <td colspan="${showQuantity ? '4' : '3'}" style="text-align: left; color: #64748b; border: 1px solid #123f5944;">ضريبة القيمة المضافة ${taxRate || 15}% ${officeTaxBearing > 0 ? `(يتحمل المكتب ${officeTaxBearing}%)` : ''}</td>
+                          <td colspan="${showQuantity ? "4" : "3"}" style="text-align: left; color: #64748b; border: 1px solid #123f5944;">ضريبة القيمة المضافة ${taxRate || 15}% ${officeTaxBearing > 0 ? `(يتحمل المكتب ${officeTaxBearing}%)` : ""}</td>
                           <td style="border: 1px solid #123f5944; font-weight: 900;">${formatCurrency(taxAmount)}</td>
                         </tr>
-                        ${officeTaxBearing > 0 ? `
+                        ${
+                          officeTaxBearing > 0
+                            ? `
                         <tr>
-                          <td colspan="${showQuantity ? '4' : '3'}" style="text-align: left; color: #047857; border: 1px solid #123f5944;">خصم إعفاء ضريبي (المكتب يتحمل ${officeTaxBearing}%)</td>
+                          <td colspan="${showQuantity ? "4" : "3"}" style="text-align: left; color: #047857; border: 1px solid #123f5944;">خصم إعفاء ضريبي (المكتب يتحمل ${officeTaxBearing}%)</td>
                           <td style="border: 1px solid #123f5944; font-weight: 900; color: #047857;">- ${formatCurrency(calculatedOfficeDiscount)}</td>
-                        </tr>` : ''}
+                        </tr>`
+                            : ""
+                        }
                         <tr style="background-color: #123f59; color: #fff;">
-                          <td colspan="${showQuantity ? '4' : '3'}" style="text-align: left; border: 1px solid #123f5944;">الإجمالي النهائي المستحق الصافي للدفع</td>
+                          <td colspan="${showQuantity ? "4" : "3"}" style="text-align: left; border: 1px solid #123f5944;">الإجمالي النهائي المستحق الصافي للدفع</td>
                           <td style="border: 1px solid #123f5944; font-weight: 900;">${formatCurrency(finalPayable)} ر.س</td>
                         </tr>
                       </tbody>
                     </table>
                   </div>
 
-                  ${paymentsList && paymentsList.length > 0 ? `
+                  ${
+                    paymentsList && paymentsList.length > 0
+                      ? `
                   <div class="avoid-break" style="margin-bottom: 24px;">
                     <div class="section-title">${signatureMethod !== "SELF" ? "خامساً" : "رابعاً"}: جدول توزيع الدفعات المالية</div>
                     <table style="border: 1px solid #123f59; font-size: 11px; margin-bottom: 0;">
@@ -1062,18 +1147,26 @@ const generatePdfPreview = async (req, res) => {
                         <tr><th style="width: 20%;">الدفعة</th><th style="width: 15%;">النسبة (%)</th><th style="width: 25%;">المبلغ (شامل الضريبة)</th><th style="width: 40%;">الاستحقاق</th></tr>
                       </thead>
                       <tbody style="font-weight: bold;">
-                        ${paymentsList.map((payment, index) => `
+                        ${paymentsList
+                          .map(
+                            (payment, index) => `
                         <tr>
                           <td style="background-color: #f8fafc; border: 1px solid #123f5944;">${payment.label || `الدفعة ${index + 1}`}</td>
-                          <td style="border: 1px solid #123f5944;">${payment.percentage || Math.round(100/paymentsList.length)}%</td>
+                          <td style="border: 1px solid #123f5944;">${payment.percentage || Math.round(100 / paymentsList.length)}%</td>
                           <td style="border: 1px solid #123f5944; color: #065f46;">${formatCurrency(payment.amount)} ر.س</td>
                           <td style="border: 1px solid #123f5944; text-align: right; padding-right: 12px; color: #475569;">${payment.condition || "حسب الاتفاق"}</td>
-                        </tr>`).join('')}
+                        </tr>`,
+                          )
+                          .join("")}
                       </tbody>
                     </table>
-                  </div>` : ''}
+                  </div>`
+                      : ""
+                  }
 
-                  ${(showMissingDocs && missingDocs && missingDocs.trim() !== "") ? `
+                  ${
+                    showMissingDocs && missingDocs && missingDocs.trim() !== ""
+                      ? `
                   <div class="avoid-break" style="margin-bottom: 24px;">
                     <div class="section-title">${signatureMethod !== "SELF" ? "سادساً" : "خامساً"}: المستندات والمسوغات المطلوب توفيرها لبدء العمل</div>
                     <div style="border: 1px solid #123f5933; border-radius: 12px; background-color: #fff;">
@@ -1084,11 +1177,15 @@ const generatePdfPreview = async (req, res) => {
                         <table style="width: 100%; border: none;">
                           <tbody>
                             ${(() => {
-                              const docs = missingDocs.split('\\n').filter(d => d.trim() !== '');
-                              let rows = '';
+                              const docs = missingDocs
+                                .split("\\n")
+                                .filter((d) => d.trim() !== "");
+                              let rows = "";
                               for (let i = 0; i < docs.length; i += 2) {
-                                const doc1 = docs[i].replace(/^- /, '').trim();
-                                const doc2 = docs[i+1] ? docs[i+1].replace(/^- /, '').trim() : '';
+                                const doc1 = docs[i].replace(/^- /, "").trim();
+                                const doc2 = docs[i + 1]
+                                  ? docs[i + 1].replace(/^- /, "").trim()
+                                  : "";
                                 rows += `
                                   <tr>
                                     <td style="width: 50%; border: none; padding: 5px; text-align: right;">
@@ -1098,11 +1195,15 @@ const generatePdfPreview = async (req, res) => {
                                       </div>
                                     </td>
                                     <td style="width: 50%; border: none; padding: 5px; text-align: right;">
-                                      ${doc2 ? `
+                                      ${
+                                        doc2
+                                          ? `
                                       <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; padding: 10px; border-radius: 8px; font-size: 11px; font-weight: bold; color: #334155;">
                                         <span style="display: inline-block; width: 10px; height: 10px; border: 1px solid #c5983c; border-radius: 2px; background-color: #fff; margin-left: 8px; vertical-align: middle;"></span>
                                         ${doc2}
-                                      </div>` : ''}
+                                      </div>`
+                                          : ""
+                                      }
                                     </td>
                                   </tr>`;
                               }
@@ -1112,7 +1213,9 @@ const generatePdfPreview = async (req, res) => {
                         </table>
                       </div>
                     </div>
-                  </div>` : ''}
+                  </div>`
+                      : ""
+                  }
 
                   <div class="avoid-break" style="margin-bottom: 24px;">
                     <div class="section-title">${signatureMethod !== "SELF" ? "سابعاً" : "سادساً"}: الشروط والأحكام والالتزامات العامة</div>
@@ -1135,9 +1238,13 @@ const generatePdfPreview = async (req, res) => {
                             <div style="margin-bottom: 10px;"><span style="color: #64748b; font-weight: bold;">الصفة للتمثيل:</span> <span style="font-weight: 900; color: #1e293b;">${signatureMethod !== "SELF" ? repCapacity : "المالك الفعلي ذو العلاقة"}</span></div>
                             <div style="margin-bottom: 10px;"><span style="color: #64748b; font-weight: bold;">رقم الهوية:</span> <span style="font-weight: 900; color: #1e293b;">${signatureMethod !== "SELF" ? repIdNumber : "............................"}</span></div>
                             <div style="margin-bottom: 10px;"><span style="color: #64748b; font-weight: bold;">رقم الجوال:</span> <span style="font-weight: 900; color: #1e293b;">${signatureMethod !== "SELF" ? repPhone : "............................"}</span></div>
-                            ${signatureMethod !== "SELF" ? `
+                            ${
+                              signatureMethod !== "SELF"
+                                ? `
                             <div style="margin-bottom: 10px;"><span style="color: #64748b; font-weight: bold;">مستند التفويض:</span> <span style="font-weight: 900; color: #164e63;">${authDocNumber ? `رقم (${authDocNumber})` : "............................"}</span></div>
-                            ` : ''}
+                            `
+                                : ""
+                            }
                             <div style="margin-top: 50px; text-align: center; color: #94a3b8; font-weight: bold;">التوقيع الشخصي والختم: ........................................</div>
                           </td>
                           <td style="padding: 16px; vertical-align: top; border-bottom: none;">
@@ -1180,34 +1287,48 @@ const generatePdfPreview = async (req, res) => {
 
     // 🚀 استخدام Gotenberg لتحويل HTML إلى PDF
     const form = new FormData();
-    form.append('files', Buffer.from(htmlContent, 'utf-8'), { filename: 'index.html', contentType: 'text/html' });
-    form.append('paperWidth', '8.27'); 
-    form.append('paperHeight', '11.69'); 
-    form.append('marginTop', '0');
-    form.append('marginBottom', '0');
-    form.append('marginLeft', '0');
-    form.append('marginRight', '0');
-    form.append('printBackground', 'true');
-    form.append('waitDelay', '1.5s'); 
-
-    const response = await axios.post('http://gotenberg:3000/forms/chromium/convert/html', form, {
-      headers: { ...form.getHeaders() },
-      responseType: 'arraybuffer' 
+    form.append("files", Buffer.from(htmlContent, "utf-8"), {
+      filename: "index.html",
+      contentType: "text/html",
     });
+    form.append("paperWidth", "8.27");
+    form.append("paperHeight", "11.69");
+    form.append("marginTop", "0");
+    form.append("marginBottom", "0");
+    form.append("marginLeft", "0");
+    form.append("marginRight", "0");
+    form.append("printBackground", "true");
+    form.append("waitDelay", "1.5s");
+
+    const response = await axios.post(
+      "http://127.0.0.1:3000/forms/chromium/convert/html",
+      form,
+      {
+        headers: { ...form.getHeaders() },
+        responseType: "arraybuffer",
+      },
+    );
 
     const pdfBuffer = Buffer.from(response.data);
 
     res.set({
-      'Content-Type': 'application/pdf',
-      'Content-Length': pdfBuffer.length,
-      'Content-Disposition': `attachment; filename="${referenceNumber}.pdf"`,
+      "Content-Type": "application/pdf",
+      "Content-Length": pdfBuffer.length,
+      "Content-Disposition": `attachment; filename="${referenceNumber}.pdf"`,
     });
-    
-    res.send(pdfBuffer);
 
+    res.send(pdfBuffer);
   } catch (error) {
-    console.error('Error generating PDF with Gotenberg:', error?.response?.data?.toString() || error.message);
-    res.status(500).json({ success: false, message: 'حدث خطأ أثناء توليد ملف الـ PDF عبر Gotenberg' });
+    console.error(
+      "Error generating PDF with Gotenberg:",
+      error?.response?.data?.toString() || error.message,
+    );
+    res
+      .status(500)
+      .json({
+        success: false,
+        message: "حدث خطأ أثناء توليد ملف الـ PDF عبر Gotenberg",
+      });
   }
 };
 
