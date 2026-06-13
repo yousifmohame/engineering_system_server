@@ -16,4 +16,8 @@ COPY . .
 
 EXPOSE 5000
 
-CMD ["npm", "start"]
+RUN mkdir -p /app/uploads/settlements
+RUN chmod -R 777 /app/uploads
+
+# السطر الأخير الذي يشغل المشروع
+CMD ["npm", "run", "dev"]

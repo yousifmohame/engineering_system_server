@@ -1298,6 +1298,7 @@ model Attachment {
   fileType  String
   fileSize  Int
   notes     String?  @db.Text
+  category  String?  @default("OTHER")
   createdAt DateTime @default(now())
 
   uploadedBy   Employee @relation(fields: [uploadedById], references: [id])

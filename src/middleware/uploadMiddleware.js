@@ -11,7 +11,7 @@ const storage = multer.memoryStorage();
 const upload = multer({
   storage: storage,
   limits: {
-    fileSize: 10 * 1024 * 1024, // حد أقصى 10 ميجابايت للملف الواحد
+    fileSize: 100 * 1024 * 1024, // حد أقصى 100 ميجابايت للملف الواحد
   },
   fileFilter: (req, file, cb) => {
     // 💡 السر هنا: تحويل ترميز الاسم من latin1 إلى utf8 للغة العربية
