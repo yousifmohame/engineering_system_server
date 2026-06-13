@@ -163,8 +163,9 @@ model Employee {
   documentationLogs  DocumentationAuditLog[]
   payrolls           PayrollRecord[]
 
-  documents EmployeeDocument[] @relation("EmployeeDocs")
-  leaves    EmployeeLeave[]    @relation("EmployeeLeaves")
+  documents    EmployeeDocument[] @relation("EmployeeOwnedDocs")
+  uploadedDocs EmployeeDocument[] @relation("EmployeeUploadedDocs")
+  leaves       EmployeeLeave[]    @relation("EmployeeLeaves")
 }
 
 // ==================================================
@@ -187,28 +188,22 @@ model EmployeeLeave {
 // 4. مركز مستندات الموظف المعزز بالذكاء الاصطناعي (AI Document Center)
 // ==================================================
 model EmployeeDocument {
-  id         String @id @default(uuid())
-  employeeId String
-
-  // الأنواع المحددة: NATIONAL_ID, ADDRESS_PROOF, DEGREE, RESUME, PROFESSIONAL_LICENSE, PROFILE_PIC, QIWA_CONTRACT, INITIAL_CONTRACT, EXPERIENCE_CERT, OTHER
-  type    String
-  name    String // وصف المستند
-  fileUrl String // مسار الملف
-
-  issueDate    DateTime? @db.Date
-  expiryDate   DateTime? @db.Date // null يعني غير محدد (صلاحية دائمة)
-  isExpiryOpen Boolean   @default(false) // هل الصلاحية مفتوحة؟
-
-  // 🤖 التحليل الذكي (AI Analysis)
-  isAnalyzed   Boolean @default(false)
-  aiRating     Int? // تقييم من 1 إلى 100
-  aiSummary    String? @db.Text // ملخص المستند
-  aiValidation String? @default("PENDING") // VALID, EXPIRED, MISMATCH, SUSPICIOUS
-
-  employee Employee @relation("EmployeeDocs", fields: [employeeId], references: [id], onDelete: Cascade)
-
+  id        String   @id @default(cuid())
+  fileName  String
+  filePath  String   @unique
+  fileType  String
+  fileSize  Int
+  notes     String?  @db.Text
+  category  String   @default("OTHER") // "CONTRACT", "ID_PASSPORT", "CERTIFICATE", "OTHER"
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+
+  // الموظف صاحب المستند (الذي يُرفع المستند في ملفه)
+  employeeId String
+  employee   Employee @relation("EmployeeOwnedDocs", fields: [employeeId], references: [id], onDelete: Cascade)
+
+  // الموظف/المدير الذي قام بعملية الرفع
+  uploadedById String
+  uploadedBy   Employee @relation("EmployeeUploadedDocs", fields: [uploadedById], references: [id])
 }
 
 // نموذج لسجل الحضور
@@ -1298,7 +1293,6 @@ model Attachment {
   fileType  String
   fileSize  Int
   notes     String?  @db.Text
-  category  String?  @default("OTHER")
   createdAt DateTime @default(now())
 
   uploadedBy   Employee @relation(fields: [uploadedById], references: [id])

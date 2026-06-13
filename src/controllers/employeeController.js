@@ -2,6 +2,8 @@
 const { PrismaClient } = require("@prisma/client");
 const prisma = new PrismaClient();
 const bcrypt = require("bcryptjs");
+const fs = require("fs");
+const path = require("path");
 
 // ===============================================
 // 1. جلب الموظف الحالي (من الـ Token)
@@ -47,7 +49,9 @@ const createEmployeeLeaveRequest = async (req, res) => {
     const { type, startDate, endDate, reason } = req.body;
 
     if (!type || !startDate || !endDate) {
-      return res.status(400).json({ message: "الرجاء إدخال نوع الإجازة وتاريخ البدء والانتهاء" });
+      return res
+        .status(400)
+        .json({ message: "الرجاء إدخال نوع الإجازة وتاريخ البدء والانتهاء" });
     }
 
     const employee = await prisma.employee.findUnique({ where: { id } });
@@ -65,7 +69,9 @@ const createEmployeeLeaveRequest = async (req, res) => {
       },
     });
 
-    res.status(201).json({ message: "تم رفع طلب الإجازة بنجاح", leaveRequest: newLeave });
+    res
+      .status(201)
+      .json({ message: "تم رفع طلب الإجازة بنجاح", leaveRequest: newLeave });
   } catch (error) {
     console.error("Error creating leave request:", error);
     res.status(500).json({ message: "خطأ في الخادم أثناء معالجة الطلب" });
@@ -87,10 +93,10 @@ const getAllLeaveRequests = async (req, res) => {
             name: true,
             position: true,
             department: true,
-          }
-        }
+          },
+        },
       },
-      orderBy: { createdAt: "desc" }
+      orderBy: { createdAt: "desc" },
     });
     res.status(200).json(leaveRequests);
   } catch (error) {
@@ -98,7 +104,6 @@ const getAllLeaveRequests = async (req, res) => {
     res.status(500).json({ message: "خطأ في الخادم أثناء جلب طلبات الإجازات" });
   }
 };
-
 
 // ===============================================
 // 3. 🚀 جديد: تحديث حالة الطلب من قبل الإدارة (اعتماد / رفض)
@@ -115,10 +120,15 @@ const updateLeaveRequestStatus = async (req, res) => {
 
     const updatedLeave = await prisma.employeeLeave.update({
       where: { id: leaveId },
-      data: { status }
+      data: { status },
     });
 
-    res.status(200).json({ message: "تم تحديث حالة طلب الإجازة بنجاح", leave: updatedLeave });
+    res
+      .status(200)
+      .json({
+        message: "تم تحديث حالة طلب الإجازة بنجاح",
+        leave: updatedLeave,
+      });
   } catch (error) {
     console.error("Error updating leave status:", error);
     res.status(500).json({ message: "خطأ في الخادم أثناء تحديث الطلب" });
@@ -764,11 +774,11 @@ const getEmployeeLeaveRequests = async (req, res) => {
 
     // جلب الإجازات من جدول employeeLeave الخاصة بهذا الموظف فقط
     const leaveRequests = await prisma.employeeLeave.findMany({
-      where: { 
-        employeeId: id 
+      where: {
+        employeeId: id,
       },
-      orderBy: { 
-        createdAt: "desc" // ترتيب من الأحدث للأقدم
+      orderBy: {
+        createdAt: "desc", // ترتيب من الأحدث للأقدم
       },
     });
 
@@ -830,20 +840,6 @@ const getEmployeePromotions = async (req, res) => {
     res
       .status(500)
       .json({ message: "Error fetching promotions", error: error.message });
-  }
-};
-
-const getEmployeeAttachments = async (req, res) => {
-  try {
-    const attachments = await prisma.attachment.findMany({
-      where: { uploadedById: req.params.id },
-      orderBy: { createdAt: "desc" },
-    });
-    res.status(200).json(attachments);
-  } catch (error) {
-    res
-      .status(500)
-      .json({ message: "Error fetching attachments", error: error.message });
   }
 };
 
@@ -985,8 +981,8 @@ const getEmployeeById = async (req, res) => {
       include: {
         roles: {
           include: {
-            permissions: true // جلب الصلاحيات المرتبطة بالأدوار
-          }
+            permissions: true, // جلب الصلاحيات المرتبطة بالأدوار
+          },
         },
         specialPermissions: true, // جلب الصلاحيات الخاصة إن وجدت
       },
@@ -1001,17 +997,19 @@ const getEmployeeById = async (req, res) => {
 
     // استخراج جميع الصلاحيات في مصفوفة واحدة مسطحة لتسهيل التعامل في الواجهة الأمامية
     const allPermissions = new Map();
-    
+
     if (employee.roles) {
-      employee.roles.forEach(role => {
+      employee.roles.forEach((role) => {
         if (role.permissions) {
-          role.permissions.forEach(perm => allPermissions.set(perm.id, perm));
+          role.permissions.forEach((perm) => allPermissions.set(perm.id, perm));
         }
       });
     }
 
     if (employee.specialPermissions) {
-      employee.specialPermissions.forEach(perm => allPermissions.set(perm.id, perm));
+      employee.specialPermissions.forEach((perm) =>
+        allPermissions.set(perm.id, perm),
+      );
     }
 
     // إضافة حقل 'permissions' يحتوي على جميع الصلاحيات
@@ -1021,6 +1019,113 @@ const getEmployeeById = async (req, res) => {
   } catch (error) {
     console.error("Error fetching employee by ID:", error);
     res.status(500).json({ message: "خطأ في الخادم أثناء جلب بيانات الموظف" });
+  }
+};
+// ===============================================
+// 📁 محرك مستندات الموظف (HR Documents Engine)
+// متوافق 100% مع جدول EmployeeDocument
+// ===============================================
+
+// 1. جلب مرفقات الموظف
+// GET /api/employees/:id/attachments
+const getEmployeeAttachments = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const documents = await prisma.employeeDocument.findMany({
+      where: { employeeId: id },
+      include: {
+        uploadedBy: { select: { name: true } } // جلب اسم من قام بالرفع
+      },
+      orderBy: { createdAt: "desc" },
+    });
+    
+    res.status(200).json(documents);
+  } catch (error) {
+    console.error("Error fetching employee documents:", error);
+    res.status(500).json({ message: "خطأ في جلب مستندات الموظف" });
+  }
+};
+
+// 2. رفع مرفق للموظف
+// POST /api/employees/:id/attachments
+const uploadEmployeeAttachment = async (req, res) => {
+  try {
+    const { id: employeeId } = req.params;
+    const { category, notes } = req.body; 
+    const uploaderId = req.user?.id || req.employee?.id; 
+
+    if (!uploaderId) {
+      if (req.file) fs.unlinkSync(req.file.path);
+      return res.status(401).json({ message: "غير مصرح لك بالرفع" });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ message: "الرجاء إرفاق ملف" });
+    }
+
+    const targetEmployee = await prisma.employee.findUnique({ where: { id: employeeId } });
+    if (!targetEmployee) {
+      if (req.file) fs.unlinkSync(req.file.path);
+      return res.status(404).json({ message: "الموظف غير موجود" });
+    }
+
+    const dbFilePath = `/uploads/employees/${req.file.filename}`;
+
+    // ✅ التنفيذ المتوافق مع الـ Schema الخاص بك
+    const newDocument = await prisma.employeeDocument.create({
+      data: {
+        fileName: req.file.originalname,
+        filePath: dbFilePath,
+        fileType: req.file.mimetype,
+        fileSize: req.file.size,
+        notes: notes || null,
+        category: category || "OTHER", // 👈 تم استخدام category كما في الداتا بيز
+        employee: {
+          connect: { id: employeeId }
+        },
+        uploadedBy: {
+          connect: { id: uploaderId }
+        }
+      },
+      include: {
+        uploadedBy: { select: { name: true } } // لإرجاع الاسم فوراً للفرونت إند
+      }
+    });
+
+    res.status(201).json({ message: "تم رفع المستند بنجاح", attachment: newDocument });
+  } catch (error) {
+    console.error("Error uploading employee document:", error);
+    if (req.file) fs.unlinkSync(req.file.path);
+    res.status(500).json({ message: "خطأ في الخادم أثناء حفظ المستند" });
+  }
+};
+
+// 3. حذف مستند خاص بالموظف
+// DELETE /api/employees/attachments/:attachmentId
+const deleteEmployeeAttachment = async (req, res) => {
+  try {
+    const { attachmentId } = req.params;
+
+    const document = await prisma.employeeDocument.findUnique({
+      where: { id: attachmentId },
+    });
+
+    if (!document) {
+      return res.status(404).json({ message: "المستند غير موجود" });
+    }
+
+    const absolutePath = path.join(__dirname, "../../", document.filePath);
+
+    if (fs.existsSync(absolutePath)) {
+      fs.unlinkSync(absolutePath);
+    }
+
+    await prisma.employeeDocument.delete({ where: { id: attachmentId } });
+
+    res.status(200).json({ message: "تم حذف المستند بنجاح" });
+  } catch (error) {
+    console.error("Error deleting employee document:", error);
+    res.status(500).json({ message: "خطأ أثناء محاولة حذف المستند" });
   }
 };
 
@@ -1046,4 +1151,6 @@ module.exports = {
   getEmployeesWithStats,
   getEmployeeAttendanceAnalysis,
   getEmployeeById,
+  uploadEmployeeAttachment,
+  deleteEmployeeAttachment,
 };
