@@ -988,9 +988,15 @@ model Quotation {
 
   // الشروط
   terms          String?        @db.Text
+  conclusion     String?        @db.Text
   notes          String?        @db.Text
   clientTitle    ClientTitle    @default(MR)
   handlingMethod HandlingMethod @default(DIRECT)
+
+  firstPartyEmployeeId    String?
+  firstPartyRepCapacity   String?
+  showFirstPartyEmpId     Boolean @default(true)
+  firstPartySignatureType String? @default("MANUAL")
 
   // الحالة والربط
   status            QuotationStatus @default(DRAFT)

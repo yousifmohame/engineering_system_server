@@ -137,6 +137,11 @@ const createQuotation = async (req, res) => {
         showClientCode: data.showClientCode ?? true,
         showPropertyCode: data.showPropertyCode ?? true,
 
+        firstPartyEmployeeId: data.firstPartyEmployeeId || null,
+        firstPartyRepCapacity: data.firstPartyRepCapacity,
+        showFirstPartyEmpId: data.showFirstPartyEmpId ?? true,
+        firstPartySignatureType: data.firstPartySignatureType || "MANUAL",
+
         serviceNumber: data.serviceNumber || null,
         serviceYear: data.serviceYear || null,
         licenseNumber: data.licenseNumber || null,
@@ -152,6 +157,7 @@ const createQuotation = async (req, res) => {
         missingDocs: data.missingDocs,
         showMissingDocs: data.showMissingDocs || false,
         terms: data.terms,
+        conclusion: data.conclusion,
         clientTitle: data.clientTitle || "MR",
         handlingMethod: data.handlingMethod || "DIRECT",
         acceptedMethods: data.acceptedMethods || ["bank"],
@@ -271,6 +277,7 @@ const updateQuotation = async (req, res) => {
       ...(data.status && { status: data.status }),
       ...(data.notes !== undefined && { notes: data.notes }),
       ...(data.terms !== undefined && { terms: data.terms }),
+      ...(data.conclusion !== undefined && { conclusion: data.conclusion }),
       ...(data.templateType && { templateType: data.templateType }),
       ...(data.showClientCode !== undefined && {
         showClientCode: data.showClientCode,
@@ -398,6 +405,10 @@ const updateQuotation = async (req, res) => {
             taxRate: globalTaxRateFloat,
             taxAmount: calcTaxAmount,
             total: calcTotal,
+            firstPartyEmployeeId: data.firstPartyEmployeeId || null,
+            firstPartyRepCapacity: data.firstPartyRepCapacity,
+            showFirstPartyEmpId: data.showFirstPartyEmpId ?? true,
+            firstPartySignatureType: data.firstPartySignatureType || "MANUAL",
           },
           include: {
             items: { orderBy: { order: "asc" } },
@@ -726,12 +737,11 @@ const signQuotation = async (req, res) => {
     res.status(500).json({ success: false, message: "فشل التوقيع" });
   }
 };
-
 const generatePdfPreview = async (req, res) => {
   try {
     const data = req.body;
 
-    // استخراج المتغيرات لسهولة الاستخدام
+    // 🚀 تم إضافة استخراج المتغيرات الجديدة الخاصة بالطرف الأول والمعاملات
     const {
       transactionType,
       licenseNumber,
@@ -741,10 +751,11 @@ const generatePdfPreview = async (req, res) => {
       clientTitle,
       clientNameForPreview,
       clientCodeForPreview,
-      showClientCode,
+      validityDays,
       showPropertyCode,
       propertyCodeForPreview,
       termsText,
+      conclusion,
       items = [],
       subtotal = 0,
       taxAmount = 0,
@@ -780,7 +791,64 @@ const generatePdfPreview = async (req, res) => {
       bankAccountsData = [],
       propertyDistrict = "---",
       propertyPlanNumber = "---",
+      status = "DRAFT",
+
+      // 👇 الإضافات الهامة هنا:
+      transactionRefForPreview,
+      meetingTitleForPreview,
+      firstPartyRepCapacity = "إدارة المشاريع وعقود العملاء",
+      firstPartyEmpCode,
+      showFirstPartyEmpId = true,
+      firstPartySignatureType = "MANUAL",
+      employeeSignatureUrl,
     } = data;
+
+    // حساب الحالة واللون للـ PDF
+    let badgeText = "مسودة غير معتمدة";
+    let badgeColor = "#b45309"; // amber-700
+    let badgeBg = "#fffbeb"; // amber-50
+    let badgeBorder = "#fde68a"; // amber-200
+
+    const isFullyApproved =
+      status === "ACCEPTED" || status === "PARTIALLY_PAID";
+    const isCancelled = status === "CANCELLED" || status === "REJECTED";
+    const isOfficeApproved = status === "APPROVED" || status === "SENT";
+
+    let isExpired = false;
+    if (
+      !isFullyApproved &&
+      !isCancelled &&
+      issueDate &&
+      validityDays !== "unlimited"
+    ) {
+      const expiryDate = new Date(issueDate);
+      expiryDate.setDate(expiryDate.getDate() + parseInt(validityDays));
+      // تصفير الوقت لتجنب أخطاء الساعات
+      expiryDate.setHours(23, 59, 59, 999);
+      if (new Date() > expiryDate) isExpired = true;
+    }
+
+    if (isExpired) {
+      badgeText = "منتهي (انتهت الصلاحية)";
+      badgeColor = "#334155";
+      badgeBg = "#f1f5f9";
+      badgeBorder = "#cbd5e1";
+    } else if (isCancelled) {
+      badgeText = "ملغي";
+      badgeColor = "#b91c1c";
+      badgeBg = "#fef2f2";
+      badgeBorder = "#fecaca";
+    } else if (isFullyApproved) {
+      badgeText = "معتمد من جميع الأطراف";
+      badgeColor = "#047857";
+      badgeBg = "#ecfdf5";
+      badgeBorder = "#a7f3d0";
+    } else if (isOfficeApproved) {
+      badgeText = "معتمد من مقدم الخدمة فقط";
+      badgeColor = "#1d4ed8";
+      badgeBg = "#eff6ff";
+      badgeBorder = "#bfdbfe";
+    }
 
     // الحسابات والتنسيقات
     const referenceNumber =
@@ -809,20 +877,16 @@ const generatePdfPreview = async (req, res) => {
 
     // بناء النص التمهيدي
     let introText = `إشارة إلى طلبكم بخصوص تقديم عرض سعر خدمات (${transactionType || "الخدمات الهندسية والاستشارية"})`;
-    if (showPropertyCode && propertyCodeForPreview)
-      introText += ` لقطعة الأرض أو الملف رقم (${propertyCodeForPreview})`;
     if (handlingMethod)
       introText += `، بناءً على أسلوب التعامل والتفويض المعتمد (${handlingMethod})`;
     introText +=
       "، فإنه يسرنا تقديم العرض المالي والفني لإنهاء الأعمال المطلوبة وفقاً لنطاق العمل والاشتراطات والملاحظات التالية:";
 
     // 💡 هام: يجب استخدام روابط كاملة للصور في السيرفر (Absolute URLs)
-    const logoUrl = "https://details-worksystem1.com/logo.svg"; // تأكد من المسار
-    const bgUrl = "https://details-worksystem1.com/safe_background/1.webp"; // تأكد من المسار
+    const logoUrl = "https://details-worksystem1.com/logo.svg";
+    const bgUrl = "https://details-worksystem1.com/safe_background/1.webp";
 
-    // ==========================================
-    // 🧠 خوارزمية الدمج البصري لبيانات المخططات (Rowspan Logic) - نسخة السيرفر
-    // ==========================================
+    // خوارزمية الدمج البصري لبيانات المخططات (Rowspan Logic)
     const totalPlotsArea = plots.reduce(
       (sum, plot) => sum + (Number(plot.area) || 0),
       0,
@@ -889,7 +953,6 @@ const generatePdfPreview = async (req, res) => {
       }
     }
 
-    // تجهيز تسميات طرق الدفع
     const paymentMethodsLabels = {
       bank: "تحويل بنكي",
       cash: "نقدي",
@@ -932,7 +995,6 @@ const generatePdfPreview = async (req, res) => {
           .text-left { text-align: left; }
           .avoid-break { break-inside: avoid; page-break-inside: avoid; }
           
-          /* Utility Classes */
           .bg-slate-50 { background-color: #f8fafc; }
           .text-slate-500 { color: #64748b; }
           .text-slate-700 { color: #334155; }
@@ -948,6 +1010,11 @@ const generatePdfPreview = async (req, res) => {
         
         <div class="page-container" style="display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center;">
           <div class="bg-layer"></div>
+          <div style="position: absolute; top: 40px; left: 40px; z-index: 20;">
+            <div style="padding: 8px 16px; border-radius: 12px; border: 2px solid ${badgeBorder}; background-color: ${badgeBg}; color: ${badgeColor}; font-weight: 900; font-size: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
+              ${badgeText}
+            </div>
+          </div>
           <div class="content" style="width: 100%; padding: 80px 0;">
             <div style="width: 300px; margin: 0 auto 60px auto;">
               <img src="${logoUrl}" alt="Logo" style="max-width: 100%; mix-blend-mode: multiply;" />
@@ -964,9 +1031,28 @@ const generatePdfPreview = async (req, res) => {
 
               <table style="border: none; font-size: 14px; font-weight: bold; color: #334155; margin-bottom: 0;">
                 <tr>
-                  <td style="border: none; text-align: right; border-bottom: 1px dashed #cbd5e1; padding: 8px 0;"><span style="color: #64748b;">رقم المرجع:</span> <span style="color: #0f172a; font-weight: 900;">${referenceNumber}</span></td>
-                  <td style="border: none; text-align: right; border-bottom: 1px dashed #cbd5e1; padding: 8px 0;"><span style="color: #64748b;">تاريخ الإصدار:</span> <span style="color: #0f172a;">${displayIssueDate}</span></td>
+                  <td style="border: none; text-align: right; border-bottom: 1px dashed #cbd5e1; padding: 8px 0; width: 50%;"><span style="color: #64748b;">رقم المرجع:</span> <span style="color: #0f172a; font-weight: 900;">${referenceNumber}</span></td>
+                  <td style="border: none; text-align: right; border-bottom: 1px dashed #cbd5e1; padding: 8px 0; width: 50%;"><span style="color: #64748b;">تاريخ الإصدار:</span> <span style="color: #0f172a;">${displayIssueDate}</span></td>
                 </tr>
+                
+                ${
+                  transactionRefForPreview || meetingTitleForPreview
+                    ? `
+                <tr>
+                  ${
+                    transactionRefForPreview
+                      ? `<td colspan="${meetingTitleForPreview ? "1" : "2"}" style="border: none; text-align: right; border-bottom: 1px dashed #cbd5e1; padding: 8px 0;"><span style="color: #64748b;">معاملة رقم:</span> <span style="color: #0f172a; font-weight: 900;">${transactionRefForPreview}</span></td>`
+                      : '<td style="border: none; border-bottom: 1px dashed #cbd5e1;"></td>'
+                  }
+                  ${
+                    meetingTitleForPreview
+                      ? `<td colspan="${transactionRefForPreview ? "1" : "2"}" style="border: none; text-align: right; border-bottom: 1px dashed #cbd5e1; padding: 8px 0;"><span style="color: #64748b;">استناداً لمحضر:</span> <span style="color: #0f172a; font-weight: 900;">${meetingTitleForPreview}</span></td>`
+                      : '<td style="border: none; border-bottom: 1px dashed #cbd5e1;"></td>'
+                  }
+                </tr>`
+                    : ""
+                }
+
                 ${
                   propertyCodeForPreview
                     ? `
@@ -988,7 +1074,6 @@ const generatePdfPreview = async (req, res) => {
           <div class="bg-layer"></div>
           
           <table style="width: 100%; border: none; margin: 0; position: relative; z-index: 1;">
-            
             <thead style="display: table-header-group;">
               <tr>
                 <td style="border: none; padding: 60px 70px 20px 70px;">
@@ -1014,8 +1099,8 @@ const generatePdfPreview = async (req, res) => {
                   
                   <table style="width: 100%; text-align: right; border-collapse: collapse; font-size: 10px; font-weight: bold; border: 1px solid #123f5944; margin: 16px 0 24px 0;">
                     <tr>
-                      <td class="bg-slate-50 text-slate-500" style="width: 20%; border: 1px solid #123f5944;">نوع المستند</td>
-                      <td class="font-black" style="width: 30%; color: #123f59; border: 1px solid #123f5944;">عرض سعر خدمات هندسية</td>
+                      <td class="bg-slate-50 text-slate-500" style="width: 20%; border: 1px solid #123f5944;">نوع الخدمة</td>
+                      <td class="font-black" style="width: 30%; color: #123f59; border: 1px solid #123f5944;">${transactionType || "عرض سعر خدمات فنية"}</td>
                       <td class="bg-slate-50 text-slate-500" style="width: 20%; border: 1px solid #123f5944;">حالة المستند</td>
                       <td class="font-black text-emerald-800" style="width: 30%; border: 1px solid #123f5944;">عرض نهائي للعميل</td>
                     </tr>
@@ -1027,7 +1112,7 @@ const generatePdfPreview = async (req, res) => {
                     </tr>
                     <tr>
                       <td class="bg-slate-50 text-slate-500" style="border: 1px solid #123f5944;">مدة صلاحية العرض</td>
-                      <td class="text-slate-800" style="border: 1px solid #123f5944;">30 يوماً من تاريخ التحرير</td>
+                      <td class="text-slate-800" style="border: 1px solid #123f5944;">${validityDays === "unlimited" ? "مفتوح / غير محدد" : `${validityDays} يوماً تبدأ بعد اعتماد مقدم الخدمة`}</td>
                       <td class="bg-slate-50 text-slate-500" style="border: 1px solid #123f5944;">نسخة الوثيقة</td>
                       <td class="font-mono text-slate-800" style="border: 1px solid #123f5944;">v1.0</td>
                     </tr>
@@ -1148,70 +1233,93 @@ const generatePdfPreview = async (req, res) => {
                     ${
                       licenseNumber || serviceNumber
                         ? `
-                    <table style="width: 100%; border-collapse: collapse; text-align: right; font-size: 10.5px; border: 1px solid #123f59; margin-top: 12px; margin-bottom: 0;">
-                      <tbody class="font-bold text-[#123f59]">
-                        <tr>
-                          <td class="bg-slate-50 w-1/4" style="border: 1px solid #123f5944; padding: 8px;">رقم وتاريخ رخصة البناء</td>
-                          <td class="w-1/4 font-mono" style="border: 1px solid #123f5944; padding: 8px;">${licenseNumber ? `${licenseNumber} لعام ${licenseYear}هـ` : "---"}</td>
-                          <td class="bg-slate-50 w-1/4" style="border: 1px solid #123f5944; padding: 8px;">رقم وتاريخ معاملة البلدي</td>
-                          <td class="w-1/4 font-mono" style="border: 1px solid #123f5944; padding: 8px;">${serviceNumber ? `${serviceNumber} لعام ${serviceYear}هـ` : "---"}</td>
-                        </tr>
-                      </tbody>
-                    </table>`
+                  <table style="width: 100%; border-collapse: collapse; text-align: right; font-size: 10.5px; border: 1px solid #123f59; margin-top: 12px; margin-bottom: 0;">
+                    <tbody class="font-bold text-[#123f59]">
+                      <tr>
+                        ${
+                          licenseNumber
+                            ? `
+                        <td class="bg-slate-50" style="border: 1px solid #123f5944; padding: 8px; width: 25%;">رقم وتاريخ رخصة البناء</td>
+                        <td class="font-mono" style="border: 1px solid #123f5944; padding: 8px; width: ${licenseNumber && serviceNumber ? "25%" : "75%"};">${licenseNumber} لعام ${licenseYear}هـ</td>`
+                            : ""
+                        }
+                        
+                        ${
+                          serviceNumber
+                            ? `
+                        <td class="bg-slate-50" style="border: 1px solid #123f5944; padding: 8px; width: 25%;">رقم وتاريخ المعاملة / الطلب</td>
+                        <td class="font-mono" style="border: 1px solid #123f5944; padding: 8px; width: ${licenseNumber && serviceNumber ? "25%" : "75%"};">${serviceNumber} لعام ${serviceYear}هـ</td>`
+                            : ""
+                        }
+                      </tr>
+                    </tbody>
+                  </table>`
                         : ""
                     }
                   </div>
 
                   <div class="avoid-break" style="margin-bottom: 24px;">
                     <div class="section-title">${signatureMethod !== "SELF" ? "رابعاً" : "ثالثاً"}: نطاق الأعمال وقائمة التكاليف المالية</div>
-                    <table style="width: 100%; border-collapse: collapse; text-align: center; font-size: 10.5px; border: 1px solid #123f59; margin-bottom: 0;">
+                    <table style="width: 100%; border-collapse: collapse; text-align: center; font-size: 10.5px; border: 1px solid #123f59; margin-bottom: 0; table-layout: fixed;">
                       <thead style="background-color: #123f59; color: #fff; font-weight: 900;">
                         <tr>
                           <th style="padding: 8px; border: 1px solid #123f59; width: 5%;">م</th>
-                          <th style="padding: 8px; text-align: right; border: 1px solid #123f59;">وصف الخدمة الاستشارية / نطاق العمل الفني</th>
-                          ${showQuantity ? `<th style="padding: 8px; border: 1px solid #123f59; width: 10%;">الكمية</th>` : ""}
-                          <th style="padding: 8px; border: 1px solid #123f59; width: 15%;">الفئة (ر.س)</th>
-                          <th style="padding: 8px; border: 1px solid #123f59; width: 20%;">الإجمالي قبل الضريبة</th>
+                          <th style="padding: 8px; text-align: right; border: 1px solid #123f59; width: ${showQuantity ? "80%" : "95%"};">وصف الخدمة الاستشارية / نطاق العمل الفني</th>
+                          ${showQuantity ? `<th style="padding: 8px; border: 1px solid #123f59; width: 15%;">الكمية</th>` : ""}
                         </tr>
                       </thead>
                       <tbody class="font-bold text-[#123f59]">
                         ${
                           items.length === 0
-                            ? `<tr><td colspan="${showQuantity ? "5" : "4"}" style="padding: 24px; color: #94a3b8;">لا توجد بنود فنية مسجلة</td></tr>`
+                            ? `<tr><td colspan="${showQuantity ? "3" : "2"}" style="padding: 24px; color: #94a3b8;">لا توجد بنود فنية مسجلة</td></tr>`
                             : items
                                 .map(
                                   (item, index) => `
-                          <tr>
-                            <td class="font-mono" style="padding: 8px; border: 1px solid #123f5944;">${index + 1}</td>
-                            <td class="text-right" style="padding: 8px; border: 1px solid #123f5944; line-height: 1.5;">${item.title}</td>
-                            ${showQuantity ? `<td class="font-mono" style="padding: 8px; border: 1px solid #123f5944;">${item.qty || item.quantity || 1} ${item.unit || ""}</td>` : ""}
-                            <td class="font-mono" style="padding: 8px; border: 1px solid #123f5944;">${formatCurrency(item.price || item.unitPrice)}</td>
-                            <td class="font-mono font-black" style="padding: 8px; border: 1px solid #123f5944; color: #123f59;">${formatCurrency((item.qty || item.quantity || 1) * (item.price || item.unitPrice || 0) - (item.discount || 0))}</td>
-                          </tr>`,
+                        <tr>
+                          <td class="font-mono" style="padding: 8px; border: 1px solid #123f5944;">${index + 1}</td>
+                          <td class="text-right" style="padding: 8px; border: 1px solid #123f5944; line-height: 1.5; word-wrap: break-word; white-space: pre-wrap;">${item.title}</td>
+                          ${showQuantity ? `<td class="font-mono" style="padding: 8px; border: 1px solid #123f5944;">${item.qty || item.quantity || 1} ${item.unit || ""}</td>` : ""}
+                        </tr>`,
                                 )
                                 .join("")
                         }
                         
                         <tr class="bg-slate-50">
-                          <td colspan="${showQuantity ? "4" : "3"}" class="text-left font-black" style="padding: 10px; border: 1px solid #123f5944;">المجموع الفرعي</td>
-                          <td class="font-mono font-black text-[12px] text-slate-800" style="padding: 10px; border: 1px solid #123f5944;">${formatCurrency(subtotal)}</td>
+                          <td colspan="${showQuantity ? "3" : "2"}" style="padding: 0; border: 1px solid #123f5944;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; box-sizing: border-box;">
+                              <span class="font-black">المجموع الفرعي</span>
+                              <span class="font-mono font-black" style="font-size: 12px; color: #1e293b;">${formatCurrency(subtotal)} ر.س</span>
+                            </div>
+                          </td>
                         </tr>
                         <tr>
-                          <td colspan="${showQuantity ? "4" : "3"}" class="text-left font-bold text-slate-500" style="padding: 10px; border: 1px solid #123f5944;">ضريبة القيمة المضافة ${taxRate || 15}% ${officeTaxBearing > 0 ? `(يتحمل المكتب ${officeTaxBearing}%)` : ""}</td>
-                          <td class="font-mono font-bold text-[12px] text-slate-700" style="padding: 10px; border: 1px solid #123f5944;">${formatCurrency(taxAmount)}</td>
+                          <td colspan="${showQuantity ? "3" : "2"}" style="padding: 0; border: 1px solid #123f5944;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; box-sizing: border-box;">
+                              <span style="font-weight: bold; color: #64748b;">ضريبة القيمة المضافة ${taxRate || 15}% ${officeTaxBearing > 0 ? `(يتحمل المكتب ${officeTaxBearing}%)` : ""}</span>
+                              <span class="font-mono font-bold" style="font-size: 12px; color: #334155;">${formatCurrency(taxAmount)} ر.س</span>
+                            </div>
+                          </td>
                         </tr>
                         ${
                           officeTaxBearing > 0
                             ? `
                         <tr>
-                          <td colspan="${showQuantity ? "4" : "3"}" class="text-left font-bold text-emerald-700" style="padding: 8px; border: 1px solid #123f5944;">خصم إعفاء ضريبي (المكتب يتحمل ${officeTaxBearing}%)</td>
-                          <td class="font-mono font-black text-[12px] text-emerald-700" style="padding: 8px; border: 1px solid #123f5944;">- ${formatCurrency(calculatedOfficeDiscount)}</td>
+                          <td colspan="${showQuantity ? "3" : "2"}" style="padding: 0; border: 1px solid #123f5944;">
+                             <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; box-sizing: border-box;">
+                              <span style="font-weight: bold; color: #047857;">خصم إعفاء ضريبي (المكتب يتحمل ${officeTaxBearing}%)</span>
+                              <span class="font-mono font-black" style="font-size: 12px; color: #047857;">- ${formatCurrency(calculatedOfficeDiscount)} ر.س</span>
+                             </div>
+                          </td>
                         </tr>`
                             : ""
                         }
                         <tr class="font-black text-white" style="background-color: #123f59;">
-                          <td colspan="${showQuantity ? "4" : "3"}" class="text-left text-[12.5px]" style="padding: 12px; border: 1px solid #123f5944;">الإجمالي النهائي المستحق الصافي للدفع</td>
-                          <td class="font-mono text-[13.5px]" style="padding: 12px; border: 1px solid #123f5944;">${formatCurrency(finalPayable)} ر.س</td>
+                          <td colspan="${showQuantity ? "3" : "2"}" style="padding: 0; border: 1px solid #123f5944;">
+                             <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; box-sizing: border-box;">
+                              <span style="font-size: 12.5px;">الإجمالي النهائي المستحق الصافي للدفع</span>
+                              <span class="font-mono" style="font-size: 13.5px;">${formatCurrency(finalPayable)} ر.س</span>
+                             </div>
+                          </td>
                         </tr>
                       </tbody>
                     </table>
@@ -1336,6 +1444,15 @@ const generatePdfPreview = async (req, res) => {
                     <div style="background-color: rgba(248, 250, 252, 0.5); padding: 16px; border-radius: 8px; border: 1px solid #f1f5f9; font-size: 11px; font-weight: bold; color: #475569; line-height: 24px; white-space: pre-wrap; text-align: right;">${termsText || "خاضع للشروط العامة المسجلة بالمكتب."}</div>
                   </div>
 
+                  ${
+                    conclusion && conclusion.trim() !== ""
+                      ? `
+                  <div class="avoid-break" style="margin-bottom: 24px;">
+                    <div style="padding: 16px; font-size: 12px; font-weight: bold; color: #475569; line-height: 26px; white-space: pre-wrap; text-align: center;">${conclusion}</div>
+                  </div>`
+                      : ""
+                  }
+
                   <div class="avoid-break" style="margin-top: 40px;">
                     <h4 style="text-align: center; font-size: 12.5px; font-weight: 900; color: #123f59; margin-bottom: 16px;">صيغة الاعتماد والموافقة النهائية والتواقيع الرسمية</h4>
                     <table style="border: 2px solid #123f59; font-size: 11px; width: 100%; table-layout: fixed;">
@@ -1360,8 +1477,22 @@ const generatePdfPreview = async (req, res) => {
                             <div style="margin-bottom: 10px;"><span style="color: #64748b;">اسم المنشأة الهندسية:</span> <span style="font-weight: 900; color: #1e293b;">${firstPartyName || "شركة ديتيلز كونسولتس للاستشارات الهندسية"}</span></div>
                             <div style="margin-bottom: 10px;"><span style="color: #64748b;">يمثلها في التوقيع:</span> <span style="font-weight: 900; color: #1e293b;">${firstPartyRep || employeeName || "إدارة تطوير الأعمال والمشاريع"}</span></div>
                             <div style="margin-bottom: 10px;"><span style="color: #64748b;">الإدارة المصدرة للعرض:</span> <span style="font-weight: 900; color: #1e293b;">إدارة المشاريع وعقود العملاء</span></div>
-                            <div style="margin-bottom: 10px;"><span style="color: #64748b;">رقم الموظف الرقمي:</span> <span class="font-mono" style="font-weight: 900; color: #1e293b;">${employeeId}</span></div>
-                            <div style="margin-top: 50px; text-align: center; color: #94a3b8; font-weight: bold;">ختم الاعتماد والتوقيع:<br/>........................................</div>
+                            
+                            ${
+                              showFirstPartyEmpId
+                                ? `<div style="margin-bottom: 10px;"><span style="color: #64748b;">الرقم الوظيفي:</span> <span class="font-mono" style="font-weight: 900; color: #1e293b;">${firstPartyEmpCode || employeeId || "SYS-XXX"}</span></div>`
+                                : ""
+                            }
+                            
+                            <div style="margin-top: 50px; text-align: center; color: #94a3b8; font-weight: bold;">
+                              ختم الاعتماد والتوقيع:<br/>
+                              ${
+                                firstPartySignatureType === "SYSTEM" &&
+                                employeeSignatureUrl
+                                  ? `<img src="${employeeSignatureUrl}" style="height: 64px; margin-top: 8px; mix-blend-mode: multiply;" />`
+                                  : "........................................"
+                              }
+                            </div>
                           </td>
                         </tr>
                       </tbody>
@@ -1431,12 +1562,10 @@ const generatePdfPreview = async (req, res) => {
       "Error generating PDF with Gotenberg:",
       error?.response?.data?.toString() || error.message,
     );
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "حدث خطأ أثناء توليد ملف الـ PDF عبر Gotenberg",
-      });
+    res.status(500).json({
+      success: false,
+      message: "حدث خطأ أثناء توليد ملف الـ PDF عبر Gotenberg",
+    });
   }
 };
 
