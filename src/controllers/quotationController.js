@@ -1064,9 +1064,13 @@ const generatePdfPreview = async (req, res) => {
              </div>
           </td>
           <td style="padding: 4px; border: 1px solid #123f5944; text-align: center; vertical-align: middle;">
-             <div style="display: flex; flex-direction: column; align-items: center;">
-                <img src="${qrBase64}" style="width: 45px; height: 45px; object-fit: contain; margin-bottom: 2px; border: 1px solid #f1f5f9; padding: 2px; border-radius: 4px; background: #fff;" />
-             </div>
+            <div style="display: flex; flex-direction: column; align-items: center;">
+                <img 
+                  src="${qrBase64}" 
+                  alt="Bank QR"
+                  style="width: 45px; height: 45px; object-fit: contain; margin-bottom: 2px; border: 1px solid #f1f5f9; padding: 2px; border-radius: 4px; background: #fff; image-rendering: -webkit-optimize-contrast; image-rendering: crisp-edges;" 
+                />
+            </div>
           </td>
         </tr>`;
       });
@@ -1670,7 +1674,7 @@ const generatePdfPreview = async (req, res) => {
     form.append("waitDelay", "1.5s");
 
     const response = await axios.post(
-      "http://gotenberg:3000/forms/chromium/convert/html",
+      "http://127.0.0.1:3000/forms/chromium/convert/html",
       form,
       {
         headers: { ...form.getHeaders() },
