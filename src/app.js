@@ -277,6 +277,21 @@ app.use('/api/payrolls', payrollRoutes);
 const technicalReportRoutes = require('./routes/technicalReportRoutes');
 app.use('/api/technical-reports', technicalReportRoutes);
 
+const jobOfferRoutes = require("./routes/jobOfferRoutes");
+app.use("/api/hr/job-offers", jobOfferRoutes);
+
+const { generateQRBuffer } = require('./utils/qrGenerator');
+
+// أضف هذا المسار في منطقة المسارات العامة (قبل الـ Auth Middleware)
+app.get('/api/utils/qr', async (req, res) => {
+  const { data } = req.query;
+  if (!data) return res.status(400).send('No data provided');
+  
+  const buffer = await generateQRBuffer(data);
+  
+  // 🔴 التعديل هنا: غيرنا image/png إلى image/svg+xml
+  res.type('image/svg+xml').send(buffer); 
+});
 // ==================================================
 // مسار اختبار السيرفر (يمكن حذفه لاحقاً)
 // ==================================================

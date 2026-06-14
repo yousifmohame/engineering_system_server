@@ -163,6 +163,11 @@ model Employee {
   documentationLogs  DocumentationAuditLog[]
   payrolls           PayrollRecord[]
 
+  jobOffer JobOffer? @relation("AcceptedJobOffer")
+
+  // العروض الوظيفية التي قام هذا الموظف (موظف الموارد البشرية) بإنشائها
+  createdJobOffers JobOffer[] @relation("CreatedJobOffers")
+
   documents    EmployeeDocument[] @relation("EmployeeOwnedDocs")
   uploadedDocs EmployeeDocument[] @relation("EmployeeUploadedDocs")
   leaves       EmployeeLeave[]    @relation("EmployeeLeaves")
@@ -291,6 +296,46 @@ model EmployeePromotion {
   employeeId String
 
   @@index([employeeId, date])
+}
+
+enum JobOfferStatus {
+  DRAFT // مسودة (قيد التجهيز)
+  PENDING // بانتظار توقيع الموظف
+  ACCEPTED // مقبول
+  REJECTED // مرفوض
+}
+
+model JobOffer {
+  id             String  @id @default(uuid())
+  jobTitle       String // المسمى الوظيفي
+  candidateName  String // اسم المرشح
+  candidateEmail String? // البريد الإلكتروني للمرشح
+  candidatePhone String? // رقم الهاتف
+
+  // تفاصيل الراتب والمقدمة
+  introduction String? @db.Text // مقدمة العرض الوظيفي
+  basicSalary  Float // الراتب الأساسي
+  allowances   Json? // البدلات (مثل: { "housing": 1000, "transport": 500 })
+  conditions   String? @db.Text // شروط وأحكام العرض
+
+  // المرفقات والتنسيق (ربط مع نموذج المرفقات الحالي إذا وجد، أو حفظ مسار الملف)
+  frontCoverPath  String? // مسار/معرف الغلاف الأمامي
+  backCoverPath   String? // مسار/معرف الغلاف الخلفي
+  cvFilePath      String? // مسار/معرف السيرة الذاتية
+  signedOfferPath String? // مسار/معرف العرض الموقع من الطرفين
+
+  status JobOfferStatus @default(DRAFT)
+
+  // العلاقة مع الموظف (يتم ربطه عند القبول)
+  employeeId String?   @unique
+  employee   Employee? @relation("AcceptedJobOffer", fields: [employeeId], references: [id])
+
+  // منشئ العرض الوظيفي (ربط مع المستخدم/مدير الـ HR)
+  createdById String
+  createdBy   Employee @relation("CreatedJobOffers", fields: [createdById], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 // نموذج الرواتب و المسيرات

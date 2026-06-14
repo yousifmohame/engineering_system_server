@@ -1506,12 +1506,33 @@ const generatePdfPreview = async (req, res) => {
             <tfoot style="display: table-footer-group;">
               <tr>
                 <td style="border: none; padding: 20px 60px 40px 60px;">
-                  <div style="border-top: 2.5px solid #123f59; padding-top: 12px; text-align: center;">
-                    <div style="font-size: 9.5px; font-weight: 900; color: #123f59; opacity: 0.8; direction: ltr; margin-bottom: 4px;">
-                      📍 King Fahd Dist - RIYADH - Kingdom of Saudi Arabia - POSTAL CODE : 12274
-                    </div>
-                    <div style="font-size: 9.5px; font-weight: 900; color: #123f59; opacity: 0.8; direction: ltr;">
-                      ☎ 0590722827 | N.N: 7052303828 | ✉ info@details-consults.sa
+                  <div style="border-top: 2.5px solid #123f59; padding-top: 12px; direction: ltr;">
+                    <div style="display: flex; align-items: flex-start; gap: 12px; color: #123f59;">
+                      
+                      <div style="height: 60px; width: 60px; flex-shrink: 0; border: 1.5px dashed #cbd5e1; border-radius: 8px; background-color: #f8fafc; display: flex; align-items: center; justify-content: center; box-sizing: border-box;">
+                        <span style="font-size: 8px; color: #94a3b8; font-weight: 900; text-align: center; line-height: 1.4;">QR<br/>للتحقق</span>
+                      </div>
+                      
+                      <div style="min-width: 0; flex: 1; display: flex; flex-direction: column; justify-content: center; padding-top: 4px;">
+                        <div style="display: flex; align-items: center; justify-content: flex-end; gap: 6px; white-space: nowrap; font-size: 10.5px; font-weight: 900; line-height: 1.4; direction: rtl;">
+                          <span>📍</span>
+                          <span>حي الملك فهد - الرياض - المملكة العربية السعودية - الرمز البريدي : ١٢٢٧٤</span>
+                          <span style="opacity: 0.5;">·</span>
+                          <span>جوال : ٠٥٩٠٧٢٢٨٢٧</span>
+                          <span style="opacity: 0.5;">·</span>
+                          <span>الرقم الوطني الموحد : ٧٠٥٢٣٠٣٨٢٨</span>
+                        </div>
+                        <div style="margin-top: 4px; display: flex; align-items: center; justify-content: flex-start; gap: 4px; white-space: nowrap; font-size: 10px; font-weight: 900; line-height: 1.4; direction: ltr;">
+                          <span>📍</span>
+                          <span>King Fahd Dist - RIYADH - Kingdom of Saudi Arabia - POSTAL CODE : 12274</span>
+                          <span style="margin-left: 4px;">☎</span>
+                          <span>0590722827</span>
+                          <span style="margin-left: 4px;">- N.N:</span>
+                          <span>7052303828</span>
+                          <span style="margin-left: 4px;">✉</span>
+                          <span>info@details-consults.sa</span>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </td>

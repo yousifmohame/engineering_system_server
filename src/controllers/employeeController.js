@@ -267,6 +267,7 @@ const createEmployee = async (req, res) => {
       requiredDailyHours,
       customWorkingDays,
       roleIds,
+      jobOfferId
     } = req.body;
 
     if (
@@ -379,7 +380,7 @@ const createEmployee = async (req, res) => {
           ? parseFloat(requiredDailyHours)
           : 8.0,
         customWorkingDays: customWorkingDays ? customWorkingDays : null,
-
+        jobOffer: jobOfferId ? { connect: { id: jobOfferId } } : undefined,
         roles: {
           connect:
             roleIds && roleIds.length > 0 ? roleIds.map((id) => ({ id })) : [],
@@ -387,6 +388,41 @@ const createEmployee = async (req, res) => {
       },
       include: { roles: true },
     });
+
+    if (jobOfferId) {
+      const offer = await prisma.jobOffer.findUnique({ where: { id: jobOfferId } });
+      if (offer) {
+        const documentsToCreate = [];
+        
+        if (offer.cvFilePath) {
+          documentsToCreate.push({
+            fileName: "السيرة الذاتية - من العرض الوظيفي",
+            filePath: offer.cvFilePath,
+            fileType: "application/pdf", // أو حسب نوعها
+            fileSize: 0,
+            category: "OTHER",
+            employeeId: newEmployee.id,
+            uploadedById: req.user?.id || req.employee?.id
+          });
+        }
+        
+        if (offer.signedOfferPath) {
+          documentsToCreate.push({
+            fileName: "العرض الوظيفي الموقع",
+            filePath: offer.signedOfferPath,
+            fileType: "application/pdf",
+            fileSize: 0,
+            category: "CONTRACT", // تصنيفها كعقد/وثيقة رسمية
+            employeeId: newEmployee.id,
+            uploadedById: req.user?.id || req.employee?.id
+          });
+        }
+
+        if (documentsToCreate.length > 0) {
+          await prisma.employeeDocument.createMany({ data: documentsToCreate });
+        }
+      }
+    }
 
     delete newEmployee.password;
     res
@@ -1021,10 +1057,6 @@ const getEmployeeById = async (req, res) => {
     res.status(500).json({ message: "خطأ في الخادم أثناء جلب بيانات الموظف" });
   }
 };
-// ===============================================
-// 📁 محرك مستندات الموظف (HR Documents Engine)
-// متوافق 100% مع جدول EmployeeDocument
-// ===============================================
 
 // 1. جلب مرفقات الموظف
 // GET /api/employees/:id/attachments
