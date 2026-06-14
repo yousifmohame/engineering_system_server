@@ -2012,12 +2012,15 @@ model TreasurySettings {
 // ===============================================
 model BankAccount {
   id            String  @id @default(cuid())
-  bankName      String
-  accountName   String?
+  bankName      String // اسم البنك
+  bankLogo      String? @db.Text // 👈 رابط أو مسار صورة شعار البنك
+  accountNameAr String? // 👈 اسم العميل/الشركة بالعربي
+  accountNameEn String? // 👈 اسم العميل/الشركة بالإنجليزي
   accountNumber String  @unique
   iban          String?
+  currency      String  @default("SAR") // 👈 العملة (ر.س، USD، إلخ)
 
-  // 👈 الربط مع الأشخاص
+  // الربط مع الأشخاص
   openedById String?
   openedBy   Person? @relation("AccountOpener", fields: [openedById], references: [id])
 

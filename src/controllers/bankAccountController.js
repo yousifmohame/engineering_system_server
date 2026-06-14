@@ -35,26 +35,24 @@ const getBankAccounts = async (req, res) => {
 const createBankAccount = async (req, res) => {
   try {
     const data = req.body;
-
     const newAccount = await prisma.bankAccount.create({
       data: {
         bankName: data.bankName,
-        accountName: data.accountName,
+        bankLogo: data.bankLogo || null, // 👈 صورة الشعار
+        accountNameAr: data.accountNameAr, // 👈 الاسم بالعربي
+        accountNameEn: data.accountNameEn, // 👈 الاسم بالإنجليزي
+        currency: data.currency || "SAR",  // 👈 العملة
         accountNumber: data.accountNumber,
         iban: data.iban,
-        // 💡 حفظ الـ IDs بدلاً من الأسماء
         openedById: data.openedById || null,
         controlledById: data.controlledById || null,
         openDate: data.openDate ? new Date(data.openDate) : null,
-        authorizedPersons: data.authorizedPersons, // هذا الحقل نصي (String)
+        authorizedPersons: data.authorizedPersons,
         initialBalance: parseFloat(data.initialBalance) || 0,
-        initialBalanceDate: data.initialBalanceDate
-          ? new Date(data.initialBalanceDate)
-          : null,
+        initialBalanceDate: data.initialBalanceDate ? new Date(data.initialBalanceDate) : null,
         initialBalanceNotes: data.initialBalanceNotes,
       },
     });
-
     res.status(201).json({ success: true, data: newAccount });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -66,29 +64,50 @@ const updateBankAccount = async (req, res) => {
   try {
     const { id } = req.params;
     const data = req.body;
-
     const updatedAccount = await prisma.bankAccount.update({
       where: { id },
       data: {
         bankName: data.bankName,
-        accountName: data.accountName,
+        bankLogo: data.bankLogo || null,
+        accountNameAr: data.accountNameAr,
+        accountNameEn: data.accountNameEn,
+        currency: data.currency || "SAR",
         accountNumber: data.accountNumber,
         iban: data.iban,
         openedById: data.openedById || null,
         controlledById: data.controlledById || null,
         openDate: data.openDate ? new Date(data.openDate) : null,
         authorizedPersons: data.authorizedPersons,
-        initialBalance: parseFloat(data.initialBalance) || 0,
-        initialBalanceDate: data.initialBalanceDate
-          ? new Date(data.initialBalanceDate)
-          : null,
-        initialBalanceNotes: data.initialBalanceNotes,
       },
     });
-
     res.json({ success: true, data: updatedAccount });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// 🚀 دالة جديدة: جلب حساب بنكي للزوار (Public) لصفحة الـ QR
+const getPublicBankAccount = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const account = await prisma.bankAccount.findUnique({
+      where: { id },
+      select: { // 💡 نعيد البيانات الآمنة فقط للعميل
+        id: true,
+        bankName: true,
+        bankLogo: true,
+        accountNameAr: true,
+        accountNameEn: true,
+        accountNumber: true,
+        iban: true,
+        currency: true
+      }
+    });
+
+    if (!account) return res.status(404).json({ success: false, message: "الحساب غير موجود" });
+    res.json({ success: true, data: account });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "حدث خطأ" });
   }
 };
 
@@ -193,5 +212,6 @@ module.exports = {
   updateBankAccount,
   deleteBankAccount,
   addPersonalRecharge,
-  createBankTransaction
+  createBankTransaction,
+  getPublicBankAccount,
 };

@@ -7,8 +7,11 @@ const {
   updateBankAccount,
   deleteBankAccount,
   addPersonalRecharge,
-  createBankTransaction
+  createBankTransaction,
+  getPublicBankAccount
 } = require("../controllers/bankAccountController");
+
+router.get("/public/:id", getPublicBankAccount); // 👈 مسار جلب الحساب للزوار
 
 router.use(protect);
 
