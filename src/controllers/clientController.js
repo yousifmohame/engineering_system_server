@@ -625,6 +625,7 @@ const getClientById = async (req, res) => {
 // ==================================================
 // ✅ 3. دالة لجلب قائمة عملاء خفيفة (Dropdowns)
 // ==================================================
+
 const getSimpleClients = async (req, res) => {
   try {
     const { search } = req.query;
@@ -646,12 +647,14 @@ const getSimpleClients = async (req, res) => {
         clientCode: true,
         mobile: true,
         idNumber: true,
+        type: true,           // 💡 تم إضافته لجلب نوع العميل الفعلي (فرد، شركة، ورثة...)
+        representative: true, // 💡 تم إضافته لجلب بيانات الوكيل/المفوض من الـ JSON المركزي
       },
       where,
       orderBy: { clientCode: "asc" },
     });
 
-    console.log("🚀 عدد العملاء الذين تم جلبهم للدروب داون:", clients.length);
+    console.log("🚀 عدد العملاء الذين تم جلبهم للدروب داون مع كامل بيانات الربط:", clients.length);
 
     const simpleList = clients.map((client) => {
       const fullName = getFullName(client.name);
@@ -663,6 +666,8 @@ const getSimpleClients = async (req, res) => {
         mobile: client.mobile,
         idNumber: client.idNumber,
         fullNameRaw: fullName,
+        type: client.type,                     // 💡 تم ربطه بالبيانات الحقيقية بدلاً من true الثابتة
+        representative: client.representative, // 💡 تم ربطه بالبيانات الحقيقية بدلاً من true الثابتة
       };
     });
 
