@@ -747,6 +747,9 @@ const getDatePart = (formatter, date, type) =>
 
 const formatDateParts = (value) => {
   const date = value ? new Date(value) : new Date();
+  const dayName = new Intl.DateTimeFormat("ar-SA", { weekday: "long" }).format(
+    date,
+  );
   if (Number.isNaN(date.getTime()))
     return { gregorian: value, hijri: value, combined: value };
   const gregorianFormatter = new Intl.DateTimeFormat("ar-SA-u-ca-gregory", {
@@ -766,7 +769,8 @@ const formatDateParts = (value) => {
   return {
     gregorian,
     hijri,
-    combined: `ميلادي: ${gregorian} / هجري: ${hijri}`,
+    combined: `${dayName}، ميلادي: ${gregorian} / هجري: ${hijri}`,
+    dayName,
   };
 };
 
@@ -839,6 +843,7 @@ const generatePdfPreview = async (req, res) => {
       authDocExpiryDate,
       showAuthDocExpiryDate,
       customUsufructType,
+      documentType
     } = data;
 
     // حساب الحالة واللون للـ PDF
@@ -1038,8 +1043,6 @@ const generatePdfPreview = async (req, res) => {
       const bankPromises = selectedBankAccounts.map(async (bankId) => {
         const bank = bankAccountsData.find((b) => b.id === bankId);
         if (!bank) return "";
-        const bankUrl = `https://details-worksystem1.com/shared/bank/${bank.id}`;
-        const qrBase64 = await generateQRDataURL(bankUrl); // توليد الـ QR محلياً
 
         return `
         <tr style="background-color: #ffffff;">
@@ -1066,9 +1069,9 @@ const generatePdfPreview = async (req, res) => {
           <td style="padding: 4px; border: 1px solid #123f5944; text-align: center; vertical-align: middle;">
             <div style="display: flex; flex-direction: column; align-items: center;">
                 <img 
-                  src="${qrBase64}" 
+                  src="${bank.qrCodeData}" 
                   alt="Bank QR"
-                  style="width: 45px; height: 45px; object-fit: contain; margin-bottom: 2px; border: 1px solid #f1f5f9; padding: 2px; border-radius: 4px; background: #fff; image-rendering: -webkit-optimize-contrast; image-rendering: crisp-edges;" 
+                  style="width: 60px; height: 60px; object-fit: contain; margin-bottom: 2px; border: 1px solid #f1f5f9; padding: 2px; border-radius: 4px; background: #fff; image-rendering: -webkit-optimize-contrast; image-rendering: crisp-edges;" 
                 />
             </div>
           </td>
@@ -1111,8 +1114,9 @@ const generatePdfPreview = async (req, res) => {
             print-color-adjust: exact !important;
             background-color: #e8edf0;
           }
+          /* التعديل هنا: تغيير min-height */
           .page-container {
-            width: 794px; min-height: 1123px; padding: 60px 70px;
+            width: 794px; min-height: 100vh; padding: 60px 70px;
             box-sizing: border-box; background-color: #ffffff;
             position: relative; page-break-after: always;
             overflow: hidden;
@@ -1157,7 +1161,9 @@ const generatePdfPreview = async (req, res) => {
             </div>
 
             <div style="width: 80%; margin: 0 auto; border-top: 5px solid #123f59; border-bottom: 5px solid #123f59; padding: 48px 0; margin-bottom: 32px;">
-              <h1 style="font-size: 42px; font-weight: 900; color: #123f59; margin-bottom: 24px; margin-top: 0; line-height: 1.2;">عرض سعر فني ومالي</h1>
+              <h1 style="font-size: 42px; font-weight: 900; color: #123f59; margin-bottom: 24px; margin-top: 0; line-height: 1.2;">
+                ${documentType || "عرض سعر فني ومالي"}
+              </h1>
               <h2 style="font-size: 22px; font-weight: bold; color: #475569; margin: 0;">${transactionType || "خدمات هندسية واستشارية استراتيجية"}</h2>
             </div>
 
@@ -1174,7 +1180,7 @@ const generatePdfPreview = async (req, res) => {
                   transactionRefForPreview || meetingTitleForPreview
                     ? `
                 <tr>
-                  ${transactionRefForPreview ? `<td colspan="${meetingTitleForPreview ? "1" : "2"}" style="border: none; text-align: right; border-bottom: 1px dashed #cbd5e1; padding: 4px 0;"><span style="color: #64748b;">معاملة رقم:</span> <span style="color: #0f172a; font-weight: 900; font-family: monospace;">${transactionRefForPreview}</span></td>` : '<td style="border: none; border-bottom: 1px dashed #cbd5e1;"></td>'}
+                  ${transactionRefForPreview ? `<td colspan="${meetingTitleForPreview ? "1" : "2"}" style="border: none; text-align: right; border-bottom: 1px dashed #cbd5e1; padding: 4px 0;"><span style="color: #64748b;"> الرقم الداخلي للمعاملة:</span> <span style="color: #0f172a; font-weight: 900; font-family: monospace;">${transactionRefForPreview}</span></td>` : '<td style="border: none; border-bottom: 1px dashed #cbd5e1;"></td>'}
                   ${meetingTitleForPreview ? `<td colspan="${transactionRefForPreview ? "1" : "2"}" style="border: none; text-align: right; border-bottom: 1px dashed #cbd5e1; padding: 4px 0;"><span style="color: #64748b;">استناداً لمحضر اجتماع:</span> <span style="color: #0f172a; font-weight: 900; font-family: monospace;">${meetingTitleForPreview}</span></td>` : '<td style="border: none; border-bottom: 1px dashed #cbd5e1;"></td>'}
                 </tr>`
                     : ""
@@ -1207,8 +1213,7 @@ const generatePdfPreview = async (req, res) => {
                     </div>
                     <div style="width: 280px;">
                       <table style="width: 100%; text-align: right; border-collapse: collapse; font-size: 10px; font-weight: bold; border: 1px solid #123f5944; margin: 0; background: transparent;">
-                        <tr><td style="border: 1px solid #123f5944; width: 35%; color: #475569; padding: 8px;">نوع المستند</td><td style="border: 1px solid #123f5944; color: #123f59; font-weight: 900; font-size: 12px; padding: 8px;">عرض سعر خدمات فنية</td></tr>
-                        <tr><td style="border: 1px solid #123f5944; color: #475569; padding: 8px;">التاريخ</td><td style="border: 1px solid #123f5944; color: #123f59; font-size: 9.5px; font-weight: bold; padding: 8px;">${issueDateParts.combined}</td></tr>
+<tr><td style="border: 1px solid #123f5944; width: 35%; color: #475569; padding: 8px;">نوع المستند</td><td style="border: 1px solid #123f5944; color: #123f59; font-weight: 900; font-size: 12px; padding: 8px;">${documentType || "عرض سعر فني ومالي"}</td></tr>                        <tr><td style="border: 1px solid #123f5944; color: #475569; padding: 8px;">التاريخ</td><td style="border: 1px solid #123f5944; color: #123f59; font-size: 9px; font-weight: bold; padding: 7px;">${issueDateParts.combined}</td></tr>
                         <tr><td style="border: 1px solid #123f5944; color: #475569; padding: 8px;">رقم المرجع</td><td style="border: 1px solid #123f5944; font-weight: 900; color: #123f59; font-family: monospace; font-size: 11px; padding: 8px;">${referenceNumber}</td></tr>
                       </table>
                     </div>
@@ -1262,15 +1267,12 @@ const generatePdfPreview = async (req, res) => {
                           <td class="w-1/4 font-black text-[#123f59]" style="border: 1px solid #123f5944; padding: 8px;">${clientNameForPreview}</td>
                         </tr>
                         <tr>
-                          <td class="bg-slate-50" style="border: 1px solid #123f5944; padding: 8px;">أسلوب التعامل والتفويض</td>
+                          <td class="bg-slate-50" style="border: 1px solid #123f5944; padding: 8px;">الصفة الرسمية للتعامل و الإعتماد</td>
                           <td style="border: 1px solid #123f5944; padding: 8px;">${handlingMethod}</td>
                           <td class="bg-slate-50" style="border: 1px solid #123f5944; padding: 8px;">رقم الجوال للاتصال</td>
                           <td class="font-mono text-blue-700" style="border: 1px solid #123f5944; padding: 8px;">${repPhone || "---"}</td>
                         </tr>
-                        <tr>
-                          <td class="bg-slate-50" style="border: 1px solid #123f5944; padding: 8px;">الصفة القانونية للتوقيع</td>
-                          <td colspan="3" style="border: 1px solid #123f5944; padding: 8px;">${signatureMethod === "SELF" ? "المالك الأصلي مباشرة" : "ممثل نظامي بموجب مستند ساري الكفاءة"}</td>
-                        </tr>
+                        
                       </tbody>
                     </table>
                   </div>
@@ -1520,15 +1522,18 @@ const generatePdfPreview = async (req, res) => {
                         <span style="color: #123f59; font-weight: 900; font-size: 10px;">نأمل منكم التكرم بتجهيز المستندات التالية وتسليمها للمكتب ليتسنى لنا البدء في تنفيذ الأعمال:</span>
                       </div>
                       <div style="padding: 16px;">
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px 24px;">
+                        <div style="display: flex; flex-direction: column; gap: 8px;">
                           ${missingDocs
-                            .split("\\n")
+                            // 🌟 التعديل هنا: استخدام تعبير نمطي قوي لالتقاط الأسطر الجديدة في جميع المتصفحات والأنظمة
+                            .split(/\r?\n/)
                             .filter((d) => d.trim() !== "")
                             .map(
-                              (doc) => `
-                            <div style="display: flex; align-items: flex-start; gap: 10px; padding: 10px; border-radius: 8px; background-color: rgba(248,250,252,0.8); border: 1px solid #f1f5f9;">
-                              <div style="margin-top: 2px; flex-shrink: 0; background-color: #fff; border-radius: 3px; width: 14px; height: 14px; display: flex; align-items: center; justify-content: center; box-shadow: 0 1px 2px rgba(0,0,0,0.05); border: 1px solid #c5983c;"></div>
-                              <span style="font-size: 10.5px; font-weight: bold; color: #334155; line-height: 1.4;">${doc.replace(/^- /, "").trim()}</span>
+                              (doc, idx) => `
+                            <div style="display: flex; align-items: flex-start; gap: 10px; padding: 8px 10px; border-radius: 8px; background-color: rgba(248,250,252,0.5); border: 1px solid rgba(241,245,249,0.8);">
+                              <span style="flex-shrink: 0; display: flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; font-size: 10px; font-weight: bold; color: #fff; background-color: #123f59; margin-top: 2px;">
+                                ${idx + 1}
+                              </span>
+                              <span style="font-size: 11px; font-weight: bold; color: #334155; line-height: 1.6;">${doc.replace(/^- /, "").trim()}</span>
                             </div>`,
                             )
                             .join("")}
@@ -1674,7 +1679,7 @@ const generatePdfPreview = async (req, res) => {
     form.append("waitDelay", "1.5s");
 
     const response = await axios.post(
-      "http://127.0.0.1:3000/forms/chromium/convert/html",
+      "http://gotenberg:3000/forms/chromium/convert/html",
       form,
       {
         headers: { ...form.getHeaders() },

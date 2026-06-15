@@ -1,5 +1,6 @@
 const { PrismaClient } = require("@prisma/client");
 const prisma = new PrismaClient();
+const { generateQRDataURL } = require("../utils/qrGenerator");
 
 // 1. جلب جميع الحسابات البنكية
 const getBankAccounts = async (req, res) => {
@@ -35,13 +36,15 @@ const getBankAccounts = async (req, res) => {
 const createBankAccount = async (req, res) => {
   try {
     const data = req.body;
+
+    // 1. إنشاء الحساب أولاً
     const newAccount = await prisma.bankAccount.create({
       data: {
         bankName: data.bankName,
-        bankLogo: data.bankLogo || null, // 👈 صورة الشعار
-        accountNameAr: data.accountNameAr, // 👈 الاسم بالعربي
-        accountNameEn: data.accountNameEn, // 👈 الاسم بالإنجليزي
-        currency: data.currency || "SAR",  // 👈 العملة
+        bankLogo: data.bankLogo || null,
+        accountNameAr: data.accountNameAr,
+        accountNameEn: data.accountNameEn,
+        currency: data.currency || "SAR",
         accountNumber: data.accountNumber,
         iban: data.iban,
         openedById: data.openedById || null,
@@ -49,12 +52,35 @@ const createBankAccount = async (req, res) => {
         openDate: data.openDate ? new Date(data.openDate) : null,
         authorizedPersons: data.authorizedPersons,
         initialBalance: parseFloat(data.initialBalance) || 0,
-        initialBalanceDate: data.initialBalanceDate ? new Date(data.initialBalanceDate) : null,
+        initialBalanceDate: data.initialBalanceDate
+          ? new Date(data.initialBalanceDate)
+          : null,
         initialBalanceNotes: data.initialBalanceNotes,
       },
     });
+
+    // 2. توليد الـ QR Code برابط الحساب الجديد
+    try {
+      const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
+      const publicUrl = `${frontendUrl}/shared/bank/${newAccount.id}`;
+      const qrCodeBase64 = await generateQRDataURL(publicUrl);
+
+      // تحديث الحساب بكود الـ QR
+      if (qrCodeBase64) {
+        await prisma.bankAccount.update({
+          where: { id: newAccount.id },
+          data: { qrCodeData: qrCodeBase64 },
+        });
+        newAccount.qrCodeData = qrCodeBase64;
+      }
+    } catch (qrError) {
+      console.error("Failed to generate QR Code on create:", qrError.message);
+      // لن نوقف العملية في حال فشل توليد الـ QR، بل سنكمل إرجاع الحساب
+    }
+
     res.status(201).json({ success: true, data: newAccount });
   } catch (error) {
+    console.error("Create Bank Account Error:", error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -64,6 +90,19 @@ const updateBankAccount = async (req, res) => {
   try {
     const { id } = req.params;
     const data = req.body;
+
+    let qrCodeBase64 = undefined;
+
+    // 1. محاولة توليد QR محدث (خاصة إذا تم تغيير بيانات تؤثر عليه مستقبلاً)
+    try {
+      const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
+      const publicUrl = `${frontendUrl}/shared/bank/${id}`;
+      qrCodeBase64 = await generateQRDataURL(publicUrl);
+    } catch (qrError) {
+      console.error("Failed to generate QR Code on update:", qrError.message);
+    }
+
+    // 2. تحديث الحساب
     const updatedAccount = await prisma.bankAccount.update({
       where: { id },
       data: {
@@ -78,21 +117,25 @@ const updateBankAccount = async (req, res) => {
         controlledById: data.controlledById || null,
         openDate: data.openDate ? new Date(data.openDate) : null,
         authorizedPersons: data.authorizedPersons,
+        // تحديث الـ QR فقط إذا تم توليده بنجاح
+        ...(qrCodeBase64 && { qrCodeData: qrCodeBase64 }),
       },
     });
+
     res.json({ success: true, data: updatedAccount });
   } catch (error) {
+    console.error("Update Bank Account Error:", error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// 🚀 دالة جديدة: جلب حساب بنكي للزوار (Public) لصفحة الـ QR
+// 🚀 دالة: جلب حساب بنكي للزوار (Public) لصفحة الـ QR
 const getPublicBankAccount = async (req, res) => {
   try {
     const { id } = req.params;
     const account = await prisma.bankAccount.findUnique({
       where: { id },
-      select: { // 💡 نعيد البيانات الآمنة فقط للعميل
+      select: {
         id: true,
         bankName: true,
         bankLogo: true,
@@ -100,11 +143,14 @@ const getPublicBankAccount = async (req, res) => {
         accountNameEn: true,
         accountNumber: true,
         iban: true,
-        currency: true
-      }
+        currency: true,
+      },
     });
 
-    if (!account) return res.status(404).json({ success: false, message: "الحساب غير موجود" });
+    if (!account)
+      return res
+        .status(404)
+        .json({ success: false, message: "الحساب غير موجود" });
     res.json({ success: true, data: account });
   } catch (error) {
     res.status(500).json({ success: false, message: "حدث خطأ" });
@@ -118,12 +164,10 @@ const deleteBankAccount = async (req, res) => {
     await prisma.bankAccount.delete({ where: { id } });
     res.json({ success: true, message: "تم حذف الحساب البنكي بنجاح" });
   } catch (error) {
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "لا يمكن حذف هذا الحساب لوجود حركات مالية مرتبطة به.",
-      });
+    res.status(500).json({
+      success: false,
+      message: "لا يمكن حذف هذا الحساب لوجود حركات مالية مرتبطة به.",
+    });
   }
 };
 
@@ -138,7 +182,7 @@ const addPersonalRecharge = async (req, res) => {
         accountId,
         type: "شحن شخصي",
         amount: parsedAmount,
-        partnerId: partnerId || null, // 💡 تم تعديلها لتأخذ الـ ID
+        partnerId: partnerId || null,
         date: date ? new Date(date) : new Date(),
         notes,
       },
@@ -149,13 +193,11 @@ const addPersonalRecharge = async (req, res) => {
       data: { externalBalance: { increment: parsedAmount } },
     });
 
-    res
-      .status(201)
-      .json({
-        success: true,
-        data: transaction,
-        message: "تم شحن رصيد الحساب بنجاح",
-      });
+    res.status(201).json({
+      success: true,
+      data: transaction,
+      message: "تم شحن رصيد الحساب بنجاح",
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -168,17 +210,15 @@ const createBankTransaction = async (req, res) => {
     const parsedAmount = parseFloat(amount);
 
     if (!parsedAmount || parsedAmount <= 0) {
-      return res.status(400).json({ success: false, message: "المبلغ غير صحيح" });
+      return res
+        .status(400)
+        .json({ success: false, message: "المبلغ غير صحيح" });
     }
 
-    // تحديد هل العملية تزيد أم تنقص الرصيد؟
-    // الإيداع يزود الرصيد، والسحب والمصروف ينقص الرصيد
     const balanceChange = type === "deposit" ? parsedAmount : -parsedAmount;
-    
-    // ترجمة النوع للعربية لحفظه في الداتابيز
-    const typeAr = type === "deposit" ? "إيداع" : type === "withdrawal" ? "سحب" : "مصروف";
+    const typeAr =
+      type === "deposit" ? "إيداع" : type === "withdrawal" ? "سحب" : "مصروف";
 
-    // استخدام Transaction لضمان إنشاء السجل وتحديث الرصيد معاً
     const result = await prisma.$transaction([
       prisma.bankTransaction.create({
         data: {
@@ -191,7 +231,7 @@ const createBankTransaction = async (req, res) => {
       }),
       prisma.bankAccount.update({
         where: { id: accountId },
-        data: { systemBalance: { increment: balanceChange } }, // 👈 تحديث رصيد النظام تلقائياً
+        data: { systemBalance: { increment: balanceChange } },
       }),
     ]);
 

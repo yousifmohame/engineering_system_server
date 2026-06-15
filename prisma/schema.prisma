@@ -333,8 +333,8 @@ model EmployeeContract {
 // 2. تحديث نموذج العروض الوظيفية الشامل
 // ==========================================
 model JobOffer {
-  id          String @id @default(uuid())
-  offerNumber       String?  @unique @default(uuid()) // أضفنا ?
+  id          String  @id @default(uuid())
+  offerNumber String? @unique @default(uuid()) // أضفنا ?
 
   // 1. بيانات العرض الأساسية
   offerType          String    @default("NEW") // جديد، معدل، بديل، داخلي
@@ -2161,6 +2161,7 @@ model BankAccount {
   accountNumber String  @unique
   iban          String?
   currency      String  @default("SAR") // 👈 العملة (ر.س، USD، إلخ)
+  qrCodeData    String? @db.Text
 
   // الربط مع الأشخاص
   openedById String?
