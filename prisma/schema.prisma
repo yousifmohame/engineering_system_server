@@ -171,6 +171,7 @@ model Employee {
   documents    EmployeeDocument[] @relation("EmployeeOwnedDocs")
   uploadedDocs EmployeeDocument[] @relation("EmployeeUploadedDocs")
   leaves       EmployeeLeave[]    @relation("EmployeeLeaves")
+  contracts    EmployeeContract[]
 }
 
 // ==================================================
@@ -298,44 +299,140 @@ model EmployeePromotion {
   @@index([employeeId, date])
 }
 
-enum JobOfferStatus {
-  DRAFT // مسودة (قيد التجهيز)
-  PENDING // بانتظار توقيع الموظف
-  ACCEPTED // مقبول
-  REJECTED // مرفوض
+// ==========================================
+// 1. نموذج عقود الموظفين الرسمية (قوى، أجير، عن بعد)
+// ==========================================
+model EmployeeContract {
+  id         String   @id @default(uuid())
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  contractType String // (عقد عمل، أجير، عمل عن بعد، اتفاقية تدريب)
+  source       String // (منصة قوى، منصة أجير، داخلي)
+
+  startDate   DateTime? @db.Date
+  endDate     DateTime? @db.Date
+  isActive    Boolean   @default(true)
+  isRenewable Boolean   @default(true)
+  autoRenew   Boolean   @default(false)
+
+  firstPartyName  String?
+  firstPartyRep   String?
+  secondPartyName String?
+
+  fileUrl         String  @db.Text
+  aiExtractedData Json? // بيانات الذكاء الاصطناعي الخام
+  notes           String? @db.Text
+
+  uploadedById String?
+  uploadedAt   DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 }
 
+// ==========================================
+// 2. تحديث نموذج العروض الوظيفية الشامل
+// ==========================================
 model JobOffer {
-  id             String  @id @default(uuid())
-  jobTitle       String // المسمى الوظيفي
-  candidateName  String // اسم المرشح
-  candidateEmail String? // البريد الإلكتروني للمرشح
-  candidatePhone String? // رقم الهاتف
+  id          String @id @default(uuid())
+  offerNumber       String?  @unique @default(uuid()) // أضفنا ?
 
-  // تفاصيل الراتب والمقدمة
-  introduction String? @db.Text // مقدمة العرض الوظيفي
-  basicSalary  Float // الراتب الأساسي
-  allowances   Json? // البدلات (مثل: { "housing": 1000, "transport": 500 })
-  conditions   String? @db.Text // شروط وأحكام العرض
+  // 1. بيانات العرض الأساسية
+  offerType          String    @default("NEW") // جديد، معدل، بديل، داخلي
+  language           String    @default("AR")
+  detailLevel        String    @default("DETAILED")
+  templateId         String?
+  branch             String?
+  status             String    @default("DRAFT") // مسودة، تحت المراجعة، مرسل، مقبول، الخ
+  requiresSuperApp   Boolean   @default(true)
+  requiresGmApp      Boolean   @default(false)
+  requiresFinApp     Boolean   @default(false)
+  isConvertibleToEmp Boolean   @default(true)
+  creationReason     String?   @db.Text
+  internalNotes      String?   @db.Text
+  validityDays       Int       @default(14)
+  issueDate          DateTime  @default(now())
+  expiryDate         DateTime?
 
-  // المرفقات والتنسيق (ربط مع نموذج المرفقات الحالي إذا وجد، أو حفظ مسار الملف)
-  frontCoverPath  String? // مسار/معرف الغلاف الأمامي
-  backCoverPath   String? // مسار/معرف الغلاف الخلفي
-  cvFilePath      String? // مسار/معرف السيرة الذاتية
-  signedOfferPath String? // مسار/معرف العرض الموقع من الطرفين
+  // 2. بيانات المرشح
+  candidateNameAr String  @default("غير محدد")
+  candidateNameEn String?
+  identityType    String  @default("NATIONAL_ID")
+  idNumber        String?
+  nationality     String?
+  candidatePhone  String
+  candidateEmail  String
+  candidateCity   String?
+  candidateStatus String  @default("NEW_CANDIDATE")
+  candidateSource String? // لينكدإن، إحالة، الخ
+  validationFlags Json? // { idChecked: true, degreeChecked: false }
 
-  status JobOfferStatus @default(DRAFT)
+  // 3. المرفقات وتحليل الـ CV
+  cvFileUrl        String?
+  aiCvAnalysis     Json? // نقاط القوة، النقص، التوصيات
+  otherAttachments Json? // مصفوفة مسارات المرفقات الأخرى
 
-  // العلاقة مع الموظف (يتم ربطه عند القبول)
-  employeeId String?   @unique
-  employee   Employee? @relation("AcceptedJobOffer", fields: [employeeId], references: [id])
+  // 4. بيانات الوظيفة
+  jobTitleAr         String    @default("غير محدد")
+  jobTitleEn         String?
+  department         String?
+  directManager      String?
+  workLocation       String? // مقر، هجين، عن بعد
+  shiftType          String? // كامل، جزئي، تدريب
+  expectedStartDate  DateTime? @db.Date
+  finalStartDate     DateTime? @db.Date
+  probationDays      Int       @default(90)
+  workingDaysPerWeek Int       @default(5)
+  workingHoursPerDay Int       @default(8)
+  requiredTools      Json? // { laptop: true, car: false, drivingLicense: true }
 
-  // منشئ العرض الوظيفي (ربط مع المستخدم/مدير الـ HR)
+  // 5. الوصف الوظيفي والمهام
+  jobDescription String? @db.Text
+  jobTasks       Json? // مصفوفة المهام ومؤشرات الأداء
+
+  // 6. العرض المالي
+  basicSalary        Float
+  housingAllowance   Float   @default(0)
+  transportAllowance Float   @default(0)
+  otherAllowances    Json? // { telecom: 200, nature: 500 }
+  totalSalary        Float   @default(0)
+  currency           String  @default("SAR")
+  medicalInsurance   String? // فئة A, B, C
+  tickets            String? // تذكرة سنوية
+  financialNotes     String? @db.Text
+
+  // 7. الشروط والنظام
+  conditions String? @db.Text
+
+  // 8. المستندات المطلوبة قبل المباشرة
+  requiredDocs Json? // مصفوفة المستندات { name: "الهوية", required: true }
+
+  // 9. الإرسال والقبول
+  sendingDetails    Json? // { method: "EMAIL", date: "...", sentBy: "..." }
+  acceptanceDetails Json? // { method: "MANUAL", date: "...", acceptedBy: "...", fileUrl: "..." }
+  isFinalAccepted   Boolean @default(false)
+  isConvertedToEmp  Boolean @default(false)
+
+  // 10. الاعتمادات
+  supervisorId     String?
+  supervisorStatus String  @default("PENDING")
+  supervisorNotes  String? @db.Text
+  gmStatus         String?
+
+  // 11. إعدادات الإخراج
+  previewSettings Json? // { showCover: true, showQR: true, showTasks: "SHORT" }
+
+  // التتبع والإصدارات
+  version       Int     @default(1)
+  parentOfferId String? // إذا كان عرض معدل من عرض سابق
+
   createdById String
   createdBy   Employee @relation("CreatedJobOffers", fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  // الربط بالموظف عند القبول
+  employeeId     String?   @unique
+  employeeAsUser Employee? @relation("AcceptedJobOffer", fields: [employeeId], references: [id])
 }
 
 // نموذج الرواتب و المسيرات

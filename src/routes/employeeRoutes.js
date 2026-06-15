@@ -6,6 +6,10 @@ const path = require("path");
 const fs = require("fs");
 const { protect } = require("../middleware/authMiddleware");
 
+const { analyzeEmploymentContract } = require("../controllers/contractAiController");
+
+// مسار لتحليل عقد العمل باستخدام الذكاء الاصطناعي
+
 // ==============================================================
 // 🛠️ إعداد Multer المخصص لمرفقات الموظفين
 // ==============================================================
@@ -59,14 +63,19 @@ const {
   getEmployeesWithStats,
   getEmployeeAttendanceAnalysis,
   getEmployeeById,
+  createEmployeeContract,
+  getAllEmployeeContracts
 } = require("../controllers/employeeController");
 
 router.route("/").get(getAllEmployees).post(createEmployee);
 router.get("/with-stats", getEmployeesWithStats);
 router.route("/me").get(protect, getMe);
+router.post("/analyze", protect, uploadEmployeeDoc.single("contractFile"), analyzeEmploymentContract);
 
 router.get("/all/leave-requests", protect, getAllLeaveRequests);
 router.put("/leave-requests/:leaveId/status", protect, updateLeaveRequestStatus);
+router.post("/contracts/auto-link", protect, createEmployeeContract); // مسار حفظ وربط العقد التلقائي
+router.get("/all/contracts", protect, getAllEmployeeContracts);
 
 router.route("/:id")
   .get(getEmployeeById)

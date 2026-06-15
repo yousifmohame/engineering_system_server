@@ -1161,6 +1161,154 @@ const deleteEmployeeAttachment = async (req, res) => {
   }
 };
 
+// ==============================================================
+// 7. جلب جميع عقود الموظفين
+// GET /api/employees/all/contracts
+// ==============================================================
+const getAllEmployeeContracts = async (req, res) => {
+  try {
+    const contracts = await prisma.employeeContract.findMany({
+      include: { 
+        employee: { 
+          select: { 
+            name: true, // 👈 تم تصحيحها من nameAr لأن الحقل في الداتا بيز اسمه name
+            nationalId: true 
+          } 
+        } 
+      },
+      orderBy: { 
+        uploadedAt: 'desc' // 👈 تم تصحيحها من createdAt إلى uploadedAt لتطابق الـ Schema
+      }
+    });
+    res.status(200).json({ contracts });
+  } catch (error) {
+    console.error("Error fetching contracts:", error);
+    res.status(500).json({ message: "حدث خطأ أثناء جلب العقود" });
+  }
+};
+// ==============================================================
+// 6. حفظ عقد رسمي للموظف (منصة الرفع العامة مع الإنشاء التلقائي)
+// POST /api/employees/contracts/auto-link
+// ==============================================================
+// ==============================================================
+// 6. حفظ عقد رسمي للموظف (منصة الرفع العامة مع الإنشاء التلقائي واليدوي)
+// POST /api/employees/contracts/auto-link
+// ==============================================================
+const createEmployeeContract = async (req, res) => {
+  try {
+    const {
+      employeeId, // 👈 نستقبل الـ ID إذا تم تحديده يدوياً من المنسدلة
+      contractType,
+      source,
+      startDate,
+      endDate,
+      isActive,
+      isRenewable,
+      autoRenew,
+      firstPartyName,
+      firstPartyRep,
+      secondPartyName,
+      secondPartyIdNumber,
+      secondPartyNationality, 
+      secondPartyPhone,
+      secondPartyEmail,
+      jobTitle,
+      fileUrl,
+      basicSalary,
+      totalSalary,
+      aiExtractedData
+    } = req.body;
+
+    let employee = null;
+    let isNewEmployee = false;
+
+    // 1. إذا قام المشرف باختيار الموظف يدوياً من القائمة المنسدلة
+    if (employeeId) {
+      employee = await prisma.employee.findUnique({
+        where: { id: employeeId }
+      });
+      if (!employee) return res.status(404).json({ message: "الموظف المختار غير موجود في النظام." });
+    } 
+    // 2. إذا لم يختاره (الربط التلقائي)، نبحث بالهوية المستخرجة
+    else if (secondPartyIdNumber) {
+      employee = await prisma.employee.findUnique({
+        where: { nationalId: secondPartyIdNumber }
+      });
+    }
+
+    // 3. إذا لم يجد الموظف لا يدوياً ولا بالهوية، يقوم بإنشائه (Auto-Onboarding)
+    if (!employee) {
+      if (!secondPartyIdNumber) {
+        return res.status(400).json({ message: "يرجى اختيار الموظف يدوياً، أو التأكد من استخراج رقم الهوية لإنشائه." });
+      }
+
+      const tempEmpNumber = `EMP-${Math.floor(10000 + Math.random() * 90000)}`;
+
+      employee = await prisma.employee.create({
+        data: {
+          name: secondPartyName || "موظف جديد (مسجل تلقائياً)", 
+          firstNameAr: secondPartyName?.split(" ")[0] || "", 
+          nationalId: secondPartyIdNumber,
+          employeeCode: tempEmpNumber, 
+          email: secondPartyEmail || `temp-${secondPartyIdNumber}@company.com`,
+          phone: secondPartyPhone || `TEMP-${Math.floor(Math.random() * 999999999)}`, 
+          nationality: secondPartyNationality || "",
+          position: jobTitle || "غير محدد",
+          department: "غير محدد", 
+          password: "TempPassword123!", 
+          hireDate: startDate ? new Date(startDate) : new Date(),
+          baseSalary: basicSalary ? parseFloat(basicSalary) : 0,
+          status: "active"
+        }
+      });
+      isNewEmployee = true;
+    } else {
+      // 4. إذا الموظف موجود (سواء مختار يدوياً أو آلياً)، نحدّث راتبه ومسماه فقط
+      await prisma.employee.update({
+        where: { id: employee.id },
+        data: {
+          baseSalary: basicSalary ? parseFloat(basicSalary) : undefined,
+          position: jobTitle || undefined
+        }
+      });
+    }
+
+    const uploaderId = req.user?.id || req.employee?.id;
+
+    // 5. إنشاء العقد وربطه
+    const newContract = await prisma.employeeContract.create({
+      data: {
+        employeeId: employee.id, // تم الربط بشكل مؤكد!
+        contractType: contractType || "غير محدد",
+        source: source || "غير محدد",
+        startDate: startDate ? new Date(startDate) : null,
+        endDate: endDate ? new Date(endDate) : null,
+        isActive: Boolean(isActive),
+        isRenewable: Boolean(isRenewable),
+        autoRenew: Boolean(autoRenew),
+        firstPartyName,
+        firstPartyRep,
+        secondPartyName,
+        fileUrl,
+        aiExtractedData: aiExtractedData || {},
+        uploadedById: uploaderId
+      }
+    });
+
+    res.status(201).json({ 
+      message: isNewEmployee 
+        ? "تم إنشاء ملف الموظف تلقائياً وربط العقد به بنجاح!" 
+        : "تم حفظ العقد وربطه بملف الموظف بنجاح!", 
+      contract: newContract,
+      isNewEmployee
+    });
+
+  } catch (error) {
+    console.error("Error linking employee contract:", error);
+    res.status(500).json({ message: "حدث خطأ أثناء حفظ العقد." });
+  }
+};
+
 module.exports = {
   getMe,
   createEmployeeLeaveRequest,
@@ -1185,4 +1333,6 @@ module.exports = {
   getEmployeeById,
   uploadEmployeeAttachment,
   deleteEmployeeAttachment,
+  createEmployeeContract,
+  getAllEmployeeContracts
 };
