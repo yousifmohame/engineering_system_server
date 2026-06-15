@@ -136,6 +136,7 @@ const createQuotation = async (req, res) => {
         validityDays: parseInt(data.validityDays) || 30,
         expiryDate,
         templateType: data.templateType || "SUMMARY",
+        templateId: data.templateId || null,
         showClientCode: data.showClientCode ?? true,
         showPropertyCode: data.showPropertyCode ?? true,
 
@@ -281,6 +282,7 @@ const updateQuotation = async (req, res) => {
       ...(data.terms !== undefined && { terms: data.terms }),
       ...(data.conclusion !== undefined && { conclusion: data.conclusion }),
       ...(data.templateType && { templateType: data.templateType }),
+      ...(data.templateId !== undefined && { templateId: data.templateId }),
       ...(data.showClientCode !== undefined && {
         showClientCode: data.showClientCode,
       }),
