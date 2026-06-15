@@ -1155,6 +1155,7 @@ model Quotation {
   authDocDate       DateTime? // تاريخ المستند
   authDocIssuer     String? // الجهة المصدرة
   isAuthDocAttached Boolean         @default(false)
+  pdfUrl            String?         @db.Text
 
   // إضافة حقول لدعم العروض التكميلية والبديلة
   quotationCategory String  @default("ORIGINAL") // ORIGINAL, SUPPLEMENTARY, REVISED...
