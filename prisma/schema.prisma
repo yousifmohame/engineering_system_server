@@ -1079,8 +1079,10 @@ model QuotationLog {
 // 2. النموذج الرئيسي لعرض السعر (Quotation)
 // ==================================================
 model Quotation {
-  id     String @id @default(cuid())
-  number String @unique // QT-26-02-0012
+  id      String  @id @default(cuid())
+  number  String  @unique // QT-26-02-0012
+  subject String? // حقل الموضوع
+  address String? // حقل العنوان
 
   // 🔗 1. علاقات العملاء والمكاتب
   clientId String?

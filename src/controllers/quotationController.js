@@ -173,7 +173,8 @@ const createQuotation = async (req, res) => {
       const createdQuote = await tx.quotation.create({
         data: {
           number: quotationNumber,
-
+          subject: data.subject || null,
+          address: data.address || null,
           // 🔗 علاقات العملاء والأملاك والمعاملات
           client: data.clientId
             ? { connect: { id: data.clientId } }
@@ -357,6 +358,8 @@ const updateQuotation = async (req, res) => {
     const baseUpdateData = {
       ...(data.status && { status: data.status }),
       ...(data.notes !== undefined && { notes: data.notes }),
+      ...(data.subject !== undefined && { subject: data.subject }),
+      ...(data.address !== undefined && { address: data.address }),
       ...(data.terms !== undefined && { terms: data.terms }),
       ...(data.conclusion !== undefined && { conclusion: data.conclusion }),
       ...(data.templateType && { templateType: data.templateType }),
@@ -942,6 +945,8 @@ const approveQuotationWorkflow = async (req, res) => {
 
     const data = {
       quotationId: quote.id,
+      subject: quote.subject,
+      address: quote.address,
       transactionType:
         quote.transactionType?.name || "خدمات هندسية واستشارية استراتيجية",
       licenseNumber: quote.licenseNumber,
@@ -1037,6 +1042,8 @@ const approveQuotationWorkflow = async (req, res) => {
     const {
       transactionType,
       licenseNumber,
+      subject,
+      address,
       licenseYear,
       serviceNumber,
       serviceYear,
@@ -1423,7 +1430,7 @@ const approveQuotationWorkflow = async (req, res) => {
               <table style="border: none; font-size: 14px; font-weight: bold; color: #334155; margin-bottom: 0;">
                 <tr>
                   <td style="border: none; text-align: right; border-bottom: 1px dashed #cbd5e1; padding: 4px 0; width: 50%;"><span style="color: #64748b; font-size: 12px;">رقم العرض /الرقم المرجعي:</span> <span style="color: #0f172a; font-weight: 900; font-size: 12px; font-family: monospace;">${referenceNumber}</span></td>
-                  <td style="border: none; text-align: right; border-bottom: 1px dashed #cbd5e1; padding: 4px 0; width: 50%;"><span style="color: #64748b;">تاريخ الإصدار:</span> <span style="color: #0f172a; font-family: monospace;">${new Date(issueDate).toLocaleDateString('en-US')}</span></td>
+                  <td style="border: none; text-align: right; border-bottom: 1px dashed #cbd5e1; padding: 4px 0; width: 50%;"><span style="color: #64748b;">تاريخ الإصدار:</span> <span style="color: #0f172a; font-family: monospace;">${new Date(issueDate).toLocaleDateString("en-US")}</span></td>
                 </tr>
                 ${
                   transactionRefForPreview || meetingTitleForPreview
@@ -2242,6 +2249,8 @@ const generatePdfPreview = async (req, res) => {
     const {
       transactionType,
       licenseNumber,
+      subject,
+      address,
       licenseYear,
       serviceNumber,
       serviceYear,
@@ -2635,7 +2644,7 @@ const generatePdfPreview = async (req, res) => {
               <table style="border: none; font-size: 14px; font-weight: bold; color: #334155; margin-bottom: 0;">
                 <tr>
                   <td style="border: none; text-align: right; border-bottom: 1px dashed #cbd5e1; padding: 4px 0; width: 50%;"><span style="color: #64748b; font-size: 12px;">رقم العرض /الرقم المرجعي:</span> <span style="color: #0f172a; font-weight: 900; font-size: 12px; font-family: monospace;">${referenceNumber}</span></td>
-                  <td style="border: none; text-align: right; border-bottom: 1px dashed #cbd5e1; padding: 4px 0; width: 50%;"><span style="color: #64748b;">تاريخ الإصدار:</span> <span style="color: #0f172a; font-family: monospace;">${new Date(issueDate).toLocaleDateString('en-US')}</span></td>
+                  <td style="border: none; text-align: right; border-bottom: 1px dashed #cbd5e1; padding: 4px 0; width: 50%;"><span style="color: #64748b;">تاريخ الإصدار:</span> <span style="color: #0f172a; font-family: monospace;">${new Date(issueDate).toLocaleDateString("en-US")}</span></td>
                 </tr>
                 ${
                   transactionRefForPreview || meetingTitleForPreview
@@ -3180,6 +3189,8 @@ const generateAndSavePdf = async (req, res) => {
     const {
       transactionType,
       licenseNumber,
+      subject,
+      address,
       licenseYear,
       serviceNumber,
       serviceYear,
@@ -3582,7 +3593,7 @@ const generateAndSavePdf = async (req, res) => {
               <table style="border: none; font-size: 14px; font-weight: bold; color: #334155; margin-bottom: 0;">
                 <tr>
                   <td style="border: none; text-align: right; border-bottom: 1px dashed #cbd5e1; padding: 4px 0; width: 50%;"><span style="color: #64748b; font-size: 12px;">رقم العرض /الرقم المرجعي:</span> <span style="color: #0f172a; font-weight: 900; font-size: 12px; font-family: monospace;">${referenceNumber}</span></td>
-                  <td style="border: none; text-align: right; border-bottom: 1px dashed #cbd5e1; padding: 4px 0; width: 50%;"><span style="color: #64748b;">تاريخ الإصدار:</span> <span style="color: #0f172a; font-family: monospace;">${new Date(issueDate).toLocaleDateString('en-US')}</span></td>
+                  <td style="border: none; text-align: right; border-bottom: 1px dashed #cbd5e1; padding: 4px 0; width: 50%;"><span style="color: #64748b;">تاريخ الإصدار:</span> <span style="color: #0f172a; font-family: monospace;">${new Date(issueDate).toLocaleDateString("en-US")}</span></td>
                 </tr>
                 ${
                   transactionRefForPreview || meetingTitleForPreview
