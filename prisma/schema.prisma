@@ -168,10 +168,14 @@ model Employee {
   // العروض الوظيفية التي قام هذا الموظف (موظف الموارد البشرية) بإنشائها
   createdJobOffers JobOffer[] @relation("CreatedJobOffers")
 
-  documents    EmployeeDocument[] @relation("EmployeeOwnedDocs")
-  uploadedDocs EmployeeDocument[] @relation("EmployeeUploadedDocs")
-  leaves       EmployeeLeave[]    @relation("EmployeeLeaves")
-  contracts    EmployeeContract[]
+  documents            EmployeeDocument[] @relation("EmployeeOwnedDocs")
+  uploadedDocs         EmployeeDocument[] @relation("EmployeeUploadedDocs")
+  leaves               EmployeeLeave[]    @relation("EmployeeLeaves")
+  contracts            EmployeeContract[]
+  createdQuotations    Quotation[]        @relation("QuoteCreator")
+  approvedQuotations   Quotation[]        @relation("QuoteApprover")
+  firstPartyQuotations Quotation[]        @relation("QuoteFirstParty")
+  quotationLogs        QuotationLog[]     @relation("QuotationLogsUser")
 }
 
 // ==================================================
@@ -590,7 +594,6 @@ model Client {
   ownerships            OwnershipFile[]
   transactions          Transaction[]
   contracts             Contract[]
-  quotations            Quotation[]
   attachments           Attachment[]
   activityLogs          ActivityLog[]
   documents             Document[]
@@ -601,6 +604,7 @@ model Client {
   OfficeTask            OfficeTask[]
   archivedProjects      ArchivedProject[]
   technicalReports      TechnicalReport[]
+  quotations            Quotation[]          @relation("ClientQuotations")
 }
 
 model ClientClassification {
@@ -657,13 +661,13 @@ model OwnershipFile {
 
   transactions Transaction[] // المعاملات المرتبطة بهذا الصك
 
-  aiLogs     AIAnalysisLog[] // سجل عمليات التحليل لهذا الصك
-  quotations Quotation[]
+  aiLogs AIAnalysisLog[] // سجل عمليات التحليل لهذا الصك
 
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
   OfficeTask       OfficeTask[]
   technicalReports TechnicalReport[]
+  quotations       Quotation[]       @relation("OwnershipQuotations")
 
   @@index([deedNumber])
   @@index([district])
@@ -1050,17 +1054,60 @@ enum HandlingMethod {
   AGENT
 }
 
-// --- النماذج (Models) الخاصة بعروض الأسعار ---
+// ==================================================
+// 1. سجل تتبع عروض الأسعار (Audit Log)
+// ==================================================
+model QuotationLog {
+  id          String    @id @default(cuid())
+  quotationId String
+  quotation   Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+
+  action     String // "CREATE", "SUBMIT", "APPROVE", etc.
+  fromStatus QuotationStatus?
+  toStatus   QuotationStatus
+
+  // 🔗 الترابط مع الموظف الذي قام بالإجراء
+  userId   String
+  user     Employee @relation("QuotationLogsUser", fields: [userId], references: [id])
+  userName String?
+  notes    String?  @db.Text
+
+  createdAt DateTime @default(now())
+}
+
+// ==================================================
+// 2. النموذج الرئيسي لعرض السعر (Quotation)
+// ==================================================
 model Quotation {
   id     String @id @default(cuid())
   number String @unique // QT-26-02-0012
 
+  // 🔗 1. علاقات العملاء والمكاتب
   clientId String?
-  client   Client? @relation(fields: [clientId], references: [id])
+  client   Client? @relation("ClientQuotations", fields: [clientId], references: [id])
 
-  // تم تغيير Property إلى OwnershipFile لتطابق قاعدة بياناتك الفعالة
+  officeId String? // إذا كان العرض موجهاً لمكتب وسيط بدلاً من عميل مباشر
+  office   IntermediaryOffice? @relation("OfficeQuotations", fields: [officeId], references: [id])
+
+  // 🔗 2. علاقات الأملاك والمعاملات
   ownershipId String?
-  ownership   OwnershipFile? @relation(fields: [ownershipId], references: [id])
+  ownership   OwnershipFile? @relation("OwnershipQuotations", fields: [ownershipId], references: [id])
+
+  transactionId String?
+  transaction   PrivateTransaction? @relation("TransactionQuotations", fields: [transactionId], references: [id], onDelete: Cascade)
+
+  meetingMinuteId String?
+  meetingMinute   MeetingMinute? @relation("MeetingMinuteQuotations", fields: [meetingMinuteId], references: [id])
+
+  // 🔗 3. علاقات الموظفين (الموارد البشرية)
+  createdById String?
+  creator     Employee? @relation("QuoteCreator", fields: [createdById], references: [id])
+
+  approvedById String?
+  approvedBy   Employee? @relation("QuoteApprover", fields: [approvedById], references: [id])
+
+  firstPartyEmployeeId String?
+  firstPartyEmployee   Employee? @relation("QuoteFirstParty", fields: [firstPartyEmployeeId], references: [id])
 
   // البيانات الأساسية
   issueDate    DateTime @default(now())
@@ -1068,22 +1115,18 @@ model Quotation {
   expiryDate   DateTime
   isRenewable  Boolean  @default(false)
 
-  // 1. الربط الإضافي (من الخطوة 0)
-  transactionId String?
-  transaction   PrivateTransaction? @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  // التشفير والأمان
+  stampType         StampType @default(NONE)
+  qrVerificationUrl String?   @db.Text
+  barcodeData       String?
+  securityHash      String?   @db.Text
 
-  meetingMinuteId String?
-  meetingMinute   MeetingMinute? @relation(fields: [meetingMinuteId], references: [id])
-
-  // 2. التشفير والأمان (من الخطوة 8)
-  stampType         StampType @default(NONE) // يضاف كـ Enum: NONE, SECURE_QR
-  qrVerificationUrl String?   @db.Text // الرابط الذي سيفتح عند مسح الـ QR
-  barcodeData       String? // رقم الباركود الفريد (مثال: 815-QT-X9)
-  securityHash      String?   @db.Text // تشفير لبيانات العرض لمنع التلاعب في قاعدة البيانات
-
-  // 3. إدارة الإصدارات (للاحترافية)
-  revisionNumber Int     @default(1)
-  parentQuoteId  String?
+  // 🔗 4. إدارة الإصدارات (العلاقة الذاتية لعروض السعر التكميلية أو المعدلة)
+  revisionNumber    Int         @default(1)
+  quotationCategory String      @default("ORIGINAL")
+  parentQuotationId String?
+  parentQuotation   Quotation?  @relation("QuotationRevisions", fields: [parentQuotationId], references: [id])
+  childQuotations   Quotation[] @relation("QuotationRevisions")
 
   // نموذج العرض
   templateType     TemplateType @default(SUMMARY)
@@ -1102,16 +1145,15 @@ model Quotation {
   // حقول الاعتمادات والأختام
   isStamped Boolean   @default(false)
   stampedAt DateTime?
-  stampedBy String? // ID المستخدم الذي قام بالختم
+  stampedBy String?
 
   isSigned      Boolean   @default(false)
   signedAt      DateTime?
-  signedBy      String?
-  signatureHash String? // رمز التشفير للتوقيع الإلكتروني (إن وُجد)
+  signatureHash String?
 
   // البنود والتسعير
   items            QuotationItem[]
-  subtotal         Float           @default(0) // استخدام Float ليتوافق مع باقي النظام
+  subtotal         Float           @default(0)
   taxRate          Float           @default(0.15)
   officeTaxBearing Int             @default(0)
   taxAmount        Float           @default(0)
@@ -1119,14 +1161,15 @@ model Quotation {
   collectedAmount  Float           @default(0)
   currency         String          @default("SAR")
 
-  // الدفعات
-  payments        QuotationPayment[] // تم تغيير الاسم لمنع التضارب مع الدفعات العادية
+  // 🔗 5. الدفعات والمرفقات وسجل التتبع
+  payments    QuotationPayment[]
+  attachments Attachment[]       @relation("QuotationAttachments")
+  logs        QuotationLog[] // السجل التاريخي للإجراءات
+
   acceptedMethods Json?
 
-  // المرفقات والنواقص
-  attachments     Attachment[]
-  missingDocs     String?      @db.Text
-  showMissingDocs Boolean      @default(false)
+  missingDocs     String? @db.Text
+  showMissingDocs Boolean @default(false)
 
   // الشروط
   terms          String?        @db.Text
@@ -1135,37 +1178,33 @@ model Quotation {
   clientTitle    ClientTitle    @default(MR)
   handlingMethod HandlingMethod @default(DIRECT)
 
-  firstPartyEmployeeId    String?
   firstPartyRepCapacity   String?
   showFirstPartyEmpId     Boolean @default(true)
   firstPartySignatureType String? @default("MANUAL")
 
-  // الحالة والربط
-  status            QuotationStatus @default(DRAFT)
-  contract          Contract?
-  // إضافة حقول لتمثيل العميل والتفويض
-  clientType        String? // فرد، شركة، ورثة، وقف، حكومي...
-  signatureMethod   String? // المالك بنفسه، وكيل، مفوض إداري...
-  repName           String? // اسم الممثل/المفوض
-  repIdNumber       String? // رقم هوية الممثل
-  repPhone          String? // جوال الممثل
-  repCapacity       String? // صفته (مدير، وكيل، ناظر...)
-  authDocType       String? // نوع مستند التفويض (وكالة، قرار...)
-  authDocNumber     String? // رقم المستند
-  authDocDate       DateTime? // تاريخ المستند
-  authDocIssuer     String? // الجهة المصدرة
-  isAuthDocAttached Boolean         @default(false)
-  pdfUrl            String?         @db.Text
+  // الحالة
+  status QuotationStatus @default(DRAFT)
 
-  // إضافة حقول لدعم العروض التكميلية والبديلة
-  quotationCategory String  @default("ORIGINAL") // ORIGINAL, SUPPLEMENTARY, REVISED...
-  parentQuotationId String? // لربط العرض التكميلي بالعرض الأصلي
+  // 🔗 6. العلاقة مع العقد
+  contract Contract? // العلاقة موجودة مسبقاً من جهة العقد
+
+  clientType        String?
+  signatureMethod   String?
+  repName           String?
+  repIdNumber       String?
+  repPhone          String?
+  repCapacity       String?
+  authDocType       String?
+  authDocNumber     String?
+  authDocDate       DateTime?
+  authDocIssuer     String?
+  isAuthDocAttached Boolean   @default(false)
+  pdfUrl            String?   @db.Text
 
   qrCodeData String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  createdBy String?
 }
 
 model QuotationItem {
@@ -1464,7 +1503,7 @@ model Attachment {
 
   employee    Employee?  @relation("EmployeeAttachments", fields: [employeeId], references: [id], onDelete: Cascade)
   employeeId  String?
-  quotation   Quotation? @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+  quotation   Quotation? @relation("QuotationAttachments", fields: [quotationId], references: [id], onDelete: Cascade)
   quotationId String?
 }
 
@@ -1910,8 +1949,8 @@ model PrivateTransaction {
   ownersList       TransactionOwner[]
   OfficeTask       OfficeTask[]
   MeetingMinute    MeetingMinute[]
-  Quotation        Quotation[]
   technicalReports TechnicalReport[]
+  quotations       Quotation[]        @relation("TransactionQuotations")
 
   @@index([clientId])
   @@index([districtId])
@@ -2571,6 +2610,7 @@ model IntermediaryOffice {
   PrivateTransaction   PrivateTransaction[]
   archivedAsDesigner   ArchivedProject[]    @relation("ArchivedDesigner")
   archivedAsSupervisor ArchivedProject[]    @relation("ArchivedSupervisor")
+  quotations           Quotation[]          @relation("OfficeQuotations")
 }
 
 model OfficeContact {
@@ -3602,11 +3642,11 @@ model MeetingMinute {
   // ==========================================
   // ⏱️ 4. التتبع
   // ==========================================
-  createdAt DateTime    @default(now())
-  updatedAt DateTime    @updatedAt
-  createdBy String?
-  updatedBy String?
-  Quotation Quotation[]
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+  createdBy  String?
+  updatedBy  String?
+  quotations Quotation[] @relation("MeetingMinuteQuotations")
 }
 
 // ==========================================

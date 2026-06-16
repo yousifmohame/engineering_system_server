@@ -5,6 +5,58 @@ const axios = require("axios");
 const FormData = require("form-data");
 const fs = require("fs");
 const path = require("path");
+
+// ==========================================
+// دالة مساعدة: حفظ المرفقات (Base64 إلى ملفات)
+// ==========================================
+const processAndSaveAttachments = (attachments, userId) => {
+  if (!attachments || !Array.isArray(attachments) || attachments.length === 0)
+    return [];
+
+  const uploadDir = path.join(
+    __dirname,
+    "../../uploads/quotations/attachments",
+  );
+  if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir, { recursive: true });
+  }
+
+  const processedFiles = [];
+
+  for (const att of attachments) {
+    // 1. إذا كان الملف موجوداً مسبقاً (في حالة التحديث)
+    if (att.filePath || !att.fileData) continue;
+
+    // 2. معالجة الـ Base64
+    const matches = att.fileData.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+    if (!matches || matches.length !== 3) continue;
+
+    const fileType = matches[1];
+    const buffer = Buffer.from(matches[2], "base64");
+
+    // استخراج الامتداد الأصلي أو توليده
+    const extension = att.name.includes(".")
+      ? att.name.split(".").pop()
+      : fileType.split("/")[1];
+    const safeName = att.name.replace(/[^a-zA-Z0-9.\-]/g, "_");
+    const fileName = `ATT_${Date.now()}_${Math.round(Math.random() * 1000)}.${extension}`;
+    const filePath = path.join(uploadDir, fileName);
+
+    // كتابة الملف في السيرفر
+    fs.writeFileSync(filePath, buffer);
+
+    processedFiles.push({
+      fileName: att.name,
+      filePath: `/uploads/quotations/attachments/${fileName}`,
+      fileType: att.type || fileType,
+      fileSize: buffer.length,
+      notes: att.description || null,
+      uploadedById: userId,
+    });
+  }
+
+  return processedFiles;
+};
 // ==========================================
 // دالة مساعدة: توليد رقم عرض السعر (QT-YY-MM-####)
 // ==========================================
@@ -39,9 +91,7 @@ const generateSecurityData = (quoteNumber) => {
 // ===============================================
 // 1. إنشاء عرض سعر (محدث ومصحح لخطأ Prisma + زيادة عداد النموذج)
 // ===============================================
-// ===============================================
-// 1. إنشاء عرض سعر (مع دعم الضريبة المخصصة لكل بند)
-// ===============================================
+
 const createQuotation = async (req, res) => {
   try {
     const data = req.body;
@@ -113,82 +163,114 @@ const createQuotation = async (req, res) => {
       if (existingType) validTransactionTypeId = existingType.id;
     }
 
-    const newQuotation = await prisma.quotation.create({
-      data: {
-        number: quotationNumber,
+    const attachmentsToCreate = processAndSaveAttachments(
+      data.ownerAttachments,
+      req.user?.id,
+    );
+    // التنفيذ داخل معاملة (Transaction) لضمان حفظ العرض والسجل معاً
+    const newQuotation = await prisma.$transaction(async (tx) => {
+      const createdQuote = await tx.quotation.create({
+        data: {
+          number: quotationNumber,
 
-        client: data.clientId ? { connect: { id: data.clientId } } : undefined,
-        ownership: data.propertyId
-          ? { connect: { id: data.propertyId } }
-          : undefined,
-        transaction: data.transactionId
-          ? { connect: { id: data.transactionId } }
-          : undefined,
-        meetingMinute: data.meetingId
-          ? { connect: { id: data.meetingId } }
-          : undefined,
+          // 🔗 علاقات العملاء والأملاك والمعاملات
+          client: data.clientId
+            ? { connect: { id: data.clientId } }
+            : undefined,
+          ownership: data.propertyId
+            ? { connect: { id: data.propertyId } }
+            : undefined,
+          transaction: data.transactionId
+            ? { connect: { id: data.transactionId } }
+            : undefined,
+          meetingMinute: data.meetingId
+            ? { connect: { id: data.meetingId } }
+            : undefined,
+          transactionType: validTransactionTypeId
+            ? { connect: { id: validTransactionTypeId } }
+            : undefined,
 
-        transactionType: validTransactionTypeId
-          ? { connect: { id: validTransactionTypeId } }
-          : undefined,
+          issueDate,
+          validityDays: parseInt(data.validityDays) || 30,
+          expiryDate,
+          templateType: data.templateType || "SUMMARY",
+          templateId: data.templateId || null,
+          showClientCode: data.showClientCode ?? true,
+          showPropertyCode: data.showPropertyCode ?? true,
 
-        issueDate,
-        validityDays: parseInt(data.validityDays) || 30,
-        expiryDate,
-        templateType: data.templateType || "SUMMARY",
-        templateId: data.templateId || null,
-        showClientCode: data.showClientCode ?? true,
-        showPropertyCode: data.showPropertyCode ?? true,
+          // ✅ التعديل الأول: ربط الموظف الطرف الأول باستخدام connect
+          firstPartyEmployee: data.firstPartyEmployeeId
+            ? { connect: { id: data.firstPartyEmployeeId } }
+            : undefined,
 
-        firstPartyEmployeeId: data.firstPartyEmployeeId || null,
-        firstPartyRepCapacity: data.firstPartyRepCapacity,
-        showFirstPartyEmpId: data.showFirstPartyEmpId ?? true,
-        firstPartySignatureType: data.firstPartySignatureType || "MANUAL",
+          firstPartyRepCapacity: data.firstPartyRepCapacity,
+          showFirstPartyEmpId: data.showFirstPartyEmpId ?? true,
+          firstPartySignatureType: data.firstPartySignatureType || "MANUAL",
 
-        serviceNumber: data.serviceNumber || null,
-        serviceYear: data.serviceYear || null,
-        licenseNumber: data.licenseNumber || null,
-        licenseYear: data.licenseYear || null,
+          serviceNumber: data.serviceNumber || null,
+          serviceYear: data.serviceYear || null,
+          licenseNumber: data.licenseNumber || null,
+          licenseYear: data.licenseYear || null,
 
-        // 👇 تسجيل الإجماليات
-        subtotal: calcSubtotal,
-        taxRate: globalTaxRateFloat,
-        officeTaxBearing: parseInt(data.officeTaxBearing) || 0,
-        taxAmount: calcTaxAmount,
-        total: calcTotal,
+          // 👇 تسجيل الإجماليات
+          subtotal: calcSubtotal,
+          taxRate: globalTaxRateFloat,
+          officeTaxBearing: parseInt(data.officeTaxBearing) || 0,
+          taxAmount: calcTaxAmount,
+          total: calcTotal,
 
-        missingDocs: data.missingDocs,
-        showMissingDocs: data.showMissingDocs || false,
-        terms: data.terms,
-        conclusion: data.conclusion,
-        clientTitle: data.clientTitle || "MR",
-        handlingMethod: data.handlingMethod || "DIRECT",
-        acceptedMethods: data.acceptedMethods || ["bank"],
+          missingDocs: data.missingDocs,
+          showMissingDocs: data.showMissingDocs || false,
+          terms: data.terms,
+          conclusion: data.conclusion,
+          clientTitle: data.clientTitle || "MR",
+          handlingMethod: data.handlingMethod || "DIRECT",
+          acceptedMethods: data.acceptedMethods || ["bank"],
 
-        stampType: stampType,
-        barcodeData: securityData.barcodeData,
-        qrVerificationUrl: securityData.qrVerificationUrl,
-        securityHash: securityData.securityHash,
-        isStamped: stampType === "SECURE_QR",
-        stampedAt: stampType === "SECURE_QR" ? new Date() : null,
+          stampType: stampType,
+          barcodeData: securityData.barcodeData,
+          qrVerificationUrl: securityData.qrVerificationUrl,
+          securityHash: securityData.securityHash,
+          isStamped: stampType === "SECURE_QR",
+          stampedAt: stampType === "SECURE_QR" ? new Date() : null,
 
-        status: data.isDraft
-          ? "DRAFT"
-          : stampType === "SECURE_QR"
-            ? "APPROVED"
-            : "PENDING_APPROVAL",
-        createdBy: req.user?.id,
+          status: data.isDraft
+            ? "DRAFT"
+            : stampType === "SECURE_QR"
+              ? "APPROVED"
+              : "PENDING_APPROVAL",
 
-        items: { create: itemsToCreate },
-        payments: {
-          create: (data.payments || []).map((p, idx) => ({
-            installmentNumber: idx + 1,
-            percentage: parseFloat(p.percentage),
-            amount: parseFloat(p.amount),
-            dueCondition: p.condition || "حسب الاتفاق",
-          })),
+          // ✅ التعديل الثاني: ربط الموظف منشئ العرض (creator) باستخدام connect
+          creator: req.user?.id ? { connect: { id: req.user.id } } : undefined,
+
+          items: { create: itemsToCreate },
+          payments: {
+            create: (data.payments || []).map((p, idx) => ({
+              installmentNumber: idx + 1,
+              percentage: parseFloat(p.percentage),
+              amount: parseFloat(p.amount),
+              dueCondition: p.condition || "حسب الاتفاق",
+            })),
+          },
+          attachments: {
+            create: attachmentsToCreate,
+          },
         },
-      },
+      });
+
+      // 2. إنشاء سجل التتبع الأولي فوراً داخل نفس المعاملة
+      await tx.quotationLog.create({
+        data: {
+          quotationId: createdQuote.id,
+          action: "CREATE",
+          toStatus: createdQuote.status,
+          userId: req.user?.id || "SYSTEM",
+          userName: req.user?.name || "نظام الإنشاء الآلي",
+          notes: "تم إنشاء مسودة عرض السعر الأولي",
+        },
+      });
+
+      return createdQuote;
     });
 
     // =========================================================
@@ -228,7 +310,7 @@ const createQuotation = async (req, res) => {
 };
 
 // ===============================================
-// 2. تحديث عرض سعر (مع دعم الضريبة المخصصة لكل بند)
+// 2. تحديث عرض سعر (مصحح وآمن مع سجل التتبع)
 // ===============================================
 const updateQuotation = async (req, res) => {
   try {
@@ -242,6 +324,7 @@ const updateQuotation = async (req, res) => {
         .json({ success: false, message: "عرض السعر غير موجود" });
     }
 
+    // 1. التحقق من حالة القفل
     const isLockedStatus = ["APPROVED", "ACCEPTED", "PARTIALLY_PAID"].includes(
       existingQuote.status,
     );
@@ -253,6 +336,7 @@ const updateQuotation = async (req, res) => {
       });
     }
 
+    // 2. تجهيز التواريخ
     let issueDate = existingQuote.issueDate;
     let expiryDate = existingQuote.expiryDate;
     let validityDays = existingQuote.validityDays;
@@ -268,14 +352,7 @@ const updateQuotation = async (req, res) => {
       expiryDate.setDate(expiryDate.getDate() + validityDays);
     }
 
-    let validTransactionTypeId = undefined;
-    if (data.transactionTypeId && data.transactionTypeId.length > 20) {
-      const existingType = await prisma.transactionType.findUnique({
-        where: { id: data.transactionTypeId },
-      });
-      if (existingType) validTransactionTypeId = existingType.id;
-    }
-
+    // 3. تجهيز بيانات التحديث الأساسية
     const baseUpdateData = {
       ...(data.status && { status: data.status }),
       ...(data.notes !== undefined && { notes: data.notes }),
@@ -307,125 +384,144 @@ const updateQuotation = async (req, res) => {
       ...(data.officeTaxBearing !== undefined && {
         officeTaxBearing: parseInt(data.officeTaxBearing),
       }),
+
       issueDate,
       validityDays,
       expiryDate,
 
-      ...(validTransactionTypeId && {
-        transactionType: { connect: { id: validTransactionTypeId } },
-      }),
-      ...(data.clientId && { client: { connect: { id: data.clientId } } }),
-      ...(data.propertyId && {
-        ownership: { connect: { id: data.propertyId } },
-      }),
-      ...(data.transactionId && {
-        transaction: { connect: { id: data.transactionId } },
-      }),
-      ...(data.meetingId && {
-        meetingMinute: { connect: { id: data.meetingId } },
-      }),
+      // الحقول المباشرة للطرف الأول (بدون Id)
+      firstPartyRepCapacity:
+        data.firstPartyRepCapacity !== undefined
+          ? data.firstPartyRepCapacity
+          : existingQuote.firstPartyRepCapacity,
+      showFirstPartyEmpId:
+        data.showFirstPartyEmpId ?? existingQuote.showFirstPartyEmpId,
+      firstPartySignatureType:
+        data.firstPartySignatureType || existingQuote.firstPartySignatureType,
     };
 
-    let updatedQuotation;
+    // 4. معالجة العلاقات المترابطة (Relations) بشكل آمن
+    if (data.transactionTypeId && data.transactionTypeId.length > 20) {
+      baseUpdateData.transactionType = {
+        connect: { id: data.transactionTypeId },
+      };
+    }
+    if (data.clientId)
+      baseUpdateData.client = { connect: { id: data.clientId } };
+    if (data.propertyId)
+      baseUpdateData.ownership = { connect: { id: data.propertyId } };
+    if (data.transactionId)
+      baseUpdateData.transaction = { connect: { id: data.transactionId } };
+    if (data.meetingId)
+      baseUpdateData.meetingMinute = { connect: { id: data.meetingId } };
 
-    if (data.items || data.payments) {
-      updatedQuotation = await prisma.$transaction(async (tx) => {
-        let calcSubtotal = existingQuote.subtotal;
-        let calcTaxAmount = existingQuote.taxAmount;
-        let calcTotal = existingQuote.total;
-        let globalTaxRateFloat =
-          data.taxRate !== undefined
-            ? parseFloat(data.taxRate) / 100
-            : existingQuote.taxRate;
+    // 🌟 الإصلاح الأساسي لمشكلة firstPartyEmployeeId
+    if (data.firstPartyEmployeeId) {
+      baseUpdateData.firstPartyEmployee = {
+        connect: { id: data.firstPartyEmployeeId },
+      };
+    } else if (
+      data.firstPartyEmployeeId === null ||
+      data.firstPartyEmployeeId === ""
+    ) {
+      baseUpdateData.firstPartyEmployee = { disconnect: true };
+    }
 
-        if (data.items) {
-          await tx.quotationItem.deleteMany({ where: { quotationId: id } });
+    const newAttachmentsToCreate = processAndSaveAttachments(
+      data.ownerAttachments,
+      req.user?.id,
+    );
 
-          // 👇 تصفير الحسابات لحسابها بدقة من البنود الجديدة
-          calcSubtotal = 0;
-          calcTaxAmount = 0;
+    // 5. التنفيذ الشامل داخل معاملة (Transaction) لضمان التوثيق
+    const updatedQuotation = await prisma.$transaction(async (tx) => {
+      let calcSubtotal = existingQuote.subtotal;
+      let calcTaxAmount = existingQuote.taxAmount;
+      let calcTotal = existingQuote.total;
+      let globalTaxRateFloat =
+        data.taxRate !== undefined
+          ? parseFloat(data.taxRate) / 100
+          : existingQuote.taxRate;
 
-          const itemsToCreate = data.items.map((item, index) => {
-            const lineTotal = parseFloat(item.qty) * parseFloat(item.price);
-            let lineDiscount =
-              item.discountType === "PERCENTAGE"
-                ? lineTotal * (parseFloat(item.discount) / 100)
-                : parseFloat(item.discount) || 0;
+      // تحديث البنود إن وجدت
+      if (data.items) {
+        await tx.quotationItem.deleteMany({ where: { quotationId: id } });
 
-            const subtotal = Math.max(0, lineTotal - lineDiscount);
-            calcSubtotal += subtotal;
+        calcSubtotal = 0;
+        calcTaxAmount = 0;
 
-            // 👇 حساب ضريبة هذا البند
-            const itemTaxRate =
-              item.taxRate !== undefined
-                ? parseFloat(item.taxRate) / 100
-                : 0.15;
-            const itemTaxAmount = subtotal * itemTaxRate;
-            calcTaxAmount += itemTaxAmount; // تجميع الضريبة
+        const itemsToCreate = data.items.map((item, index) => {
+          const lineTotal = parseFloat(item.qty) * parseFloat(item.price);
+          let lineDiscount =
+            item.discountType === "PERCENTAGE"
+              ? lineTotal * (parseFloat(item.discount) / 100)
+              : parseFloat(item.discount) || 0;
 
-            return {
-              quotationId: id,
-              order: index + 1,
-              title: item.title,
-              description: item.description || null,
-              category: item.category || "عام",
-              quantity: parseFloat(item.qty),
-              unit: item.unit || "خدمة",
-              unitPrice: parseFloat(item.price),
-              discount: parseFloat(item.discount) || 0,
-              discountType: item.discountType || "PERCENTAGE",
-              subtotal: subtotal,
-              taxRate: itemTaxRate, // حفظ نسبة البند
-              taxAmount: itemTaxAmount, // حفظ قيمة الضريبة للبند
-            };
-          });
+          const subtotal = Math.max(0, lineTotal - lineDiscount);
+          calcSubtotal += subtotal;
 
-          calcTotal = calcSubtotal + calcTaxAmount;
+          const itemTaxRate =
+            item.taxRate !== undefined ? parseFloat(item.taxRate) / 100 : 0.15;
+          const itemTaxAmount = subtotal * itemTaxRate;
+          calcTaxAmount += itemTaxAmount;
 
-          if (itemsToCreate.length > 0) {
-            await tx.quotationItem.createMany({ data: itemsToCreate });
-          }
-        }
-
-        if (data.payments) {
-          await tx.quotationPayment.deleteMany({ where: { quotationId: id } });
-          const paymentsToCreate = data.payments.map((p, idx) => ({
+          return {
             quotationId: id,
-            installmentNumber: idx + 1,
-            percentage: parseFloat(p.percentage),
-            amount: parseFloat(p.amount),
-            dueCondition: p.condition || "حسب الاتفاق",
-          }));
-          if (paymentsToCreate.length > 0) {
-            await tx.quotationPayment.createMany({ data: paymentsToCreate });
-          }
-        }
-
-        return await tx.quotation.update({
-          where: { id },
-          data: {
-            ...baseUpdateData,
-            subtotal: calcSubtotal,
-            taxRate: globalTaxRateFloat,
-            taxAmount: calcTaxAmount,
-            total: calcTotal,
-            firstPartyEmployeeId: data.firstPartyEmployeeId || null,
-            firstPartyRepCapacity: data.firstPartyRepCapacity,
-            showFirstPartyEmpId: data.showFirstPartyEmpId ?? true,
-            firstPartySignatureType: data.firstPartySignatureType || "MANUAL",
-          },
-          include: {
-            items: { orderBy: { order: "asc" } },
-            payments: { orderBy: { installmentNumber: "asc" } },
-            client: { select: { name: true, clientCode: true } },
-            ownership: { select: { code: true } },
-          },
+            order: index + 1,
+            title: item.title,
+            description: item.description || null,
+            category: item.category || "عام",
+            quantity: parseFloat(item.qty),
+            unit: item.unit || "خدمة",
+            unitPrice: parseFloat(item.price),
+            discount: parseFloat(item.discount) || 0,
+            discountType: item.discountType || "PERCENTAGE",
+            subtotal: subtotal,
+            taxRate: itemTaxRate,
+            taxAmount: itemTaxAmount,
+          };
         });
-      });
-    } else {
-      updatedQuotation = await prisma.quotation.update({
+
+        calcTotal = calcSubtotal + calcTaxAmount;
+
+        if (itemsToCreate.length > 0) {
+          await tx.quotationItem.createMany({ data: itemsToCreate });
+        }
+      }
+
+      // تحديث الدفعات إن وجدت
+      if (data.payments) {
+        await tx.quotationPayment.deleteMany({ where: { quotationId: id } });
+        const paymentsToCreate = data.payments.map((p, idx) => ({
+          quotationId: id,
+          installmentNumber: idx + 1,
+          percentage: parseFloat(p.percentage),
+          amount: parseFloat(p.amount),
+          dueCondition: p.condition || "حسب الاتفاق",
+        }));
+        if (paymentsToCreate.length > 0) {
+          await tx.quotationPayment.createMany({ data: paymentsToCreate });
+        }
+      }
+
+      if (newAttachmentsToCreate && newAttachmentsToCreate.length > 0) {
+        await tx.attachment.createMany({
+          data: newAttachmentsToCreate.map((att) => ({
+            ...att,
+            quotationId: id, // ربط المرفق برقم العرض الحالي
+          })),
+        });
+      }
+
+      // 🌟 التحديث الفعلي للعرض
+      const result = await tx.quotation.update({
         where: { id },
-        data: baseUpdateData,
+        data: {
+          ...baseUpdateData,
+          subtotal: calcSubtotal,
+          taxRate: globalTaxRateFloat,
+          taxAmount: calcTaxAmount,
+          total: calcTotal,
+        },
         include: {
           items: { orderBy: { order: "asc" } },
           payments: { orderBy: { installmentNumber: "asc" } },
@@ -433,18 +529,35 @@ const updateQuotation = async (req, res) => {
           ownership: { select: { code: true } },
         },
       });
-    }
+
+      // 🌟 توثيق حدث التحديث في السجل التاريخي (Audit Log)
+      await tx.quotationLog.create({
+        data: {
+          quotationId: id,
+          action: "UPDATE",
+          fromStatus: existingQuote.status,
+          toStatus: result.status,
+          userId: req.user?.id || "SYSTEM",
+          userName: req.user?.name || "النظام",
+          notes: "قام المستخدم بتحديث بيانات أو بنود عرض السعر",
+        },
+      });
+
+      return result;
+    });
 
     res.status(200).json({
       success: true,
-      message: "تم التحديث بنجاح",
+      message: "تم التحديث وحفظ السجل بنجاح",
       data: updatedQuotation,
     });
   } catch (error) {
     console.error("Update Quotation Error:", error);
-    res
-      .status(500)
-      .json({ success: false, message: "حدث خطأ أثناء تحديث العرض" });
+    res.status(500).json({
+      success: false,
+      message: "حدث خطأ أثناء تحديث العرض",
+      error: error.message,
+    });
   }
 };
 
@@ -455,9 +568,7 @@ const updateQuotation = async (req, res) => {
 const getAllQuotations = async (req, res) => {
   try {
     const quotations = await prisma.quotation.findMany({
-      where: {
-        status: { not: "TRASHED" }, // 👈 فلترة: جلب كل شيء ما عدا الموجود في سلة المحذوفات
-      },
+      
       orderBy: { createdAt: "desc" },
       include: {
         client: { select: { name: true, clientCode: true } },
@@ -483,11 +594,17 @@ const getQuotationById = async (req, res) => {
       include: {
         client: true,
         ownership: true,
-        transaction: true, // 👈 إضافة استباقية لمعلومات المعاملة المرتبطة
-        meetingMinute: true, // 👈 إضافة استباقية لمعلومات المحضر المرتبط
+        transaction: true,
+        meetingMinute: true,
         items: { orderBy: { order: "asc" } },
         payments: { orderBy: { installmentNumber: "asc" } },
         contract: true,
+        attachments: true, // 👈👈 أضف هذا السطر المفقود
+        // 👇 إضافة جلب السجل التاريخي بترتيب تنازلي
+        logs: {
+          orderBy: { createdAt: "desc" },
+          include: { user: { select: { name: true } } }, // جلب اسم الموظف من العلاقة
+        },
       },
     });
 
@@ -512,14 +629,33 @@ const getQuotationById = async (req, res) => {
 const deleteQuotation = async (req, res) => {
   try {
     const { id } = req.params;
+    const userId = req.user?.id;
+    const userName = req.user?.name || "مستخدم النظام";
 
-    // 👈 بدلاً من الحذف النهائي، نقوم بتحديث الحالة إلى TRASHED
-    const trashedQuotation = await prisma.quotation.update({
-      where: { id: id },
-      data: {
-        status: "TRASHED", // نقل لسلة المحذوفات
-        // notes: "تم نقل هذا العرض لسلة المحذوفات", // اختياري
-      },
+    const trashedQuotation = await prisma.$transaction(async (tx) => {
+      const quotation = await tx.quotation.findUnique({ where: { id } });
+      if (!quotation) throw new Error("NOT_FOUND");
+      if (quotation.status === "TRASHED") throw new Error("ALREADY_TRASHED");
+
+      const updated = await tx.quotation.update({
+        where: { id },
+        data: { status: "TRASHED" },
+      });
+
+      // توثيق عملية النقل للسلة
+      await tx.quotationLog.create({
+        data: {
+          quotationId: id,
+          action: "TRASH",
+          fromStatus: quotation.status,
+          toStatus: "TRASHED",
+          userId: userId,
+          userName: userName,
+          notes: "تم نقل عرض السعر إلى سلة المحذوفات",
+        },
+      });
+
+      return updated;
     });
 
     res.status(200).json({
@@ -528,13 +664,241 @@ const deleteQuotation = async (req, res) => {
       data: trashedQuotation,
     });
   } catch (error) {
-    if (error.code === "P2025") {
+    if (error.message === "NOT_FOUND")
       return res
         .status(404)
         .json({ success: false, message: "عرض السعر غير موجود" });
-    }
-    console.error("Trash Quotation Error:", error);
+    if (error.message === "ALREADY_TRASHED")
+      return res
+        .status(400)
+        .json({ success: false, message: "العرض موجود مسبقاً في السلة" });
     res.status(500).json({ success: false, message: "خطأ في حذف العرض" });
+  }
+};
+
+// في quotationController.js
+const hardDeleteQuotation = async (req, res) => {
+  try {
+    const { id } = req.params;
+    // الحذف النهائي من الداتابيز
+    await prisma.quotation.delete({ where: { id } });
+    res.json({ success: true, message: "تم الحذف النهائي" });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "فشل الحذف النهائي" });
+  }
+};
+
+// ===============================================
+// استرجاع العرض من سلة المحذوفات (Restore)
+// ===============================================
+const restoreFromTrash = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user?.id;
+    const userName = req.user?.name || "مستخدم النظام";
+
+    await prisma.$transaction(async (tx) => {
+      const quotation = await tx.quotation.findUnique({
+        where: { id },
+        include: { logs: { orderBy: { createdAt: "desc" }, take: 2 } },
+      });
+
+      if (!quotation || quotation.status !== "TRASHED") {
+        throw new Error("هذا العرض ليس في سلة المحذوفات");
+      }
+
+      // 💡 البحث عن الحالة السابقة قبل الحذف، وإن لم توجد يعود كمسودة
+      const previousStatus =
+        quotation.logs.find((log) => log.toStatus === "TRASHED")?.fromStatus ||
+        "DRAFT";
+
+      await tx.quotation.update({
+        where: { id },
+        data: { status: previousStatus },
+      });
+
+      await tx.quotationLog.create({
+        data: {
+          quotationId: id,
+          action: "RESTORE",
+          fromStatus: "TRASHED",
+          toStatus: previousStatus,
+          userId: userId,
+          userName: userName,
+          notes: "تم استرجاع عرض السعر من سلة المحذوفات",
+        },
+      });
+    });
+
+    res.json({
+      success: true,
+      message: "تم استرجاع العرض بنجاح للحالة السابقة",
+    });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+// ===============================================
+// دورة الاعتماد: 1. تقديم العرض للمراجعة
+// ===============================================
+const submitForApproval = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user?.id;
+    const userName = req.user?.name || "مستخدم النظام";
+
+    await prisma.$transaction(async (tx) => {
+      const quote = await tx.quotation.findUnique({ where: { id } });
+      if (
+        !quote ||
+        (quote.status !== "DRAFT" && quote.status !== "NEEDS_MODIFICATION")
+      ) {
+        throw new Error("يمكن إرسال المسودات أو العروض المعادة للتعديل فقط");
+      }
+
+      await tx.quotation.update({
+        where: { id },
+        data: { status: "PENDING_APPROVAL" },
+      });
+
+      await tx.quotationLog.create({
+        data: {
+          quotationId: id,
+          action: "SUBMIT",
+          fromStatus: quote.status,
+          toStatus: "PENDING_APPROVAL",
+          userId,
+          userName,
+          notes: "تم تقديم العرض للمشرف للمراجعة والاعتماد",
+        },
+      });
+    });
+    res.json({ success: true, message: "تم إرسال العرض بنجاح للمراجعة" });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+// ===============================================
+// دورة الاعتماد: 2. طلب تعديل من الموظف
+// ===============================================
+const requestModification = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { notes } = req.body;
+    const userId = req.user?.id;
+    const userName = req.user?.name || "المشرف";
+
+    if (!notes) throw new Error("يجب إرفاق ملاحظات التعديل");
+
+    await prisma.$transaction(async (tx) => {
+      const quote = await tx.quotation.findUnique({ where: { id } });
+      if (!quote || quote.status !== "PENDING_APPROVAL")
+        throw new Error("العرض ليس قيد المراجعة");
+
+      await tx.quotation.update({
+        where: { id },
+        data: { status: "NEEDS_MODIFICATION" },
+      });
+
+      await tx.quotationLog.create({
+        data: {
+          quotationId: id,
+          action: "REQUEST_MODIFICATION",
+          fromStatus: quote.status,
+          toStatus: "NEEDS_MODIFICATION",
+          userId,
+          userName,
+          notes,
+        },
+      });
+    });
+    res.json({ success: true, message: "تم إعادة العرض للموظف للتعديل" });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+// ===============================================
+// دورة الاعتماد: 3. رفض العرض نهائياً
+// ===============================================
+const rejectQuotationWorkflow = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+    const userId = req.user?.id;
+    const userName = req.user?.name || "المشرف";
+
+    if (!reason) throw new Error("يجب كتابة سبب الرفض");
+
+    await prisma.$transaction(async (tx) => {
+      const quote = await tx.quotation.findUnique({ where: { id } });
+      if (!quote || quote.status !== "PENDING_APPROVAL")
+        throw new Error("العرض ليس قيد المراجعة");
+
+      await tx.quotation.update({
+        where: { id },
+        data: { status: "REJECTED" },
+      });
+
+      await tx.quotationLog.create({
+        data: {
+          quotationId: id,
+          action: "REJECT",
+          fromStatus: quote.status,
+          toStatus: "REJECTED",
+          userId,
+          userName,
+          notes: reason,
+        },
+      });
+    });
+    res.json({ success: true, message: "تم رفض العرض نهائياً" });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+// ===============================================
+// دورة الاعتماد: 4. الاعتماد النهائي (بديل لـ stamp العادي)
+// ===============================================
+const approveQuotationWorkflow = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user?.id;
+    const userName = req.user?.name || "المشرف";
+
+    await prisma.$transaction(async (tx) => {
+      const quote = await tx.quotation.findUnique({ where: { id } });
+      if (!quote || quote.status !== "PENDING_APPROVAL")
+        throw new Error("العرض ليس قيد المراجعة");
+
+      await tx.quotation.update({
+        where: { id },
+        data: {
+          status: "APPROVED",
+          isStamped: true,
+          stampedAt: new Date(),
+          stampedBy: userId,
+        },
+      });
+
+      await tx.quotationLog.create({
+        data: {
+          quotationId: id,
+          action: "APPROVE",
+          fromStatus: quote.status,
+          toStatus: "APPROVED",
+          userId,
+          userName,
+          notes: "تم اعتماد وختم العرض",
+        },
+      });
+    });
+    res.json({ success: true, message: "تم اعتماد العرض وختمه بنجاح" });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
   }
 };
 
@@ -2693,10 +3057,16 @@ module.exports = {
   getQuotationById,
   updateQuotation,
   deleteQuotation,
+  hardDeleteQuotation,
+  restoreFromTrash,
   getQuotationStats,
   recordPayment,
   stampQuotation,
   signQuotation,
   generatePdfPreview,
   generateAndSavePdf,
+  submitForApproval, // جديد
+  requestModification, // جديد
+  rejectQuotationWorkflow, // جديد
+  approveQuotationWorkflow, // جديد
 };

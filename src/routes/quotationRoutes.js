@@ -1,43 +1,49 @@
 // routes/quotationRoutes.js
-const express = require('express');
+const express = require("express");
 const router = express.Router();
-const { protect } = require('../middleware/authMiddleware');
+const { protect } = require("../middleware/authMiddleware");
 
-// استيراد الوظائف من الـ Controller
 const {
   createQuotation,
   getAllQuotations,
   getQuotationById,
   updateQuotation,
   deleteQuotation,
+  hardDeleteQuotation,
+  restoreFromTrash,
   getQuotationStats,
   recordPayment,
   stampQuotation,
   signQuotation,
   generatePdfPreview,
-  generateAndSavePdf
-} = require('../controllers/quotationController');
+  generateAndSavePdf,
+  submitForApproval,
+  requestModification,
+  rejectQuotationWorkflow,
+  approveQuotationWorkflow,
+} = require("../controllers/quotationController");
 
-// حماية جميع مسارات عروض الأسعار
 router.use(protect);
 
-// GET /api/quotations  -> جلب كل عروض الأسعار
-// POST /api/quotations -> إنشاء عرض سعر جديد
-router.route('/')
-  .get(getAllQuotations)
-  .post(createQuotation);
+router.route("/").get(getAllQuotations).post(createQuotation);
 
-router.get('/stats', getQuotationStats);
-router.post('/generate-pdf', generatePdfPreview);
-router.post('/generate-and-save-pdf', generateAndSavePdf);
-router.post('/:id/payments', recordPayment);
-router.patch('/:id/stamp', stampQuotation);
-router.patch('/:id/sign', signQuotation);
+router.get("/stats", getQuotationStats);
+router.post("/generate-pdf", generatePdfPreview);
+router.post("/generate-and-save-pdf", generateAndSavePdf);
 
-// GET /api/quotations/:id    -> جلب عرض سعر واحد
-// PUT /api/quotations/:id    -> تحديث عرض سعر
-// DELETE /api/quotations/:id -> حذف عرض سعر
-router.route('/:id')
+// 🚀 مسارات دورة الاعتماد (Approval Workflow)
+router.put("/:id/submit", submitForApproval);
+router.put("/:id/approve", approveQuotationWorkflow);
+router.put("/:id/modify", requestModification);
+router.put("/:id/reject", rejectQuotationWorkflow);
+router.put("/:id/restore", restoreFromTrash); // مسار الاسترجاع من السلة
+
+router.post("/:id/payments", recordPayment);
+router.patch("/:id/stamp", stampQuotation); // اختياري الإبقاء عليه إذا كان مستخدماً في مكان آخر
+router.patch("/:id/sign", signQuotation);
+router.delete("/:id/force", hardDeleteQuotation);
+router
+  .route("/:id")
   .get(getQuotationById)
   .put(updateQuotation)
   .delete(deleteQuotation);
