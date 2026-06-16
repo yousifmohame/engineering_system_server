@@ -21,6 +21,7 @@ const {
   requestModification,
   rejectQuotationWorkflow,
   approveQuotationWorkflow,
+  verifyQuotation
 } = require("../controllers/quotationController");
 
 router.use(protect);
@@ -30,7 +31,8 @@ router.route("/").get(getAllQuotations).post(createQuotation);
 router.get("/stats", getQuotationStats);
 router.post("/generate-pdf", generatePdfPreview);
 router.post("/generate-and-save-pdf", generateAndSavePdf);
-
+// إضافة هذا السطر للمسارات العامة (Public Routes)
+router.get('/verify/:barcode', verifyQuotation);
 // 🚀 مسارات دورة الاعتماد (Approval Workflow)
 router.put("/:id/submit", submitForApproval);
 router.put("/:id/approve", approveQuotationWorkflow);
