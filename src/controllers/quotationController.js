@@ -1787,11 +1787,13 @@ const generateAndSavePdf = async (req, res) => {
       documentType,
     } = data;
 
-    const quotationId = data.quotationId; 
-    
+    const quotationId = data.quotationId;
+
     if (!quotationId) {
-       console.log("❌ [BACKEND - ERROR] معرف العرض غير موجود!");
-       return res.status(400).json({ success: false, message: "معرف العرض غير موجود" });
+      console.log("❌ [BACKEND - ERROR] معرف العرض غير موجود!");
+      return res
+        .status(400)
+        .json({ success: false, message: "معرف العرض غير موجود" });
     }
 
     // حساب الحالة واللون للـ PDF
@@ -2567,6 +2569,9 @@ const generateAndSavePdf = async (req, res) => {
 
                 </td>
               </tr>
+              <tr style="height: 100%;">
+                <td colspan="10" style="border: none; padding: 0;"></td>
+              </tr>
             </tbody>
 
             <tfoot style="display: table-footer-group;">
@@ -2627,7 +2632,7 @@ const generateAndSavePdf = async (req, res) => {
     form.append("waitDelay", "1.5s");
 
     const response = await axios.post(
-      "http://127.0.0.1:3000/forms/chromium/convert/html",
+      "http://gotenberg:3000/forms/chromium/convert/html",
       form,
       {
         headers: { ...form.getHeaders() },
