@@ -1169,7 +1169,8 @@ model Quotation {
   attachments Attachment[]       @relation("QuotationAttachments")
   logs        QuotationLog[] // السجل التاريخي للإجراءات
 
-  acceptedMethods Json?
+  acceptedMethods      Json?
+  selectedBankAccounts Json? @default("[]")
 
   missingDocs     String? @db.Text
   showMissingDocs Boolean @default(false)
@@ -1212,6 +1213,15 @@ model Quotation {
   isAuthDocAttached Boolean   @default(false)
   pdfUrl            String?   @db.Text
 
+  showTimeline      Boolean   @default(true)
+  totalDuration     Int       @default(20)
+  durationUnit      String    @default("WORKING_DAY") // WORKING_DAY, CALENDAR_DAY, WEEK, MONTH
+  startConditions   Json?     @default("[\"DOCUMENTS_RECEIVED\"]") // مصفوفة بالشروط المختارة
+  customStartDate   DateTime?
+  showEndDate       Boolean   @default(false)
+  showTimelineNotes Boolean   @default(true)
+  timelineNotes     String?   @db.Text // النص الافتراضي للملاحظات السفلية
+
   qrCodeData String?
 
   createdAt DateTime @default(now())
@@ -1233,6 +1243,11 @@ model QuotationItem {
   unitPrice    Float
   discount     Float        @default(0)
   discountType DiscountType @default(PERCENTAGE)
+
+  executionDuration Int? // مدة تنفيذ هذه الخدمة المحددة
+  durationUnit      String? // وحدة المدة إن اختلفت
+  timelineNotes     String? // ملاحظات تنفيذية خاصة بالبند (تظهر في الجدول)
+  showInTimeline    Boolean @default(true) // هل تظهر في جدول العرض أم داخلية
 
   subtotal Float
 

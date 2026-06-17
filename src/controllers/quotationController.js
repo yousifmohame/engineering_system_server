@@ -138,7 +138,6 @@ const generateSecurityData = (quoteNumber) => {
 // ===============================================
 // 1. إنشاء عرض سعر (محدث ومصحح لخطأ Prisma + زيادة عداد النموذج)
 // ===============================================
-
 const createQuotation = async (req, res) => {
   try {
     const data = req.body;
@@ -151,7 +150,6 @@ const createQuotation = async (req, res) => {
 
     const quotationNumber = await generateQuotationNumber();
 
-    // 👇 متغيرات حساب الإجماليات
     let calcSubtotal = 0;
     let calcTaxAmount = 0;
 
@@ -165,11 +163,10 @@ const createQuotation = async (req, res) => {
       const subtotal = Math.max(0, lineTotal - lineDiscount);
       calcSubtotal += subtotal;
 
-      // 👇 حساب ضريبة هذا البند تحديداً
       const itemTaxRate =
         item.taxRate !== undefined ? parseFloat(item.taxRate) / 100 : 0.15;
       const itemTaxAmount = subtotal * itemTaxRate;
-      calcTaxAmount += itemTaxAmount; // تجميع الضريبة الكلية
+      calcTaxAmount += itemTaxAmount;
 
       return {
         order: index + 1,
@@ -181,14 +178,20 @@ const createQuotation = async (req, res) => {
         discount: parseFloat(item.discount) || 0,
         discountType: item.discountType || "PERCENTAGE",
         subtotal: subtotal,
-        taxRate: itemTaxRate, // حفظ نسبة ضريبة البند
-        taxAmount: itemTaxAmount, // حفظ قيمة ضريبة البند
+        taxRate: itemTaxRate,
+        taxAmount: itemTaxAmount,
+        // 🚀 حقول الجدول الزمني المرتبطة بالخدمة
+        executionDuration: item.executionDuration
+          ? parseInt(item.executionDuration)
+          : null,
+        durationUnit: item.durationUnit || null,
+        timelineNotes: item.timelineNotes || null,
+        showInTimeline:
+          item.showInTimeline !== undefined ? item.showInTimeline : true,
       };
     });
 
     const calcTotal = calcSubtotal + calcTaxAmount;
-
-    // نسبة الضريبة العامة (كمرجعية للجدول الرئيسي)
     const globalTaxRateFloat = parseFloat(data.taxRate || 15) / 100;
 
     let securityData = {};
@@ -201,7 +204,6 @@ const createQuotation = async (req, res) => {
         .digest("hex");
     }
 
-    // 🔥 الحماية الأمنية: التحقق من وجود نوع المعاملة في الداتا بيز قبل الربط
     let validTransactionTypeId = undefined;
     if (data.transactionTypeId && data.transactionTypeId.length > 20) {
       const existingType = await prisma.transactionType.findUnique({
@@ -214,14 +216,14 @@ const createQuotation = async (req, res) => {
       data.ownerAttachments,
       req.user?.id,
     );
-    // التنفيذ داخل معاملة (Transaction) لضمان حفظ العرض والسجل معاً
+
     const newQuotation = await prisma.$transaction(async (tx) => {
       const createdQuote = await tx.quotation.create({
         data: {
           number: quotationNumber,
           subject: data.subject || null,
           address: data.address || null,
-          // 🔗 علاقات العملاء والأملاك والمعاملات
+
           client: data.clientId
             ? { connect: { id: data.clientId } }
             : undefined,
@@ -246,11 +248,9 @@ const createQuotation = async (req, res) => {
           showClientCode: data.showClientCode ?? true,
           showPropertyCode: data.showPropertyCode ?? true,
 
-          // ✅ التعديل الأول: ربط الموظف الطرف الأول باستخدام connect
           firstPartyEmployee: data.firstPartyEmployeeId
             ? { connect: { id: data.firstPartyEmployeeId } }
             : undefined,
-
           firstPartyRepCapacity: data.firstPartyRepCapacity,
           showFirstPartyEmpId: data.showFirstPartyEmpId ?? true,
           firstPartySignatureType: data.firstPartySignatureType || "MANUAL",
@@ -260,12 +260,25 @@ const createQuotation = async (req, res) => {
           licenseNumber: data.licenseNumber || null,
           licenseYear: data.licenseYear || null,
 
-          // 👇 تسجيل الإجماليات
           subtotal: calcSubtotal,
           taxRate: globalTaxRateFloat,
           officeTaxBearing: parseInt(data.officeTaxBearing) || 0,
           taxAmount: calcTaxAmount,
           total: calcTotal,
+
+          // 🚀 الحقول الجديدة الخاصة بالجدول الزمني للـ Quotation
+          showTimeline: data.showTimeline ?? true,
+          totalDuration: parseInt(data.totalDuration) || 20,
+          durationUnit: data.durationUnit || "WORKING_DAY",
+          startConditions: data.startConditions
+            ? JSON.stringify(data.startConditions)
+            : '["DOCUMENTS_RECEIVED"]',
+          customStartDate: data.customStartDate
+            ? new Date(data.customStartDate)
+            : null,
+          showEndDate: data.showEndDate ?? false,
+          showTimelineNotes: data.showTimelineNotes ?? true,
+          timelineNotes: data.timelineNotes || null,
 
           missingDocs: data.missingDocs,
           showMissingDocs: data.showMissingDocs || false,
@@ -274,6 +287,7 @@ const createQuotation = async (req, res) => {
           clientTitle: data.clientTitle || "MR",
           handlingMethod: data.handlingMethod || "DIRECT",
           acceptedMethods: data.acceptedMethods || ["bank"],
+          selectedBankAccounts: data.selectedBankAccounts || [],
 
           stampType: stampType,
           barcodeData: securityData.barcodeData,
@@ -287,8 +301,6 @@ const createQuotation = async (req, res) => {
             : stampType === "SECURE_QR"
               ? "APPROVED"
               : "PENDING_APPROVAL",
-
-          // ✅ التعديل الثاني: ربط الموظف منشئ العرض (creator) باستخدام connect
           creator: req.user?.id ? { connect: { id: req.user.id } } : undefined,
 
           items: { create: itemsToCreate },
@@ -300,13 +312,10 @@ const createQuotation = async (req, res) => {
               dueCondition: p.condition || "حسب الاتفاق",
             })),
           },
-          attachments: {
-            create: attachmentsToCreate,
-          },
+          attachments: { create: attachmentsToCreate },
         },
       });
 
-      // 2. إنشاء سجل التتبع الأولي فوراً داخل نفس المعاملة
       await tx.quotationLog.create({
         data: {
           quotationId: createdQuote.id,
@@ -321,15 +330,11 @@ const createQuotation = async (req, res) => {
       return createdQuote;
     });
 
-    // =========================================================
-    // 🔥 تحديث عداد مرات استخدام النموذج (usesCount)
-    // =========================================================
     if (data.templateId) {
       try {
         const templateExists = await prisma.quotationTemplate.findUnique({
           where: { code: data.templateId },
         });
-
         if (templateExists) {
           await prisma.quotationTemplate.update({
             where: { code: data.templateId },
@@ -341,9 +346,7 @@ const createQuotation = async (req, res) => {
             data: { usesCount: { increment: 1 } },
           });
         }
-      } catch (templateError) {
-        console.error("Failed to increment template usesCount:", templateError);
-      }
+      } catch (templateError) {}
     }
 
     res.status(201).json({ success: true, data: newQuotation });
@@ -366,34 +369,25 @@ const updateQuotation = async (req, res) => {
     const data = req.body;
 
     const existingQuote = await prisma.quotation.findUnique({ where: { id } });
-    if (!existingQuote) {
+    if (!existingQuote)
       return res
         .status(404)
         .json({ success: false, message: "عرض السعر غير موجود" });
-    }
 
-    // 1. التحقق من حالة القفل
     const isLockedStatus = [
       "APPROVED",
       "SENT",
       "ACCEPTED",
       "PARTIALLY_PAID",
     ].includes(existingQuote.status);
-
     let statusToSave = data.status || existingQuote.status;
-    if (!isLockedStatus && data.isDraft !== undefined) {
-      statusToSave = data.isDraft ? "DRAFT" : "PENDING_APPROVAL";
-    }
     let resetSecurityData = {};
     let isPostApprovalEdit = false;
 
-    // 💡 الذكاء هنا: إذا كان العرض مقفلاً، نسمح بفك القفل فقط إذا تم إرسال "سبب التعديل"
     if (isLockedStatus) {
       if (data.editReason) {
         isPostApprovalEdit = true;
-        statusToSave = data.isDraft ? "DRAFT" : "PENDING_APPROVAL"; // إرجاع الحالة
-
-        // 🚨 تصفير الأختام والباركود وملف الـ PDF لأن العرض تغير ويحتاج اعتماد جديد
+        statusToSave = data.isDraft ? "DRAFT" : "PENDING_APPROVAL";
         resetSecurityData = {
           isStamped: false,
           stampedAt: null,
@@ -407,12 +401,11 @@ const updateQuotation = async (req, res) => {
         return res.status(400).json({
           success: false,
           message:
-            "هذا العرض معتمد. لتعديله، يرجى تقديم سبب التعديل (editReason) ليتم فك القفل وإعادة توجيهه للمشرف.",
+            "هذا العرض معتمد. لتعديله، يرجى تقديم سبب التعديل ليتم فك القفل.",
         });
       }
     }
 
-    // 2. تجهيز التواريخ
     let issueDate = existingQuote.issueDate;
     let expiryDate = existingQuote.expiryDate;
     let validityDays = existingQuote.validityDays;
@@ -428,9 +421,8 @@ const updateQuotation = async (req, res) => {
       expiryDate.setDate(expiryDate.getDate() + validityDays);
     }
 
-    // 3. تجهيز بيانات التحديث الأساسية
     const baseUpdateData = {
-      ...resetSecurityData, // 👈 دمج بيانات تصفير الاعتماد إذا كان تعديلاً بعد الاعتماد
+      ...resetSecurityData,
       status: statusToSave,
       ...(data.notes !== undefined && { notes: data.notes }),
       ...(data.subject !== undefined && { subject: data.subject }),
@@ -460,28 +452,69 @@ const updateQuotation = async (req, res) => {
       ...(data.clientTitle && { clientTitle: data.clientTitle }),
       ...(data.handlingMethod && { handlingMethod: data.handlingMethod }),
       ...(data.acceptedMethods && { acceptedMethods: data.acceptedMethods }),
+      ...(data.selectedBankAccounts && {
+        selectedBankAccounts: data.selectedBankAccounts,
+      }),
       ...(data.officeTaxBearing !== undefined && {
         officeTaxBearing: parseInt(data.officeTaxBearing),
       }),
-
       issueDate,
       validityDays,
       expiryDate,
-
       ...(data.clientType !== undefined && { clientType: data.clientType }),
-      ...(data.signatureMethod !== undefined && { signatureMethod: data.signatureMethod }),
+      ...(data.signatureMethod !== undefined && {
+        signatureMethod: data.signatureMethod,
+      }),
       ...(data.repName !== undefined && { repName: data.repName }),
       ...(data.repIdNumber !== undefined && { repIdNumber: data.repIdNumber }),
       ...(data.repPhone !== undefined && { repPhone: data.repPhone }),
       ...(data.repCapacity !== undefined && { repCapacity: data.repCapacity }),
       ...(data.authDocType !== undefined && { authDocType: data.authDocType }),
-      ...(data.authDocNumber !== undefined && { authDocNumber: data.authDocNumber }),
+      ...(data.authDocNumber !== undefined && {
+        authDocNumber: data.authDocNumber,
+      }),
       ...(data.authDocDate !== undefined && { authDocDate: data.authDocDate }),
-      ...(data.authDocIssueDate !== undefined && { authDocIssueDate: data.authDocIssueDate }),
-      ...(data.showAuthDocIssueDate !== undefined && { showAuthDocIssueDate: data.showAuthDocIssueDate }),
-      ...(data.authDocExpiryDate !== undefined && { authDocExpiryDate: data.authDocExpiryDate }),
-      ...(data.showAuthDocExpiryDate !== undefined && { showAuthDocExpiryDate: data.showAuthDocExpiryDate }),
-      ...(data.customUsufructType !== undefined && { customUsufructType: data.customUsufructType }),
+      ...(data.authDocIssueDate !== undefined && {
+        authDocIssueDate: data.authDocIssueDate,
+      }),
+      ...(data.showAuthDocIssueDate !== undefined && {
+        showAuthDocIssueDate: data.showAuthDocIssueDate,
+      }),
+      ...(data.authDocExpiryDate !== undefined && {
+        authDocExpiryDate: data.authDocExpiryDate,
+      }),
+      ...(data.showAuthDocExpiryDate !== undefined && {
+        showAuthDocExpiryDate: data.showAuthDocExpiryDate,
+      }),
+      ...(data.customUsufructType !== undefined && {
+        customUsufructType: data.customUsufructType,
+      }),
+
+      // 🚀 إضافة حقول الجدول الزمني للتحديث
+      ...(data.showTimeline !== undefined && {
+        showTimeline: data.showTimeline,
+      }),
+      ...(data.totalDuration !== undefined && {
+        totalDuration: parseInt(data.totalDuration),
+      }),
+      ...(data.durationUnit !== undefined && {
+        durationUnit: data.durationUnit,
+      }),
+      ...(data.startConditions !== undefined && {
+        startConditions: JSON.stringify(data.startConditions),
+      }),
+      ...(data.customStartDate !== undefined && {
+        customStartDate: data.customStartDate
+          ? new Date(data.customStartDate)
+          : null,
+      }),
+      ...(data.showEndDate !== undefined && { showEndDate: data.showEndDate }),
+      ...(data.showTimelineNotes !== undefined && {
+        showTimelineNotes: data.showTimelineNotes,
+      }),
+      ...(data.timelineNotes !== undefined && {
+        timelineNotes: data.timelineNotes,
+      }),
 
       firstPartyRepCapacity:
         data.firstPartyRepCapacity !== undefined
@@ -493,12 +526,10 @@ const updateQuotation = async (req, res) => {
         data.firstPartySignatureType || existingQuote.firstPartySignatureType,
     };
 
-    // 4. معالجة العلاقات المترابطة (Relations) بشكل آمن
-    if (data.transactionTypeId && data.transactionTypeId.length > 20) {
+    if (data.transactionTypeId && data.transactionTypeId.length > 20)
       baseUpdateData.transactionType = {
         connect: { id: data.transactionTypeId },
       };
-    }
     if (data.clientId)
       baseUpdateData.client = { connect: { id: data.clientId } };
     if (data.propertyId)
@@ -507,24 +538,21 @@ const updateQuotation = async (req, res) => {
       baseUpdateData.transaction = { connect: { id: data.transactionId } };
     if (data.meetingId)
       baseUpdateData.meetingMinute = { connect: { id: data.meetingId } };
-
-    if (data.firstPartyEmployeeId) {
+    if (data.firstPartyEmployeeId)
       baseUpdateData.firstPartyEmployee = {
         connect: { id: data.firstPartyEmployeeId },
       };
-    } else if (
+    else if (
       data.firstPartyEmployeeId === null ||
       data.firstPartyEmployeeId === ""
-    ) {
+    )
       baseUpdateData.firstPartyEmployee = { disconnect: true };
-    }
 
     const newAttachmentsToCreate = processAndSaveAttachments(
       data.ownerAttachments,
       req.user?.id,
     );
 
-    // 5. التنفيذ الشامل داخل معاملة (Transaction)
     const updatedQuotation = await prisma.$transaction(async (tx) => {
       let calcSubtotal = existingQuote.subtotal;
       let calcTaxAmount = existingQuote.taxAmount;
@@ -534,7 +562,6 @@ const updateQuotation = async (req, res) => {
           ? parseFloat(data.taxRate) / 100
           : existingQuote.taxRate;
 
-      // تحديث البنود إن وجدت
       if (data.items) {
         await tx.quotationItem.deleteMany({ where: { quotationId: id } });
         calcSubtotal = 0;
@@ -568,6 +595,14 @@ const updateQuotation = async (req, res) => {
             subtotal: subtotal,
             taxRate: itemTaxRate,
             taxAmount: itemTaxAmount,
+            // 🚀 إضافة حقول البنود الزمنية للتحديث
+            executionDuration: item.executionDuration
+              ? parseInt(item.executionDuration)
+              : null,
+            durationUnit: item.durationUnit || null,
+            timelineNotes: item.timelineNotes || null,
+            showInTimeline:
+              item.showInTimeline !== undefined ? item.showInTimeline : true,
           };
         });
 
@@ -576,7 +611,6 @@ const updateQuotation = async (req, res) => {
           await tx.quotationItem.createMany({ data: itemsToCreate });
       }
 
-      // تحديث الدفعات إن وجدت
       if (data.payments) {
         await tx.quotationPayment.deleteMany({ where: { quotationId: id } });
         const paymentsToCreate = data.payments.map((p, idx) => ({
@@ -599,7 +633,6 @@ const updateQuotation = async (req, res) => {
         });
       }
 
-      // التحديث الفعلي للعرض
       const result = await tx.quotation.update({
         where: { id },
         data: {
@@ -617,7 +650,6 @@ const updateQuotation = async (req, res) => {
         },
       });
 
-      // 🌟 توثيق حدث التحديث (وإذا كان تعديلاً بعد الاعتماد نوثق ذلك صراحة)
       await tx.quotationLog.create({
         data: {
           quotationId: id,
@@ -627,19 +659,16 @@ const updateQuotation = async (req, res) => {
           userId: req.user?.id || "SYSTEM",
           userName: req.user?.name || "النظام",
           notes: isPostApprovalEdit
-            ? `تم فك القفل وتعديل العرض بعد الاعتماد. السبب: ${data.editReason}`
-            : "قام المستخدم بتحديث بيانات أو بنود عرض السعر",
+            ? `تم فك القفل والتعديل. السبب: ${data.editReason}`
+            : "قام المستخدم بتحديث بيانات العرض",
         },
       });
-
       return result;
     });
 
     res.status(200).json({
       success: true,
-      message: isPostApprovalEdit
-        ? "تم فك القفل، تعديل العرض، وإعادته للمراجعة بنجاح"
-        : "تم التحديث وحفظ السجل بنجاح",
+      message: isPostApprovalEdit ? "تم فك القفل والتعديل" : "تم التحديث بنجاح",
       data: updatedQuotation,
     });
   } catch (error) {
@@ -1046,6 +1075,7 @@ const buildQuotationHtmlTemplate = (
     showMissingDocs = false,
     taxRate = 15,
     issueDate,
+    timelineState,
   } = data;
 
   const quotationId = data.quotationId || data.id;
@@ -1197,6 +1227,7 @@ const buildQuotationHtmlTemplate = (
     dollarSign: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="${goldColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" x2="12" y1="2" y2="22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>`,
     folderOpen: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="${goldColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 14 1.45-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.55 6a2 2 0 0 1-1.94 1.5H4a2 2 0 0 1-2-2V5c0-1.1.9-2 2-2h3.93a2 2 0 0 1 1.66.9l.82 1.2a2 2 0 0 0 1.66.9H18a2 2 0 0 1 2 2v2"/></svg>`,
     alertTriangle: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#d97706" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>`,
+    calendar: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="${goldColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></svg>`,
   };
 
   // ================= Client Representation =================
@@ -1348,6 +1379,120 @@ const buildQuotationHtmlTemplate = (
       </div>`;
   }
 
+  // ================= 🚀 معالجة الجدول الزمني (Timeline HTML Generator) =================
+  let timelineHTML = "";
+  if (timelineState && timelineState.showTimeline) {
+    const DURATION_UNITS_AR = {
+      WORKING_DAY: "يوم عمل",
+      CALENDAR_DAY: "يوم تقويمي",
+      WEEK: "أسبوع",
+      MONTH: "شهر",
+    };
+
+    // توليد نص شروط البداية
+    const conds = timelineState.startConditions || [];
+    let parts = [];
+    if (conds.includes("DOCUMENTS_RECEIVED"))
+      parts.push("استلام كافة المستندات والبيانات المطلوبة");
+    if (conds.includes("ADVANCE_PAYMENT"))
+      parts.push("تأكيد استلام الدفعة الأولى أو المستحق المالي");
+    if (conds.includes("SPECIFIC_DATE") && timelineState.customStartDate) {
+      parts.push(
+        `التاريخ المحدد (${new Date(timelineState.customStartDate).toLocaleDateString("ar-SA")})`,
+      );
+    }
+    let timelineStartText =
+      "تبدأ مدة تنفيذ الخدمات من تاريخ " +
+      parts.join("، و") +
+      (parts.length > 1 ? "، أيهما لاحق." : ".");
+    if (conds.includes("TRAFFIC_STUDY"))
+      timelineStartText +=
+        " وفي حال تطلب الأمر دراسة مرورية، تستكمل المدة بعد استلام خطاب الاعتماد من الجهة المختصة.";
+
+    const distributedDuration =
+      timelineState.timelineItems?.reduce(
+        (sum, item) => sum + (Number(item.duration) || 0),
+        0,
+      ) || 0;
+    const totalDuration = Number(timelineState.totalDuration) || 0;
+    const remainingDuration = Math.max(0, totalDuration - distributedDuration);
+
+    let timelineRowsHTML = "";
+    if (timelineState.timelineItems && timelineState.timelineItems.length > 0) {
+      timelineRowsHTML += timelineState.timelineItems
+        .map((tItem, index) => {
+          const relatedItem = items.find(
+            (i) => String(i.id) === String(tItem.itemId),
+          );
+          return `
+          <tr style="border-bottom: 1px solid #f1f5f9;">
+            <td style="padding: 8px; border: 1px solid rgba(18,63,89,0.267); font-family: monospace; background-color: rgba(248, 250, 252, 0.5);">${index + 1}</td>
+            <td style="padding: 8px; border: 1px solid rgba(18,63,89,0.267); text-align: right; line-height: 1.6;">${relatedItem ? relatedItem.title : "خدمة غير محددة"}</td>
+            <td style="padding: 8px; border: 1px solid rgba(18,63,89,0.267); font-family: monospace;">${tItem.duration} ${DURATION_UNITS_AR[tItem.unit || timelineState.durationUnit]}</td>
+            <td style="padding: 8px; border: 1px solid rgba(18,63,89,0.267); font-size: 9.5px; color: #64748b;">${tItem.notes || "---"}</td>
+          </tr>
+        `;
+        })
+        .join("");
+    }
+
+    if (remainingDuration > 0 && timelineState.timelineItems?.length > 0) {
+      timelineRowsHTML += `
+        <tr style="background-color: #f8fafc; border-bottom: 1px solid #f1f5f9;">
+          <td style="padding: 8px; border: 1px solid rgba(18,63,89,0.267); font-family: monospace; color: #94a3b8;">*</td>
+          <td style="padding: 8px; border: 1px solid rgba(18,63,89,0.267); text-align: right; color: #334155;">بقية خدمات نطاق العمل</td>
+          <td style="padding: 8px; border: 1px solid rgba(18,63,89,0.267); font-family: monospace; color: #334155;">${remainingDuration} ${DURATION_UNITS_AR[timelineState.durationUnit]}</td>
+          <td style="padding: 8px; border: 1px solid rgba(18,63,89,0.267); font-size: 9.5px; color: #64748b;">حسب التتابع الزمني</td>
+        </tr>
+      `;
+    }
+
+    let endDateHTML = "";
+    if (
+      timelineState.showEndDate &&
+      conds.includes("SPECIFIC_DATE") &&
+      timelineState.customStartDate
+    ) {
+      const estimatedEnd = new Date(
+        new Date(timelineState.customStartDate).getTime() +
+          totalDuration * 24 * 60 * 60 * 1000,
+      ).toLocaleDateString("ar-SA");
+      endDateHTML = `<span style="display: block; font-size: 9px; color: #047857; margin-top: 4px; font-family: 'Tajawal', sans-serif;">(ينتهي تقريباً في: ${estimatedEnd})</span>`;
+    }
+
+    timelineHTML = `
+      <div class="avoid-break bg-transparent" style="margin-bottom: 24px;">
+        <h4 style="margin: 0 0 12px 0; font-size: 11.5px; font-weight: 900; display: flex; align-items: center; gap: 6px; color: ${accentColor};">
+            ${icons.calendar} ${signatureMethod !== "SELF" ? "خامساً" : "رابعاً"}: الجدول الزمني لتنفيذ الخدمات
+        </h4>
+        <div style="margin-bottom: 12px; font-size: 10.5px; font-weight: bold; color: #475569; background-color: rgba(248, 250, 252, 0.5); padding: 10px; border-radius: 8px; border: 1px solid #f1f5f9; line-height: 1.6;">
+          ${timelineStartText}
+        </div>
+        <table style="width: 100%; border-collapse: collapse; text-align: center; font-size: 10.5px; border: 1px solid ${accentColor}; margin-bottom: 0; background-color: transparent;">
+          <thead style="background-color: ${accentColor}; color: #fff; font-weight: 900;" class="avoid-break">
+            <tr>
+              <th style="padding: 8px; border: 1px solid ${accentColor}; width: 8%;">م</th>
+              <th style="padding: 8px; border: 1px solid ${accentColor}; width: 45%;">الخدمة / المرحلة</th>
+              <th style="padding: 8px; border: 1px solid ${accentColor}; width: 22%;">المدة</th>
+              <th style="padding: 8px; border: 1px solid ${accentColor}; width: 25%;">ملاحظات</th>
+            </tr>
+          </thead>
+          <tbody class="font-bold text-[#123f59]">
+            ${timelineRowsHTML}
+            <tr style="background-color: rgba(241, 245, 249, 0.8);">
+              <td colspan="2" style="padding: 8px; border: 1px solid rgba(18,63,89,0.267); text-align: left; font-weight: 900; color: #1e293b;">إجمالي مدة تنفيذ الخدمات:</td>
+              <td colspan="2" style="padding: 8px; border: 1px solid rgba(18,63,89,0.267); font-weight: 900; font-family: monospace; color: ${accentColor};">
+                ${totalDuration} ${DURATION_UNITS_AR[timelineState.durationUnit]}
+                ${endDateHTML}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        ${timelineState.showTimelineNotes && timelineState.timelineNotes ? `<div style="margin-top: 8px; font-size: 10px; font-weight: bold; color: #64748b; line-height: 1.6; text-align: justify;">* ${timelineState.timelineNotes}</div>` : ""}
+      </div>
+    `;
+  }
+
   // ================= HTML Output =================
   return `
     <!DOCTYPE html>
@@ -1357,11 +1502,33 @@ const buildQuotationHtmlTemplate = (
       <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;700;900&display=swap" rel="stylesheet">
       <style>
         @page { size: A4; margin: 0; }
-        body { font-family: 'Tajawal', sans-serif; margin: 0; padding: 0; color: #123f59; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; background-color: #e8edf0; }
-        .page-container { width: 794px; min-height: 1123px; padding: 60px 70px; box-sizing: border-box; background-color: #ffffff; position: relative; page-break-after: always; overflow: hidden; background-image: ${finalBgUrl}; background-size: 794px 1123px; background-repeat: repeat-y; background-position: top center; box-shadow: 0 15px 40px rgba(0,0,0,0.12); }
-        @media print { .page-container { box-shadow: none; min-height: 100vh; } }
-        .content { position: relative; z-index: 1; width: 100%; }
-        table { width: 100%; border-collapse: collapse; margin-bottom: 24px; font-size: 10.5px; }
+        body, html { height: 100%; margin: 0; padding: 0; font-family: 'Tajawal', sans-serif; color: #123f59; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+        
+        /* 🚀 1. كلاس الخلفية الثابتة لملء كل الصفحات 🚀 */
+        .fixed-print-bg {
+          position: fixed;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100vh;
+          background-image: ${finalBgUrl};
+          background-size: 100% 100%;
+          background-repeat: no-repeat;
+          background-position: center;
+          z-index: -10; /* لجعلها خلف كل شيء */
+        }
+
+        /* تعديل الحاوية لإزالة الخلفية منها */
+        .page-container { 
+          width: 100%; /* استخدام 100% بدلاً من البيكسل لتتوافق مع هوامش Gotenberg */
+          box-sizing: border-box; 
+          position: relative; 
+          page-break-after: always; 
+          background-color: transparent !important; /* مهم جداً */
+          box-shadow: none !important;
+        }
+        
+        table { width: 100%; border-collapse: collapse; margin-bottom: 24px; font-size: 10.5px; height: 100%; } /* إعطاء الجدول ارتفاع 100% */
         .avoid-break { break-inside: avoid; page-break-inside: avoid; }
         .bg-slate-50 { background-color: #f8fafc; }
         .text-slate-500 { color: #64748b; }
@@ -1374,7 +1541,7 @@ const buildQuotationHtmlTemplate = (
       </style>
     </head>
     <body>
-      
+      <div class="fixed-print-bg"></div>
       <div class="page-container" style="display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 80px;">
         
         <div style="position: absolute; top: 32px; left: 32px; z-index: 20;">
@@ -1790,13 +1957,15 @@ const buildQuotationHtmlTemplate = (
                   </table>
                 </div>
 
+                ${timelineHTML}
+
                 ${
                   (paymentsList && paymentsList.length > 0) ||
                   (acceptedMethodsList && acceptedMethodsList.length > 0)
                     ? `
                 <div class="avoid-break bg-transparent" style="margin-bottom: 24px;">
                   <h4 style="margin: 0 0 8px 0; font-size: 11.5px; font-weight: 900; display: flex; align-items: center; gap: 6px; color: ${accentColor};">
-                     ${icons.fileText} ${signatureMethod !== "SELF" ? "خامساً" : "رابعاً"}: الجدول الزمني للدفعات المالية
+                     ${icons.dollarSign} ${signatureMethod !== "SELF" ? "سادساً" : "خامساً"}: الجدول الزمني للدفعات المالية
                   </h4>
                   <table style="width: 100%; border-collapse: collapse; text-align: center; font-size: 10.5px; border: 1px solid ${accentColor}; background-color: transparent; margin-bottom: 0;">
                     <thead style="background-color: ${accentColor}; color: #fff; font-weight: 900;">
@@ -1847,12 +2016,12 @@ const buildQuotationHtmlTemplate = (
                     ? `
                 <div class="avoid-break bg-transparent" style="margin-bottom: 24px;">
                   <h4 style="margin: 0 0 12px 0; font-size: 11.5px; font-weight: 900; display: flex; align-items: center; gap: 6px; color: ${accentColor};">
-                     ${icons.folderOpen} ${signatureMethod !== "SELF" ? "سادساً" : "خامساً"}: المستندات والمسوغات المطلوب توفيرها من طرفكم لبدء العمل
+                     ${icons.folderOpen} ${signatureMethod !== "SELF" ? "سابعاً" : "سادساً"}: المستندات والمسوغات المطلوب توفيرها من طرفكم لبدء العمل
                   </h4>
                   <div style="border: 1px solid rgba(18,63,89,0.2); border-radius: 14px; background-color: transparent; overflow: hidden; box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);">
                     <div style="background-color: rgba(18,63,89,0.04); padding: 10px 16px; border-bottom: 1px solid rgba(18,63,89,0.13); display: flex; align-items: center; gap: 8px;">
                       ${icons.alertTriangle}
-                      <span style="color: ${accentColor}; font-weight: 900; font-size: 10px;">نأمل منكم التكرم بتجهيز المستندات التالية وتسليمها للمكتب ليتسنى لنا البدء في تنفيذ الأعمال:</span>
+                      <span style="color: ${accentColor}; font-weight: 900; font-size: 10px;">نأمل منكم التكرم بتجهيز المستندات التالية وتسليمها إلي الطرف الأول ليتسنى لنا البدء في تنفيذ الأعمال:</span>
                     </div>
                     <div style="padding: 16px;">
                       <div style="display: flex; flex-direction: column; gap: 8px;">
@@ -1878,7 +2047,7 @@ const buildQuotationHtmlTemplate = (
 
                 <div class="avoid-break bg-transparent" style="margin-bottom: 32px;">
                   <h4 style="margin: 0 0 8px 0; font-size: 11.5px; font-weight: 900; color: ${accentColor};">
-                     ${signatureMethod !== "SELF" ? "سابعاً" : "سادساً"}: الشروط والأحكام والالتزامات العامة
+                     ${signatureMethod !== "SELF" ? "ثامناً" : "سابعاً"}: الشروط والأحكام والالتزامات العامة
                   </h4>
                   <div style="background-color: rgba(248, 250, 252, 0.3); padding: 8px; border-radius: 4px; border: 1px solid #f1f5f9; font-size: 11px; font-weight: bold; color: #475569; line-height: 24px; white-space: pre-wrap; text-align: right;">${termsText || "خاضع للشروط العامة المسجلة بالمكتب."}</div>
                 </div>
@@ -1897,8 +2066,8 @@ const buildQuotationHtmlTemplate = (
                   <table style="border: 2px solid ${accentColor}; font-size: 10px; width: 100%; table-layout: fixed; background: transparent;">
                     <thead style="background-color: ${accentColor}; color: #fff; font-weight: 900; font-size: 11.5px; text-align: center;">
                       <tr>
-                        <th style="width: 50%; padding: 10px; border-left: 1px solid rgba(18,63,89,0.267);">الطرف الثاني: قبول وتوقيع العميل / ${signatureMethod === "AUTHORIZED" ? "المفوض" : signatureMethod === "AGENT" ? "الوكيل" : signatureMethod === "BENEFICIARY" ? "المستفيد" : "المالك"}</th>
-                        <th style="width: 50%; padding: 10px;">الطرف الأول: اعتماد وختم مقدم الخدمة (المكتب)</th>
+                        <th style="width: 50%; padding: 10px; border-left: 1px solid rgba(18,63,89,0.267);">الطرف الثاني: اعتماد المالك أو المستفيد أو من يمثله</th>
+                        <th style="width: 50%; padding: 10px;">الطرف الأول: اعتماد مقدم الخدمة</th>
                       </tr>
                     </thead>
                     <tbody class="font-bold text-[#123f59]">
@@ -1943,7 +2112,7 @@ const buildQuotationHtmlTemplate = (
                             ${showFirstPartyEmpId ? `<div><span style="color: #64748b; font-weight: bold;">الرقم الوظيفي:</span> <span class="font-mono" style="font-weight: 900; color: #1e293b;">${firstPartyEmpCode || "__________________"}</span></div>` : ""}
                             
                             <div style="margin-top: 24px; text-align: center; color: #94a3b8; font-weight: bold;">
-                              التوقيع الشخصي والختم:<br/>
+                              التوقيع الشخصي :<br/>
                               ${firstPartySignatureType === "SYSTEM" && employeeSignatureUrl ? `<img src="${employeeSignatureUrl}" style="height: 64px; margin-top: 8px; margin-left: auto; margin-right: auto; mix-blend-mode: multiply; object-fit: contain;" />` : `<span style="display: inline-block; margin-top: 16px;">........................................</span>`}
                             </div>
                           </div>
@@ -1959,50 +2128,146 @@ const buildQuotationHtmlTemplate = (
               <td colspan="10" style="border: none; padding: 0;"></td>
             </tr>
           </tbody>
-
           <tfoot style="display: table-footer-group;">
             <tr>
-              <td style="border: none; padding: 20px 30px;">
-                <div style="border-top: 2.5px solid ${accentColor}; padding-top: 12px; direction: ltr;">
-                  <div style="display: flex; align-items: flex-start; gap: 12px; color: ${accentColor};">
-                    
-                    ${
-                      verificationQrImage
-                        ? `<img src="${verificationQrImage}" alt="Verification QR" style="height: 16mm; width: 16mm; flex-shrink: 0; border: 1px solid #cbd5e1; border-radius: 8px; background-color: #fff; padding: 2px; box-sizing: border-box; image-rendering: -webkit-optimize-contrast; image-rendering: crisp-edges;" />`
-                        : `<div style="height: 16mm; width: 16mm; flex-shrink: 0; border: 1px dashed #cbd5e1; border-radius: 8px; background-color: rgba(248, 250, 252, 0.5); display: flex; flex-direction: column; align-items: center; justify-content: center; box-sizing: border-box;">
-                          <span style="font-size: 7px; color: #94a3b8; font-weight: 900; text-align: center; line-height: 1.2;">QR<br/>للتحقق</span>
-                         </div>`
-                    }
-                    
-                    <div style="min-width: 0; flex: 1; display: flex; flex-direction: column; justify-content: center; padding-top: 4px;">
-                      <div style="display: flex; align-items: center; justify-content: flex-end; gap: 6px; white-space: nowrap; font-size: 10.5px; font-weight: 900; line-height: 1.4; direction: rtl;">
-                        <span>📍</span>
-                        <span>حي الملك فهد - الرياض - المملكة العربية السعودية - الرمز البريدي : ١٢٢٧٤</span>
-                        <span style="opacity: 0.5;">·</span>
-                        <span>جوال : ٠٥٩٠٧٢٢٨٢٧</span>
-                        <span style="opacity: 0.5;">·</span>
-                        <span>الرقم الوطني الموحد : ٧٠٥٢٣٠٣٨٢٨</span>
-                      </div>
-                      <div style="margin-top: 4px; display: flex; align-items: center; justify-content: flex-start; gap: 4px; white-space: nowrap; font-size: 10px; font-weight: 900; line-height: 1.4; direction: ltr;">
-                        <span>📍</span>
-                        <span>King Fahd Dist - RIYADH - Kingdom of Saudi Arabia - POSTAL CODE : 12274</span>
-                        <span style="margin-left: 4px;">☎</span>
-                        <span>0590722827</span>
-                        <span style="margin-left: 4px;">- N.N:</span>
-                        <span>7052303828</span>
-                        <span style="margin-left: 4px;">✉</span>
-                        <span>info@details-consults.sa</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </td>
+              <td colspan="10" style="border: none; height: 120px; background-color: transparent;">
+                </td>
             </tr>
           </tfoot>
           
         </table>
       </div>
 
+    </body>
+    </html>
+  `;
+};
+
+// ============================================================================
+// 🌟 دالة مساعدة لتوليد قالب الفوتر الثابت أسفل كل صفحة لـ Gotenberg
+// ============================================================================
+const buildFooterHtml = (verificationQrImage, accentColor = "#123f59") => {
+  return `
+    <!DOCTYPE html>
+    <html dir="rtl" lang="ar">
+    <head>
+      <meta charset="UTF-8">
+      <style>
+        /* Gotenberg Header/Footer needs explicit styles and font sizes */
+        body {
+          margin: 0;
+          padding: 0;
+          width: 100%;
+          font-family: 'Tajawal', sans-serif, system-ui;
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
+        }
+        .footer-container {
+          width: 100%;
+          padding: 0 40px; /* نفس حواف الصفحة الأساسية */
+          box-sizing: border-box;
+          font-family: 'Tajawal', sans-serif;
+        }
+        .footer-content {
+          border-top: 2.5px solid ${accentColor};
+          padding-top: 10px;
+          display: flex;
+          align-items: flex-start;
+          gap: 12px;
+          color: ${accentColor};
+          direction: ltr; /* للحفاظ على التنسيق الإنجليزي/العربي */
+          width: 100%;
+        }
+        .qr-box {
+          height: 16mm; 
+          width: 16mm; 
+          flex-shrink: 0;
+          border: 1px solid #cbd5e1; 
+          border-radius: 8px; 
+          background-color: #fff; 
+          padding: 2px;
+          box-sizing: border-box;
+          object-fit: contain;
+        }
+        .text-box {
+          flex: 1; 
+          display: flex; 
+          flex-direction: column; 
+          justify-content: center; 
+          padding-top: 2px;
+        }
+        .row-1 {
+          display: flex; 
+          align-items: center; 
+          justify-content: space-between; 
+          direction: rtl;
+        }
+        .address-text {
+          font-size: 8px; 
+          font-weight: 900; 
+          line-height: 1.4;
+        }
+        .page-numbers {
+          font-size: 9px;
+          font-weight: 900;
+          color: #64748b;
+          background: #f8fafc;
+          padding: 2px 8px;
+          border-radius: 4px;
+          border: 1px solid #e2e8f0;
+        }
+        .row-2 {
+          margin-top: 4px; 
+          display: flex; 
+          align-items: center; 
+          justify-content: flex-start; 
+          gap: 4px;
+          font-size: 7.5px; 
+          font-weight: 900; 
+          line-height: 1.4; 
+          direction: ltr;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="footer-container">
+        <div class="footer-content">
+          ${
+            verificationQrImage
+              ? `<img src="${verificationQrImage}" class="qr-box" />`
+              : `<div class="qr-box" style="display:flex; align-items:center; justify-content:center; text-align:center; font-size:6px; color:#94a3b8; border-style:dashed;">QR<br/>للتحقق</div>`
+          }
+          <div class="text-box">
+            <div class="row-1">
+              <div class="address-text">
+                <span>📍 حي الملك فهد - الرياض - المملكة العربية السعودية - الرمز البريدي : ١٢٢٧٤</span>
+                <span style="opacity: 0.5; margin: 0 4px;">·</span>
+                <span>جوال : ٠٥٩٠٧٢٢٨٢٧</span>
+                <span style="opacity: 0.5; margin: 0 4px;">·</span>
+                <span>الرقم الوطني الموحد : ٧٠٥٢٣٠٣٨٢٨</span>
+              </div>
+              <div class="page-numbers">
+                صفحة <span class="pageNumber"></span> من <span class="totalPages"></span>
+              </div>
+            </div>
+            <div class="row-2">
+              <span>📍 King Fahd Dist - RIYADH - Kingdom of Saudi Arabia - POSTAL CODE : 12274</span>
+              <span style="margin-left: 4px;">☎ 0590722827</span>
+              <span style="margin-left: 4px;">- N.N: 7052303828</span>
+              <span style="margin-left: 4px;">✉ info@details-consults.sa</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <script>
+        // سكريبت لتحويل أرقام الصفحات إلى عربي
+        const arabicDigits = (str) => String(str).replace(/[0-9]/g, d => "٠١٢٣٤٥٦٧٨٩"[d]);
+        setTimeout(() => {
+          document.querySelectorAll('.pageNumber, .totalPages').forEach(el => {
+            el.textContent = arabicDigits(el.textContent);
+          });
+        }, 0);
+      </script>
     </body>
     </html>
   `;
@@ -2017,22 +2282,29 @@ const generatePdfPreview = async (req, res) => {
     // إنشاء قالب الـ HTML (مسودة - بدون QR)
     const htmlContent = buildQuotationHtmlTemplate(data, "", data.employeeName);
 
+    const footerHtml = buildFooterHtml("", "#123f59");
+
     const form = new FormData();
     form.append("files", Buffer.from(htmlContent, "utf-8"), {
       filename: "index.html",
       contentType: "text/html",
     });
+    form.append("files", Buffer.from(footerHtml, "utf-8"), {
+      filename: "footer.html",
+      contentType: "text/html",
+    });
     form.append("paperWidth", "8.27");
     form.append("paperHeight", "11.69");
     form.append("marginTop", "0");
-    form.append("marginBottom", "0");
     form.append("marginLeft", "0");
     form.append("marginRight", "0");
+
+    form.append("marginBottom", "1.18");
     form.append("printBackground", "true");
     form.append("waitDelay", "1.5s");
 
     const response = await axios.post(
-      "http://gotenberg:3000/forms/chromium/convert/html",
+      "http://127.0.0.1/:3000/forms/chromium/convert/html",
       form,
       {
         headers: { ...form.getHeaders() },
@@ -2108,22 +2380,28 @@ const generateAndSavePdf = async (req, res) => {
       data.employeeName,
     );
 
+    const footerHtml = buildFooterHtml(verificationQrImage, "#123f59");
+
     const form = new FormData();
     form.append("files", Buffer.from(htmlContent, "utf-8"), {
       filename: "index.html",
       contentType: "text/html",
     });
+    form.append("files", Buffer.from(footerHtml, "utf-8"), {
+      filename: "footer.html",
+      contentType: "text/html",
+    });
     form.append("paperWidth", "8.27");
     form.append("paperHeight", "11.69");
     form.append("marginTop", "0");
-    form.append("marginBottom", "0");
     form.append("marginLeft", "0");
     form.append("marginRight", "0");
+    form.append("marginBottom", "1.18");
     form.append("printBackground", "true");
     form.append("waitDelay", "1.5s");
 
     const response = await axios.post(
-      "http://gotenberg:3000/forms/chromium/convert/html",
+      "http://127.0.0.1:3000/forms/chromium/convert/html",
       form,
       {
         headers: { ...form.getHeaders() },
@@ -2376,6 +2654,8 @@ const approveQuotationWorkflow = async (req, res) => {
       userName,
     );
 
+    const footerHtml = buildFooterHtml(verificationQrImage, "#123f59");
+
     // 7. الاتصال بخدمة Gotenberg لتوليد الـ PDF
     console.log(
       "⏳ [BACKEND - APPROVAL] جاري إرسال الـ HTML لخدمة Gotenberg...",
@@ -2385,17 +2665,21 @@ const approveQuotationWorkflow = async (req, res) => {
       filename: "index.html",
       contentType: "text/html",
     });
+    form.append("files", Buffer.from(footerHtml, "utf-8"), {
+      filename: "footer.html",
+      contentType: "text/html",
+    });
     form.append("paperWidth", "8.27");
     form.append("paperHeight", "11.69");
     form.append("marginTop", "0");
-    form.append("marginBottom", "0");
     form.append("marginLeft", "0");
     form.append("marginRight", "0");
+    form.append("marginBottom", "1.18");
     form.append("printBackground", "true");
     form.append("waitDelay", "1.5s");
 
     const response = await axios.post(
-      "http://gotenberg:3000/forms/chromium/convert/html",
+      "http://127.0.0.1:3000/forms/chromium/convert/html",
       form,
       {
         headers: { ...form.getHeaders() },
