@@ -247,6 +247,11 @@ const createQuotation = async (req, res) => {
           templateId: data.templateId || null,
           showClientCode: data.showClientCode ?? true,
           showPropertyCode: data.showPropertyCode ?? true,
+          authDocDate: data.authDocDate ? new Date(data.authDocDate) : null,
+          authDocIssueDate: data.authDocIssueDate ? new Date(data.authDocIssueDate) : null,
+          showAuthDocIssueDate: data.showAuthDocIssueDate || false,
+          authDocExpiryDate: data.authDocExpiryDate ? new Date(data.authDocExpiryDate) : null,
+          showAuthDocExpiryDate: data.showAuthDocExpiryDate || false,
 
           firstPartyEmployee: data.firstPartyEmployeeId
             ? { connect: { id: data.firstPartyEmployeeId } }
@@ -473,15 +478,17 @@ const updateQuotation = async (req, res) => {
       ...(data.authDocNumber !== undefined && {
         authDocNumber: data.authDocNumber,
       }),
-      ...(data.authDocDate !== undefined && { authDocDate: data.authDocDate }),
+      ...(data.authDocDate !== undefined && { 
+        authDocDate: data.authDocDate ? new Date(data.authDocDate) : null 
+      }),
       ...(data.authDocIssueDate !== undefined && {
-        authDocIssueDate: data.authDocIssueDate,
+        authDocIssueDate: data.authDocIssueDate ? new Date(data.authDocIssueDate) : null,
       }),
       ...(data.showAuthDocIssueDate !== undefined && {
         showAuthDocIssueDate: data.showAuthDocIssueDate,
       }),
       ...(data.authDocExpiryDate !== undefined && {
-        authDocExpiryDate: data.authDocExpiryDate,
+        authDocExpiryDate: data.authDocExpiryDate ? new Date(data.authDocExpiryDate) : null,
       }),
       ...(data.showAuthDocExpiryDate !== undefined && {
         showAuthDocExpiryDate: data.showAuthDocExpiryDate,
@@ -1084,8 +1091,8 @@ const buildQuotationHtmlTemplate = (
 
   // ================= Helpers =================
   // تغيير ar-SA إلى en-US لطباعة الأرقام بالإنجليزية
-  const formatCurrency = (val) =>
-    Number(val || 0).toLocaleString("en-US", {
+  const formatCurrency = (value) =>
+    Number(value || 0).toLocaleString("en-US", {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     });
@@ -1493,6 +1500,33 @@ const buildQuotationHtmlTemplate = (
     `;
   }
 
+  // ================= إعدادات جدول الاعتماد العلوي (للباك إند) =================
+  const validityText = isExpired ? "غير ساري" : "ساري";
+  const validityColorHex = isExpired ? "#e11d48" : "#059669";
+
+  let firstPartyStatusText = "مسودة";
+  let firstPartyStatusColorHex = "#64748b";
+  if (status === "REJECTED" || status === "CANCELLED") {
+    firstPartyStatusText = "مرفوض / ملغي";
+    firstPartyStatusColorHex = "#e11d48";
+  } else if (isOfficeApproved || isFullyApproved) {
+    firstPartyStatusText = `معتمد بتاريخ ${issueDateParts.gregorian}`;
+    firstPartyStatusColorHex = "#123f59";
+  } else {
+    firstPartyStatusText = "في انتظار الاعتماد";
+    firstPartyStatusColorHex = "#d97706";
+  }
+
+  let secondPartyStatusText = "في انتظار الاعتماد";
+  let secondPartyStatusColorHex = "#d97706";
+  if (isFullyApproved) {
+    secondPartyStatusText = "معتمد";
+    secondPartyStatusColorHex = "#059669";
+  } else if (status === "REJECTED" || status === "CANCELLED") {
+    secondPartyStatusText = "مرفوض / ملغي";
+    secondPartyStatusColorHex = "#e11d48";
+  }
+
   // ================= HTML Output =================
   return `
     <!DOCTYPE html>
@@ -1502,7 +1536,7 @@ const buildQuotationHtmlTemplate = (
       <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;700;900&display=swap" rel="stylesheet">
       <style>
         @page { size: A4; margin: 0; }
-        body, html { height: 100%; margin: 0; padding: 0; font-family: 'Tajawal', sans-serif; color: #123f59; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+        body, html { height: 100%; margin: 0; padding: 0; font-family: Arial, sans-serif; color: #123f59; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
         
         /* 🚀 1. كلاس الخلفية الثابتة لملء كل الصفحات 🚀 */
         .fixed-print-bg {
@@ -1544,21 +1578,57 @@ const buildQuotationHtmlTemplate = (
       <div class="fixed-print-bg"></div>
       <div class="page-container" style="display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 80px;">
         
-        <div style="position: absolute; top: 32px; left: 32px; z-index: 20;">
-          <div style="padding: 8px 16px; border-radius: 12px; border: 2px solid; font-weight: 900; font-size: 12px; box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05); ${badgeStyles}">
-            ${badgeText}
-          </div>
-        </div>
+        <div style="position: absolute; top: 15px; left: 32px; right: 32px; z-index: 20;">
+          <table style="width: 100%; border-collapse: collapse; border: 2px solid ${accentColor}; background-color: rgba(255, 255, 255, 0.95); text-align: right; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);">
+            <tbody>
+              <tr>
+                <td style="width: 30%; padding: 8px; text-align: center; vertical-align: middle; border-left: 2px solid ${accentColor};">
+                  <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;">
+                    ${
+                      verificationQrImage
+                        ? `<img src="${verificationQrImage}" alt="QR" style="width: 64px; height: 64px; mix-blend-mode: multiply;" />`
+                        : `<div style="width: 56px; height: 56px; border: 1px dashed #cbd5e1; display: flex; align-items: center; justify-content: center; background-color: #f8fafc;"><span style="font-size: 8px; color: #94a3b8; font-weight: 900;">QR</span></div>`
+                    }
+                    <span style="font-size: 8px; font-weight: 900; color: #123f59; line-height: 1.2;">شركة ديتيلز كونسولتس<br/>للاستشارات الهندسية</span>
+                  </div>
+                </td>
 
-        <div style="position: absolute; top: 32px; right: 32px; z-index: 20; display: flex; flex-direction: column; align-items: center; gap: 12px; max-width: 180px;">
-          ${
-            verificationQrImage
-              ? `<img src="${verificationQrImage}" alt="Verification QR" style="height: 80px; width: 80px; flex-shrink: 0; border: 1px solid #cbd5e1; border-radius: 12px; background-color: #fff; padding: 4px; box-sizing: border-box; image-rendering: -webkit-optimize-contrast; image-rendering: crisp-edges; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);" />`
-              : `<div style="height: 80px; width: 80px; flex-shrink: 0; border: 1px dashed #cbd5e1; border-radius: 12px; background-color: rgba(248, 250, 252, 0.5); display: flex; align-items: center; justify-content: center; box-sizing: border-box;">
-                <span style="font-size: 10px; color: #94a3b8; font-weight: 900; text-align: center; line-height: 1.2;">QR<br/>للتحقق</span>
-               </div>`
-          }
-          <p style="font-size: 11px; font-weight: 900; color: #94a3b8; margin: 0; text-align: center; line-height: 1.4;">${firstPartyName || "شركة ديتيلز كونسولتس للاستشارات الهندسية"}</p>
+                <td style="width: 40%; padding: 0; vertical-align: top; border-left: 2px solid ${accentColor};">
+                  <div style="display: flex; flex-direction: column; height: 100%;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; border-bottom: 1px solid #cbd5e1; flex: 1;">
+                      <span style="font-size: 11px; font-weight: 900; color: #475569;">حالة السريان</span>
+                      <span style="font-size: 11px; font-weight: 900; color: ${validityColorHex};">${validityText}</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; border-bottom: 1px solid #cbd5e1; flex: 1;">
+                      <span style="font-size: 11px; font-weight: 900; color: #475569;">اعتماد الطرف الأول</span>
+                      <span style="font-size: 11px; font-weight: 900; color: ${firstPartyStatusColorHex};">${firstPartyStatusText}</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; flex: 1;">
+                      <span style="font-size: 11px; font-weight: 900; color: #475569;">اعتماد الطرف الثاني</span>
+                      <span style="font-size: 11px; font-weight: 900; color: ${secondPartyStatusColorHex};">${secondPartyStatusText}</span>
+                    </div>
+                  </div>
+                </td>
+
+                <td style="width: 30%; padding: 0; vertical-align: top;">
+                  <div style="display: flex; flex-direction: column; height: 100%;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; border-bottom: 1px solid #cbd5e1; flex: 1;">
+                      <span style="font-size: 11px; font-weight: 900; color: #475569;">اسم الحي</span>
+                      <span style="font-size: 11px; font-weight: 900; color: #123f59; max-width: 100px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${propertyDistrict || "---"}</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; border-bottom: 1px solid #cbd5e1; flex: 1;">
+                      <span style="font-size: 11px; font-weight: 900; color: #475569;">مساحة الأرض</span>
+                      <span style="font-size: 11px; font-family: monospace; font-weight: 900; color: #123f59;">${formatArea(totalPlotsArea)} م²</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; background-color: #f8fafc; flex: 1;">
+                      <span style="font-size: 10px; font-weight: 900; color: #475569;">إجمالي قيمة مع الضريبة</span>
+                      <span style="font-size: 12px; font-family: monospace; font-weight: 900; color: #047857;">${formatCurrency(finalPayable)}</span>
+                    </div>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
 
         <div class="content" style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 48px; margin-top: 48px; flex: 1;">
@@ -1588,11 +1658,35 @@ const buildQuotationHtmlTemplate = (
           </div>
         </div>
 
-        <div style="width: 100%; text-align: right; background-color: transparent; padding: 32px; border-radius: 24px; border: 1px solid rgba(216,180,106,0.3); box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05); box-sizing: border-box;">
+        <div style="width: 100%; text-align: center; background-color: transparent; padding: 32px; border-radius: 24px; border: 1px solid rgba(216,180,106,0.3); box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05); box-sizing: border-box;">
           <p style="font-size: 16px; font-weight: 900; color: #64748b; margin-top: 0; margin-bottom: 12px;">مقدم إلى السادة / الطرف الثاني:</p>
-          <p style="font-size: 25px; font-weight: 900; color: ${accentColor}; margin-top: 0; margin-bottom: 30px; line-height: 1.25;">${clientTitle} / ${secondPartyName || clientNameForPreview}</p>
+          <p style="font-size: 25px; font-weight: 900; color: ${accentColor}; margin-top: 0; margin-bottom: ${signatureMethod !== "SELF" ? "8px" : "30px"}; line-height: 1.25;">${clientTitle} / ${secondPartyName || clientNameForPreview}</p>
+          
+          ${
+            signatureMethod !== "SELF"
+              ? `
+          <p style="font-size: 11px; text-align:center; font-weight: 900; color: #e11d48; margin-top: 0; margin-bottom: 24px;">
+            ${[
+              (
+                authDocType === "مستند انتفاع" && customUsufructType
+                  ? customUsufructType
+                  : authDocType
+              )
+                ? `معلومات التفويض: ${authDocType === "مستند انتفاع" && customUsufructType ? customUsufructType : authDocType}`
+                : "",
+              authDocNumber ? `رقم المستند: ${authDocNumber}` : "",
+              showAuthDocExpiryDate && authDocExpiryDate
+                ? `تاريخ انتهاء المستند: ${formatDateParts(authDocExpiryDate).gregorian}`
+                : "",
+            ]
+              .filter(Boolean)
+              .join(" | ")}
+          </p>
+          `
+              : ""
+          }
 
-          <table style="width: 100%; border: none; font-size: 14px; font-weight: bold; color: #334155; margin-bottom: 0;">
+          <table style="width: 100%; border-collapse: collapse; text-align: right; font-size: 12px; font-weight: bold; color: #334155; margin-bottom: 0;">
             <tr>
               <td style="border: none; text-align: right; border-bottom: 1px dashed #cbd5e1; padding: 0 0 4px 0; width: 45%; vertical-align: top;">
                 <div style="display: flex; justify-content: space-between; padding-left: 32px;">
@@ -2309,7 +2403,7 @@ const generatePdfPreview = async (req, res) => {
       {
         headers: { ...form.getHeaders() },
         responseType: "arraybuffer",
-      }
+      },
     );
 
     const pdfBuffer = Buffer.from(response.data);
@@ -2406,7 +2500,7 @@ const generateAndSavePdf = async (req, res) => {
       {
         headers: { ...form.getHeaders() },
         responseType: "arraybuffer",
-      }
+      },
     );
 
     const pdfBuffer = Buffer.from(response.data);
@@ -2684,7 +2778,7 @@ const approveQuotationWorkflow = async (req, res) => {
       {
         headers: { ...form.getHeaders() },
         responseType: "arraybuffer",
-      }
+      },
     );
 
     // 8. حفظ ملف الـ PDF في السيرفر
