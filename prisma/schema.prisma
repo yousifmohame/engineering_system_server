@@ -1018,6 +1018,7 @@ enum TemplateType {
 enum QuotationStatus {
   DRAFT
   PENDING_APPROVAL
+  NEEDS_MODIFICATION
   APPROVED
   SENT
   ACCEPTED
@@ -1180,9 +1181,17 @@ model Quotation {
   clientTitle    ClientTitle    @default(MR)
   handlingMethod HandlingMethod @default(DIRECT)
 
+  // حقول التمثيل النظامي الإضافية
+  authDocIssueDate      DateTime?
+  showAuthDocIssueDate  Boolean?  @default(false)
+  authDocExpiryDate     DateTime?
+  showAuthDocExpiryDate Boolean?  @default(false)
+  customUsufructType    String?
+
+  // حقول الطرف الأول (المكتب)
   firstPartyRepCapacity   String?
-  showFirstPartyEmpId     Boolean @default(true)
-  firstPartySignatureType String? @default("MANUAL")
+  showFirstPartyEmpId     Boolean? @default(true)
+  firstPartySignatureType String?  @default("MANUAL")
 
   // الحالة
   status QuotationStatus @default(DRAFT)
