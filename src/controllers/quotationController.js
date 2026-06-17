@@ -6,7 +6,7 @@ const FormData = require("form-data");
 const fs = require("fs");
 const path = require("path");
 const QRCode = require("qrcode");
-
+const https = require("https");
 // ==========================================
 // 🚀 دالة: الرفع المؤقت للملفات (ترد بالمسار المؤقت)
 // ==========================================
@@ -2304,12 +2304,17 @@ const generatePdfPreview = async (req, res) => {
     form.append("waitDelay", "1.5s");
 
     const response = await axios.post(
-      "http://127.0.0.1/:3000/forms/chromium/convert/html",
+      "http://gotenberg:3000/forms/chromium/convert/html", // أو الرابط الذي تستخدمه
       form,
       {
         headers: { ...form.getHeaders() },
         responseType: "arraybuffer",
-      },
+        
+        // 🚀 الحل الجذري: تخطي فحص شهادة SSL للطلبات الداخلية
+        httpsAgent: new https.Agent({  
+          rejectUnauthorized: false 
+        }),
+      }
     );
 
     const pdfBuffer = Buffer.from(response.data);
@@ -2401,12 +2406,17 @@ const generateAndSavePdf = async (req, res) => {
     form.append("waitDelay", "1.5s");
 
     const response = await axios.post(
-      "http://127.0.0.1:3000/forms/chromium/convert/html",
+      "http://gotenberg:3000/forms/chromium/convert/html", // أو الرابط الذي تستخدمه
       form,
       {
         headers: { ...form.getHeaders() },
         responseType: "arraybuffer",
-      },
+        
+        // 🚀 الحل الجذري: تخطي فحص شهادة SSL للطلبات الداخلية
+        httpsAgent: new https.Agent({  
+          rejectUnauthorized: false 
+        }),
+      }
     );
 
     const pdfBuffer = Buffer.from(response.data);
@@ -2679,12 +2689,17 @@ const approveQuotationWorkflow = async (req, res) => {
     form.append("waitDelay", "1.5s");
 
     const response = await axios.post(
-      "http://127.0.0.1:3000/forms/chromium/convert/html",
+      "http://gotenberg:3000/forms/chromium/convert/html", // أو الرابط الذي تستخدمه
       form,
       {
         headers: { ...form.getHeaders() },
         responseType: "arraybuffer",
-      },
+        
+        // 🚀 الحل الجذري: تخطي فحص شهادة SSL للطلبات الداخلية
+        httpsAgent: new https.Agent({  
+          rejectUnauthorized: false 
+        }),
+      }
     );
 
     // 8. حفظ ملف الـ PDF في السيرفر
