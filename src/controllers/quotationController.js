@@ -1536,7 +1536,7 @@ const buildQuotationHtmlTemplate = (
       <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;700;900&display=swap" rel="stylesheet">
       <style>
         @page { size: A4; margin: 0; }
-        body, html { height: 100%; margin: 0; padding: 0; font-family: Arial, sans-serif; color: #123f59; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+        body, html { height: 100%; margin: 0; padding: 0; font-family: Helvetica, Arial, sans-serif; color: #123f59; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
         
         /* 🚀 1. كلاس الخلفية الثابتة لملء كل الصفحات 🚀 */
         .fixed-print-bg {
