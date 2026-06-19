@@ -40,6 +40,7 @@ const analyzePermitAI = async (req, res) => {
     });
 
     const fixedOffice = req.body.fixedOffice || null;
+    const processingMode = req.body.processingMode || 'INTERACTIVE'; // INTERACTIVE or BACKGROUND
     // 3. إضافة المهمة إلى طابور BullMQ لتعمل في الخلفية
     await aiQueue.add('analyze_permit_job', {
       dbJobId: aiJob.id,
@@ -47,7 +48,8 @@ const analyzePermitAI = async (req, res) => {
       filePath: tempFilePath,
       mimeType: mimeType,
       employeeId: req.user?.id,
-      fixedOffice: fixedOffice
+      fixedOffice: fixedOffice,
+      processingMode: processingMode
     });
 
     // 4. الرد فوراً للواجهة الأمامية بأن المهمة قيد المعالجة

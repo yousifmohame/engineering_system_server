@@ -85,7 +85,11 @@ const aiWorker = new Worker('AI_PROCESSING_QUEUE', async (job) => {
     
     await prisma.aiJob.update({
       where: { id: dbJobId },
-      data: { status: 'COMPLETED', completedAt: new Date() }
+      data: { 
+        status: 'COMPLETED', 
+        completedAt: new Date(),
+        result: JSON.stringify(result) // 👈 السر هنا: يجب حفظ النتيجة في الداتا بيز ليقرأها الفرونت إند
+      }
     });
 
     await updateDailyStats(true);

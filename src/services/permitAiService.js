@@ -202,64 +202,88 @@ const processPermitJob = async (jobData, updateProgress) => {
       select: { id: true, planNumber: true },
     });
 
+    // ========================================================
+    // 💡 2. نظام الدمج (Smart Merging) وتجهيز السجلات
+    // ========================================================
     const finalResults = [];
 
-    // ========================================================
-    // 💡 2. نظام الدمج (Smart Merging) وإنشاء السجلات التلقائي
-    // ========================================================
-    // 💡 نظام الحفظ التلقائي الذكي (مع اكتشاف التكرار)
     for (const permit of validatedPermits) {
       const parsedYear = parseInt(permit.year);
       const validYear = isNaN(parsedYear) ? null : parsedYear;
 
-      const finalOfficeName = fixedOffice ? fixedOffice : permit.engineeringOffice;
+      const finalOfficeName = fixedOffice
+        ? fixedOffice
+        : permit.engineeringOffice;
 
-      const [matchedClientId, matchedOfficeId, matchedDistrictId, matchedPlanId] = await Promise.all([
+      const [
+        matchedClientId,
+        matchedOfficeId,
+        matchedDistrictId,
+        matchedPlanId,
+      ] = await Promise.all([
         findBestMatchAI(permit.ownerName, dbClients, "Client/العميل"),
-        findBestMatchAI(finalOfficeName, dbOffices, "Engineering Office/المكتب الهندسي"),
+        findBestMatchAI(
+          finalOfficeName,
+          dbOffices,
+          "Engineering Office/المكتب الهندسي",
+        ),
         findBestMatchAI(permit.district, dbDistricts, "District/الحي"),
         findBestMatchAI(permit.planNumber, dbPlans, "Plan Number/المخطط"),
       ]);
 
-      // 1. البحث لمعرفة ما إذا كانت الرخصة موجودة مسبقاً
       const existingPermit = await prisma.permit.findFirst({
         where: {
           OR: [
             { permitNumber: permit.permitNumber },
             { idNumber: permit.idNumber, planNumber: permit.planNumber },
           ],
-          NOT: { permitNumber: "" }, 
+          NOT: { permitNumber: "" },
         },
       });
 
-      // 2. الحفظ دائماً في الداتا بيز (Create Always)
-      const newPermit = await prisma.permit.create({
-        data: {
-          ...permit,
-          permitNumber: permit.permitNumber || "بدون رقم",
-          ownerName: permit.ownerName || "بدون اسم",
-          notes: permit.notes || "",
-          attachmentUrl: savedAttachmentUrl, // حفظ المرفق
-          year: validYear,
-          componentsData: JSON.stringify(permit.componentsData),
-          boundariesData: JSON.stringify(permit.boundariesData),
-          linkedClientId: matchedClientId,
-          engineeringOffice: finalOfficeName,
-          linkedOfficeId: matchedOfficeId,
-          district: matchedDistrictId || permit.district,
-          planNumber: matchedPlanId || permit.planNumber,
-          source: "رفع يدوي (AI)",
-          
-          // 💡 الإضافة العبقرية: إذا كانت موجودة، نضع حالة مميزة، وإلا حالة طبيعية
-          aiStatus: existingPermit ? "مكرر - بانتظار الدمج" : "تم التحليل",
-          aiJobId: dbJobId,
-        },
-      });
-      finalResults.push({ ...newPermit, _action: "CREATED" });
+      const permitData = {
+        ...permit,
+        permitNumber: permit.permitNumber || "بدون رقم",
+        ownerName: permit.ownerName || "بدون اسم",
+        notes: permit.notes || "",
+        attachmentUrl: savedAttachmentUrl,
+        year: validYear,
+        componentsData: permit.componentsData,
+        boundariesData: permit.boundariesData,
+        linkedClientId: matchedClientId,
+        engineeringOffice: finalOfficeName,
+        linkedOfficeId: matchedOfficeId,
+        district: matchedDistrictId || permit.district,
+        planNumber: matchedPlanId || permit.planNumber,
+        source: "رفع يدوي (AI)",
+        aiStatus: existingPermit ? "مكرر - بانتظار الدمج" : "تم التحليل",
+        aiJobId: dbJobId,
+      };
+
+      // 🛑 تنفيذ الحفظ التلقائي فقط إذا كانت النية واضحة من الفرونت إند
+      if (jobData.processingMode === "BACKGROUND") {
+        const newPermit = await prisma.permit.create({
+          data: {
+            ...permitData,
+            componentsData: JSON.stringify(permitData.componentsData),
+            boundariesData: JSON.stringify(permitData.boundariesData),
+          },
+        });
+        finalResults.push(newPermit);
+      } else {
+        // في وضع المراجعة، نعيد الكائن فقط
+        finalResults.push(permitData);
+      }
     }
 
     await updateProgress(100);
-    return finalResults;
+
+    // 🚀 Enterprise Pattern: إرجاع كائن يصف الحالة بوضوح وليس مجرد داتا
+    return {
+      status:
+        jobData.processingMode === "BACKGROUND" ? "AUTO_SAVED" : "NEEDS_REVIEW",
+      data: finalResults,
+    };
   } finally {
     // 🧹 تنظيف الملف المؤقت فقط (النسخة الدائمة أصبحت في مجلد الرخص بأمان)
     if (filePath && fs.existsSync(filePath)) {

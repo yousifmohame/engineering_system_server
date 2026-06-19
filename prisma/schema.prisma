@@ -4079,6 +4079,8 @@ model AiJob {
   // حفظ الأخطاء إن وجدت لكي يقرأها المبرمج أو تظهر في لوحة التحكم
   errorMessage String? @db.Text
 
+  result String? @db.Text
+
   // من هو الموظف الذي طلب هذا التحليل؟ (لإرسال إشعار له عند الانتهاء)
   requestedBy String?
 
