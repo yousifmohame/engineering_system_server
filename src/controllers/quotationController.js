@@ -1096,42 +1096,44 @@ const buildQuotationHtmlTemplate = (
   } = data;
 
   const getLocalImageAsBase64 = (imagePath) => {
-  if (!imagePath) return "";
+    if (!imagePath) return "";
 
-  // 1. إذا كانت الصورة محفوظة كـ Base64 مسبقاً في قاعدة البيانات
-  if (imagePath.startsWith("data:image")) {
-    return imagePath;
-  }
-
-  try {
-    let cleanPath = imagePath;
-
-    // 2. إذا كانت مسجلة كرابط كامل (http://...) نستخرج المسار المحلي فقط
-    if (imagePath.startsWith("http")) {
-      const urlObj = new URL(imagePath);
-      cleanPath = urlObj.pathname; // النتيجة: /uploads/clients/logo.png
+    // 1. إذا كانت الصورة محفوظة كـ Base64 مسبقاً في قاعدة البيانات
+    if (imagePath.startsWith("data:image")) {
+      return imagePath;
     }
 
-    // 3. تنظيف المسار من /api (إن وجدت) والشرطة المائلة في البداية
-    cleanPath = cleanPath.replace('/api', '').replace(/^\/+/, '');
+    try {
+      let cleanPath = imagePath;
 
-    // 4. بناء المسار الكامل داخل السيرفر (بافتراض أن مجلد uploads في الجذر)
-    const absolutePath = path.join(__dirname, '../../', cleanPath);
+      // 2. إذا كانت مسجلة كرابط كامل (http://...) نستخرج المسار المحلي فقط
+      if (imagePath.startsWith("http")) {
+        const urlObj = new URL(imagePath);
+        cleanPath = urlObj.pathname; // النتيجة: /uploads/clients/logo.png
+      }
 
-    // 5. قراءة الصورة من السيرفر وتحويلها لـ Base64
-    if (fs.existsSync(absolutePath)) {
-      const ext = path.extname(absolutePath).substring(1) || 'png';
-      const base64Data = fs.readFileSync(absolutePath, { encoding: 'base64' });
-      return `data:image/${ext};base64,${base64Data}`;
-    } else {
-      console.log("⚠️ [PDF Builder] Logo not found on disk:", absolutePath);
+      // 3. تنظيف المسار من /api (إن وجدت) والشرطة المائلة في البداية
+      cleanPath = cleanPath.replace("/api", "").replace(/^\/+/, "");
+
+      // 4. بناء المسار الكامل داخل السيرفر (بافتراض أن مجلد uploads في الجذر)
+      const absolutePath = path.join(__dirname, "../../", cleanPath);
+
+      // 5. قراءة الصورة من السيرفر وتحويلها لـ Base64
+      if (fs.existsSync(absolutePath)) {
+        const ext = path.extname(absolutePath).substring(1) || "png";
+        const base64Data = fs.readFileSync(absolutePath, {
+          encoding: "base64",
+        });
+        return `data:image/${ext};base64,${base64Data}`;
+      } else {
+        console.log("⚠️ [PDF Builder] Logo not found on disk:", absolutePath);
+      }
+    } catch (err) {
+      console.error("❌ [PDF Builder] Error converting image:", err.message);
     }
-  } catch (err) {
-    console.error("❌ [PDF Builder] Error converting image:", err.message);
-  }
 
-  return ""; // إرجاع فارغ إذا فشل كل شيء
-};
+    return ""; // إرجاع فارغ إذا فشل كل شيء
+  };
 
   const quotationId = data.quotationId || data.id;
   const referenceNumber =
@@ -1586,17 +1588,19 @@ const buildQuotationHtmlTemplate = (
     secondPartyStatusColorHex = "#e11d48";
   }
 
+  const fontUrlName = fontFamily ? fontFamily.replace(/\s+/g, "+") : "Tajawal";
+
   // ================= HTML Output =================
   return `
     <!DOCTYPE html>
     <html dir="rtl" lang="ar">
     <head>
       <meta charset="UTF-8">
-      <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;700;900&display=swap" rel="stylesheet">
+      <link href="https://fonts.googleapis.com/css2?family=${fontUrlName}:wght@400;700;900&display=swap" rel="stylesheet">
       <style>
         @page { size: A4; margin: 0; }
+        /* 🚀 تطبيق الخط الديناميكي */
         body, html { height: 100%; margin: 0; padding: 0; font-family: '${fontFamily}', sans-serif; color: #123f59; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-        
         /* 🚀 1. كلاس الخلفية الثابتة لملء كل الصفحات 🚀 */
         .fixed-print-bg {
           position: fixed;
@@ -2303,27 +2307,31 @@ const buildQuotationHtmlTemplate = (
 // ============================================================================
 // 🌟 دالة مساعدة لتوليد قالب الفوتر الثابت أسفل كل صفحة لـ Gotenberg
 // ============================================================================
-const buildFooterHtml = (verificationQrImage, accentColor = "#123f59") => {
+const buildFooterHtml = (verificationQrImage, accentColor = "#123f59", fontFamily = "Tajawal") => {
+  const fontUrlName = fontFamily.replace(/\s+/g, '+');
+
   return `
     <!DOCTYPE html>
     <html dir="rtl" lang="ar">
     <head>
       <meta charset="UTF-8">
+      <link href="https://fonts.googleapis.com/css2?family=${fontUrlName}:wght@400;700;900&display=swap" rel="stylesheet">
       <style>
-        /* Gotenberg Header/Footer needs explicit styles and font sizes */
         body {
           margin: 0;
           padding: 0;
           width: 100%;
-          font-family: 'Tajawal', sans-serif, system-ui;
+          /* 🚀 تطبيق الخط الديناميكي */
+          font-family: '${fontFamily}', sans-serif, system-ui;
           -webkit-print-color-adjust: exact !important;
           print-color-adjust: exact !important;
         }
         .footer-container {
           width: 100%;
-          padding: 0 40px; /* نفس حواف الصفحة الأساسية */
+          padding: 0 40px;
           box-sizing: border-box;
-          font-family: 'Tajawal', sans-serif;
+          /* 🚀 تطبيق الخط الديناميكي */
+          font-family: '${fontFamily}', sans-serif;
         }
         .footer-content {
           border-top: 2.5px solid ${accentColor};
@@ -2443,7 +2451,7 @@ const generatePdfPreview = async (req, res) => {
     // إنشاء قالب الـ HTML (مسودة - بدون QR)
     const htmlContent = buildQuotationHtmlTemplate(data, "", data.employeeName);
 
-    const footerHtml = buildFooterHtml("", "#123f59");
+    const footerHtml = buildFooterHtml("", "#123f59", data.fontFamily || "Tajawal");
 
     const form = new FormData();
     form.append("files", Buffer.from(htmlContent, "utf-8"), {
@@ -2541,7 +2549,7 @@ const generateAndSavePdf = async (req, res) => {
       data.employeeName,
     );
 
-    const footerHtml = buildFooterHtml(verificationQrImage, "#123f59");
+    const footerHtml = buildFooterHtml(verificationQrImage, "#123f59", data.fontFamily || "Tajawal");
 
     const form = new FormData();
     form.append("files", Buffer.from(htmlContent, "utf-8"), {
@@ -2815,7 +2823,7 @@ const approveQuotationWorkflow = async (req, res) => {
       userName,
     );
 
-    const footerHtml = buildFooterHtml(verificationQrImage, "#123f59");
+    const footerHtml = buildFooterHtml(verificationQrImage, "#123f59" ,data.fontFamily || "Tajawal");
 
     // 7. الاتصال بخدمة Gotenberg لتوليد الـ PDF
     console.log(
