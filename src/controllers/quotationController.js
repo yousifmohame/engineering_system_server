@@ -1095,13 +1095,43 @@ const buildQuotationHtmlTemplate = (
     showSummaryTable = true,
   } = data;
 
-  const getAbsoluteUrl = (url) => {
-    if (!url) return "";
-    if (url.startsWith("http")) return url;
-    const baseUrl =
-      process.env.BACKEND_URL || "https://details-worksystem1.com";
-    return `${baseUrl}${url}`;
-  };
+  const getLocalImageAsBase64 = (imagePath) => {
+  if (!imagePath) return "";
+
+  // 1. إذا كانت الصورة محفوظة كـ Base64 مسبقاً في قاعدة البيانات
+  if (imagePath.startsWith("data:image")) {
+    return imagePath;
+  }
+
+  try {
+    let cleanPath = imagePath;
+
+    // 2. إذا كانت مسجلة كرابط كامل (http://...) نستخرج المسار المحلي فقط
+    if (imagePath.startsWith("http")) {
+      const urlObj = new URL(imagePath);
+      cleanPath = urlObj.pathname; // النتيجة: /uploads/clients/logo.png
+    }
+
+    // 3. تنظيف المسار من /api (إن وجدت) والشرطة المائلة في البداية
+    cleanPath = cleanPath.replace('/api', '').replace(/^\/+/, '');
+
+    // 4. بناء المسار الكامل داخل السيرفر (بافتراض أن مجلد uploads في الجذر)
+    const absolutePath = path.join(__dirname, '../../', cleanPath);
+
+    // 5. قراءة الصورة من السيرفر وتحويلها لـ Base64
+    if (fs.existsSync(absolutePath)) {
+      const ext = path.extname(absolutePath).substring(1) || 'png';
+      const base64Data = fs.readFileSync(absolutePath, { encoding: 'base64' });
+      return `data:image/${ext};base64,${base64Data}`;
+    } else {
+      console.log("⚠️ [PDF Builder] Logo not found on disk:", absolutePath);
+    }
+  } catch (err) {
+    console.error("❌ [PDF Builder] Error converting image:", err.message);
+  }
+
+  return ""; // إرجاع فارغ إذا فشل كل شيء
+};
 
   const quotationId = data.quotationId || data.id;
   const referenceNumber =
@@ -1352,18 +1382,28 @@ const buildQuotationHtmlTemplate = (
     typeof data.acceptedMethods === "string"
       ? JSON.parse(data.acceptedMethods)
       : data.acceptedMethods || ["bank"];
+
   let bankAccountsHTML = "";
   if (acceptedMethodsList.includes("bank") && selectedBankAccounts.length > 0) {
     const bankRows = selectedBankAccounts.map((bankId) => {
       const bank = bankAccountsData.find((b) => b.id === bankId);
       if (!bank) return "";
-      const absoluteBankLogo = getAbsoluteUrl(bank.logo);
+
+      // 🌟 التعديل الحاسم هنا:
+      // 1. استخدام bank.bankLogo بدلاً من bank.logo
+      // 2. تحويل الصورة إلى Base64 لضمان رؤية Gotenberg لها
+      const base64BankLogo = getLocalImageAsBase64(bank.bankLogo);
+
       return `
         <tr style="background-color: transparent;">
           <td style="padding: 8px; border: 1px solid #e2e8f0; text-align: center; vertical-align: middle;">
              <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;">
-                ${absoluteBankLogo ? `<img src="${absoluteBankLogo}" style="width: 24px; height: 24px; object-fit: contain; flex-shrink: 0;" />` : `<div style="width: 20px; height: 20px; color:#94a3b8;">${icons.building}</div>`}
-                <span style="font-weight: 900; color: #123f59; font-size: 10.5px;">${bank.name || bank.bankName}</span>
+                ${
+                  base64BankLogo
+                    ? `<img src="${base64BankLogo}" style="width: 24px; height: 24px; object-fit: contain; flex-shrink: 0;" />`
+                    : `<div style="width: 20px; height: 20px; color:#94a3b8;">🏦</div>`
+                }
+                <span style="font-weight: 900; color: #123f59; font-size: 10.5px;">${bank.bankName || bank.name}</span>
              </div>
           </td>
           <td style="padding: 8px; border: 1px solid #e2e8f0; text-align: center; vertical-align: middle; color: #475569; font-size: 10.5px; line-height: 1.625;">
@@ -1596,7 +1636,9 @@ const buildQuotationHtmlTemplate = (
     <body>
       <div class="fixed-print-bg"></div>
       <div class="page-container" style="display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 80px;">
-        ${showSummaryTable ? `
+        ${
+          showSummaryTable
+            ? `
         <div style="position: absolute; bottom: -120px; left: 32px; right: 32px; z-index: 20;">
           <table style="width: 100%; border-collapse: collapse; border: 2px solid ${accentColor}; background-color: rgba(255, 255, 255, 0.95); text-align: right; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);">
             <tbody>
@@ -1649,7 +1691,9 @@ const buildQuotationHtmlTemplate = (
             </tbody>
           </table>
         </div>
-        ` : ""}
+        `
+            : ""
+        }
         <div class="content" style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 48px; margin-top: 48px; flex: 1;">
           <div style="width: 300px; display: flex; align-items: center; justify-content: center;">
             <img src="${logoUrl}" alt="Logo" style="max-height: 100%; max-width: 100%; mix-blend-mode: multiply; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.1));" />
@@ -2393,7 +2437,8 @@ const generatePdfPreview = async (req, res) => {
     const data = req.body;
 
     if (!data.signatureMethod) {
-       data.signatureMethod = (data.client?.representative || data.repName) ? "AUTHORIZED" : "SELF";
+      data.signatureMethod =
+        data.client?.representative || data.repName ? "AUTHORIZED" : "SELF";
     }
     // إنشاء قالب الـ HTML (مسودة - بدون QR)
     const htmlContent = buildQuotationHtmlTemplate(data, "", data.employeeName);
@@ -2420,7 +2465,7 @@ const generatePdfPreview = async (req, res) => {
     form.append("waitDelay", "1.5s");
 
     const response = await axios.post(
-      "http://127.0.0.1:3000/forms/chromium/convert/html", // 👈 تم التعديل هنا
+      "http://gotenberg:3000/forms/chromium/convert/html", // 👈 تم التعديل هنا
       form,
       {
         headers: { ...form.getHeaders() },
