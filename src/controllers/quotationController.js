@@ -248,9 +248,13 @@ const createQuotation = async (req, res) => {
           showClientCode: data.showClientCode ?? true,
           showPropertyCode: data.showPropertyCode ?? true,
           authDocDate: data.authDocDate ? new Date(data.authDocDate) : null,
-          authDocIssueDate: data.authDocIssueDate ? new Date(data.authDocIssueDate) : null,
+          authDocIssueDate: data.authDocIssueDate
+            ? new Date(data.authDocIssueDate)
+            : null,
           showAuthDocIssueDate: data.showAuthDocIssueDate || false,
-          authDocExpiryDate: data.authDocExpiryDate ? new Date(data.authDocExpiryDate) : null,
+          authDocExpiryDate: data.authDocExpiryDate
+            ? new Date(data.authDocExpiryDate)
+            : null,
           showAuthDocExpiryDate: data.showAuthDocExpiryDate || false,
 
           firstPartyEmployee: data.firstPartyEmployeeId
@@ -478,17 +482,21 @@ const updateQuotation = async (req, res) => {
       ...(data.authDocNumber !== undefined && {
         authDocNumber: data.authDocNumber,
       }),
-      ...(data.authDocDate !== undefined && { 
-        authDocDate: data.authDocDate ? new Date(data.authDocDate) : null 
+      ...(data.authDocDate !== undefined && {
+        authDocDate: data.authDocDate ? new Date(data.authDocDate) : null,
       }),
       ...(data.authDocIssueDate !== undefined && {
-        authDocIssueDate: data.authDocIssueDate ? new Date(data.authDocIssueDate) : null,
+        authDocIssueDate: data.authDocIssueDate
+          ? new Date(data.authDocIssueDate)
+          : null,
       }),
       ...(data.showAuthDocIssueDate !== undefined && {
         showAuthDocIssueDate: data.showAuthDocIssueDate,
       }),
       ...(data.authDocExpiryDate !== undefined && {
-        authDocExpiryDate: data.authDocExpiryDate ? new Date(data.authDocExpiryDate) : null,
+        authDocExpiryDate: data.authDocExpiryDate
+          ? new Date(data.authDocExpiryDate)
+          : null,
       }),
       ...(data.showAuthDocExpiryDate !== undefined && {
         showAuthDocExpiryDate: data.showAuthDocExpiryDate,
@@ -1083,7 +1091,17 @@ const buildQuotationHtmlTemplate = (
     taxRate = 15,
     issueDate,
     timelineState,
+    fontFamily = "Tajawal", // 🌟 قراءة الخط الممرر
+    showSummaryTable = true,
   } = data;
+
+  const getAbsoluteUrl = (url) => {
+    if (!url) return "";
+    if (url.startsWith("http")) return url;
+    const baseUrl =
+      process.env.BACKEND_URL || "https://details-worksystem1.com";
+    return `${baseUrl}${url}`;
+  };
 
   const quotationId = data.quotationId || data.id;
   const referenceNumber =
@@ -1339,11 +1357,12 @@ const buildQuotationHtmlTemplate = (
     const bankRows = selectedBankAccounts.map((bankId) => {
       const bank = bankAccountsData.find((b) => b.id === bankId);
       if (!bank) return "";
+      const absoluteBankLogo = getAbsoluteUrl(bank.logo);
       return `
         <tr style="background-color: transparent;">
           <td style="padding: 8px; border: 1px solid #e2e8f0; text-align: center; vertical-align: middle;">
              <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;">
-                ${bank.logo ? `<img src="${bank.logo}" style="width: 24px; height: 24px; object-fit: contain; flex-shrink: 0;" />` : `<div style="width: 20px; height: 20px; color:#94a3b8;">${icons.building}</div>`}
+                ${absoluteBankLogo ? `<img src="${absoluteBankLogo}" style="width: 24px; height: 24px; object-fit: contain; flex-shrink: 0;" />` : `<div style="width: 20px; height: 20px; color:#94a3b8;">${icons.building}</div>`}
                 <span style="font-weight: 900; color: #123f59; font-size: 10.5px;">${bank.name || bank.bankName}</span>
              </div>
           </td>
@@ -1536,7 +1555,7 @@ const buildQuotationHtmlTemplate = (
       <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;700;900&display=swap" rel="stylesheet">
       <style>
         @page { size: A4; margin: 0; }
-        body, html { height: 100%; margin: 0; padding: 0; font-family: 'Tajawal', sans-serif; color: #123f59; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+        body, html { height: 100%; margin: 0; padding: 0; font-family: '${fontFamily}', sans-serif; color: #123f59; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
         
         /* 🚀 1. كلاس الخلفية الثابتة لملء كل الصفحات 🚀 */
         .fixed-print-bg {
@@ -1545,11 +1564,11 @@ const buildQuotationHtmlTemplate = (
           left: 0;
           width: 100%;
           height: 100vh;
-          background-image: ${finalBgUrl};
+          background-image: ${SECURITY_BACKGROUNDS[bgType] || SECURITY_BACKGROUNDS["none"]};
           background-size: 100% 100%;
           background-repeat: no-repeat;
           background-position: center;
-          z-index: -10; /* لجعلها خلف كل شيء */
+          z-index: -10;
         }
 
         /* تعديل الحاوية لإزالة الخلفية منها */
@@ -1577,8 +1596,8 @@ const buildQuotationHtmlTemplate = (
     <body>
       <div class="fixed-print-bg"></div>
       <div class="page-container" style="display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 80px;">
-        
-        <div style="position: absolute; top: 15px; left: 32px; right: 32px; z-index: 20;">
+        ${showSummaryTable ? `
+        <div style="position: absolute; bottom: -120px; left: 32px; right: 32px; z-index: 20;">
           <table style="width: 100%; border-collapse: collapse; border: 2px solid ${accentColor}; background-color: rgba(255, 255, 255, 0.95); text-align: right; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);">
             <tbody>
               <tr>
@@ -1630,7 +1649,7 @@ const buildQuotationHtmlTemplate = (
             </tbody>
           </table>
         </div>
-
+        ` : ""}
         <div class="content" style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 48px; margin-top: 48px; flex: 1;">
           <div style="width: 300px; display: flex; align-items: center; justify-content: center;">
             <img src="${logoUrl}" alt="Logo" style="max-height: 100%; max-width: 100%; mix-blend-mode: multiply; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.1));" />
@@ -2373,6 +2392,9 @@ const generatePdfPreview = async (req, res) => {
   try {
     const data = req.body;
 
+    if (!data.signatureMethod) {
+       data.signatureMethod = (data.client?.representative || data.repName) ? "AUTHORIZED" : "SELF";
+    }
     // إنشاء قالب الـ HTML (مسودة - بدون QR)
     const htmlContent = buildQuotationHtmlTemplate(data, "", data.employeeName);
 
@@ -2398,7 +2420,7 @@ const generatePdfPreview = async (req, res) => {
     form.append("waitDelay", "1.5s");
 
     const response = await axios.post(
-      "http://127.0.0.1:3000/forms/chromium/convert/html", // 👈 تم التعديل هنا
+      "http://gotenberg:3000/forms/chromium/convert/html", // 👈 تم التعديل هنا
       form,
       {
         headers: { ...form.getHeaders() },
