@@ -1392,7 +1392,7 @@ const buildQuotationHtmlTemplate = (
       // 🌟 التعديل الحاسم هنا:
       // 1. استخدام bank.bankLogo بدلاً من bank.logo
       // 2. تحويل الصورة إلى Base64 لضمان رؤية Gotenberg لها
-      const base64BankLogo = getLocalImageAsBase64(bank.bankLogo);
+      const base64BankLogo = getLocalImageAsBase64(bank.logo || bank.bankLogo);
 
       return `
         <tr style="background-color: transparent;">
