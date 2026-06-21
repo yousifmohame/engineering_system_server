@@ -7,6 +7,7 @@ const fs = require("fs");
 const path = require("path");
 const QRCode = require("qrcode");
 const https = require("https");
+const fontsBase64 = require("../utils/fontsBase64");
 // ==========================================
 // 🚀 دالة: الرفع المؤقت للملفات (ترد بالمسار المؤقت)
 // ==========================================
@@ -1588,7 +1589,11 @@ const buildQuotationHtmlTemplate = (
     secondPartyStatusColorHex = "#e11d48";
   }
 
-  const fontUrlName = fontFamily ? fontFamily.replace(/\s+/g, "+") : "Tajawal";
+  const safeFontFamily = fontFamily ? fontFamily.toLowerCase() : "tajawal";
+  const selectedFontBase64 = fontsBase64[safeFontFamily] || fontsBase64.tajawal;
+
+  // 🚀 1. تنظيف الـ Base64 من أي فواصل أسطر أو مسافات تكسر الـ CSS
+  const cleanBase64 = selectedFontBase64.replace(/[\r\n\s]+/g, "");
 
   // ================= HTML Output =================
   return `
@@ -1596,11 +1601,29 @@ const buildQuotationHtmlTemplate = (
     <html dir="rtl" lang="ar">
     <head>
       <meta charset="UTF-8">
-      <link href="https://fonts.googleapis.com/css2?family=${fontUrlName}:wght@400;700;900&display=swap" rel="stylesheet">
       <style>
+        /* 🚀 2. وضع علامات تنصيص "" حول الرابط واستخدام النص المنظف */
+        @font-face {
+          font-family: '${fontFamily}';
+          src: url("data:font/ttf;base64,${cleanBase64}") format("truetype");
+          font-weight: normal;
+          font-style: normal;
+        }
         @page { size: A4; margin: 0; }
-        /* 🚀 تطبيق الخط الديناميكي */
-        body, html { height: 100%; margin: 0; padding: 0; font-family: '${fontFamily}', sans-serif; color: #123f59; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+        
+        body, html { 
+            /* 🚀 3. تأكيد الاتجاه يمين-يسار إجبارياً */
+            direction: rtl;
+            text-align: right;
+            height: 100%; 
+            margin: 0; 
+            padding: 0; 
+            font-family: '${fontFamily}', sans-serif !important; 
+            color: #123f59; 
+            -webkit-print-color-adjust: exact !important; 
+            print-color-adjust: exact !important; 
+        }
+        
         /* 🚀 1. كلاس الخلفية الثابتة لملء كل الصفحات 🚀 */
         .fixed-print-bg {
           position: fixed;
@@ -1615,17 +1638,16 @@ const buildQuotationHtmlTemplate = (
           z-index: -10;
         }
 
-        /* تعديل الحاوية لإزالة الخلفية منها */
         .page-container { 
-          width: 100%; /* استخدام 100% بدلاً من البيكسل لتتوافق مع هوامش Gotenberg */
+          width: 100%; 
           box-sizing: border-box; 
           position: relative; 
           page-break-after: always; 
-          background-color: transparent !important; /* مهم جداً */
+          background-color: transparent !important; 
           box-shadow: none !important;
         }
         
-        table { width: 100%; border-collapse: collapse; margin-bottom: 24px; font-size: 10.5px; height: 100%; } /* إعطاء الجدول ارتفاع 100% */
+        table { width: 100%; border-collapse: collapse; margin-bottom: 24px; font-size: 10.5px; } 
         .avoid-break { break-inside: avoid; page-break-inside: avoid; }
         .bg-slate-50 { background-color: #f8fafc; }
         .text-slate-500 { color: #64748b; }
@@ -2307,22 +2329,38 @@ const buildQuotationHtmlTemplate = (
 // ============================================================================
 // 🌟 دالة مساعدة لتوليد قالب الفوتر الثابت أسفل كل صفحة لـ Gotenberg
 // ============================================================================
-const buildFooterHtml = (verificationQrImage, accentColor = "#123f59", fontFamily = "Tajawal") => {
-  const fontUrlName = fontFamily.replace(/\s+/g, '+');
+const buildFooterHtml = (
+  verificationQrImage,
+  accentColor = "#123f59",
+  fontFamily = "tajawal",
+) => {
+  const safeFontFamily = fontFamily.toLowerCase();
+  const selectedFontBase64 = fontsBase64[safeFontFamily] || fontsBase64.tajawal;
+
+  // 🚀 تنظيف الـ Base64 للفوتر أيضاً
+  const cleanBase64 = selectedFontBase64.replace(/[\r\n\s]+/g, "");
 
   return `
     <!DOCTYPE html>
     <html dir="rtl" lang="ar">
     <head>
       <meta charset="UTF-8">
-      <link href="https://fonts.googleapis.com/css2?family=${fontUrlName}:wght@400;700;900&display=swap" rel="stylesheet">
       <style>
+        /* 🚀 وضع علامات التنصيص واستخدام النص المنظف */
+        @font-face {
+          font-family: '${fontFamily}';
+          src: url("data:font/ttf;base64,${cleanBase64}") format("truetype");
+          font-weight: normal;
+          font-style: normal;
+        }
+
         body {
+          direction: rtl;
+          text-align: right;
           margin: 0;
           padding: 0;
           width: 100%;
-          /* 🚀 تطبيق الخط الديناميكي */
-          font-family: '${fontFamily}', sans-serif, system-ui;
+          font-family: '${fontFamily}', sans-serif !important;
           -webkit-print-color-adjust: exact !important;
           print-color-adjust: exact !important;
         }
@@ -2330,8 +2368,7 @@ const buildFooterHtml = (verificationQrImage, accentColor = "#123f59", fontFamil
           width: 100%;
           padding: 0 40px;
           box-sizing: border-box;
-          /* 🚀 تطبيق الخط الديناميكي */
-          font-family: '${fontFamily}', sans-serif;
+          font-family: '${fontFamily}', sans-serif !important;
         }
         .footer-content {
           border-top: 2.5px solid ${accentColor};
@@ -2451,7 +2488,11 @@ const generatePdfPreview = async (req, res) => {
     // إنشاء قالب الـ HTML (مسودة - بدون QR)
     const htmlContent = buildQuotationHtmlTemplate(data, "", data.employeeName);
 
-    const footerHtml = buildFooterHtml("", "#123f59", data.fontFamily || "Tajawal");
+    const footerHtml = buildFooterHtml(
+      "",
+      "#123f59",
+      data.fontFamily || "tajawal",
+    );
 
     const form = new FormData();
     form.append("files", Buffer.from(htmlContent, "utf-8"), {
@@ -2470,7 +2511,8 @@ const generatePdfPreview = async (req, res) => {
 
     form.append("marginBottom", "1.18");
     form.append("printBackground", "true");
-    form.append("waitDelay", "1.5s");
+    
+    // form.append("waitDelay", "1.5s");
 
     const response = await axios.post(
       "http://127.0.0.1:3000/forms/chromium/convert/html", // 👈 تم التعديل هنا
@@ -2549,7 +2591,7 @@ const generateAndSavePdf = async (req, res) => {
       data.employeeName,
     );
 
-    const footerHtml = buildFooterHtml(verificationQrImage, "#123f59", data.fontFamily || "Tajawal");
+    const footerHtml = buildFooterHtml(verificationQrImage, "#123f59", data.fontFamily || "tajawal",);
 
     const form = new FormData();
     form.append("files", Buffer.from(htmlContent, "utf-8"), {
@@ -2567,7 +2609,7 @@ const generateAndSavePdf = async (req, res) => {
     form.append("marginRight", "0");
     form.append("marginBottom", "1.18");
     form.append("printBackground", "true");
-    form.append("waitDelay", "1.5s");
+
 
     const response = await axios.post(
       "http://127.0.0.1:3000/forms/chromium/convert/html", // 👈 تم التعديل هنا
@@ -2823,7 +2865,7 @@ const approveQuotationWorkflow = async (req, res) => {
       userName,
     );
 
-    const footerHtml = buildFooterHtml(verificationQrImage, "#123f59" ,data.fontFamily || "Tajawal");
+    const footerHtml = buildFooterHtml(verificationQrImage, "#123f59", data.fontFamily || "tajawal",);
 
     // 7. الاتصال بخدمة Gotenberg لتوليد الـ PDF
     console.log(
@@ -2845,7 +2887,7 @@ const approveQuotationWorkflow = async (req, res) => {
     form.append("marginRight", "0");
     form.append("marginBottom", "1.18");
     form.append("printBackground", "true");
-    form.append("waitDelay", "1.5s");
+
 
     const response = await axios.post(
       "http://127.0.0.1:3000/forms/chromium/convert/html", // 👈 تم التعديل هنا
