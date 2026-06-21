@@ -2465,7 +2465,7 @@ const generatePdfPreview = async (req, res) => {
     form.append("waitDelay", "1.5s");
 
     const response = await axios.post(
-      "http://gotenberg:3000/forms/chromium/convert/html", // 👈 تم التعديل هنا
+      "http://127.0.0.1:3000/forms/chromium/convert/html", // 👈 تم التعديل هنا
       form,
       {
         headers: { ...form.getHeaders() },
