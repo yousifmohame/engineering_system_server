@@ -4311,7 +4311,7 @@ model PropertyDocumentArchive {
   // 🧠 القسم الأول: بيانات تعريف الوثيقة المستخرجة بالذكاء الاصطناعي 🧠
   docType           String? // صك تسجيل ملكية, وثيقة تملك عقار, صك قديم, صك محدث
   docSource         String? // السجل العقاري, وزارة العدل, البورصة العقارية, مصورة
-  documentNumber    String?   @unique // رقم الوثيقة أو الصك
+  documentNumber    String?
   propertyNumber    String? // رقم العقار (للسجل العقاري)
   versionNumber     String? // رقم النسخة
   issueDate         DateTime? // تاريخ الوثيقة

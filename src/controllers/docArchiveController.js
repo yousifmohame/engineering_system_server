@@ -214,105 +214,163 @@ exports.saveArchivedDoc = async (req, res) => {
 };
 
 // ==========================================
-// 🚀 6. دالة التحديث والاعتماد النهائي (بعد المراجعة)
+// 🚀 دالة التحديث والاعتماد النهائي (بعد مراجعة الموظف)
 // ==========================================
 exports.updateArchivedDoc = async (req, res) => {
   try {
-    const { id } = req.params; // ID الوثيقة المراد تحديثها
+    const { id } = req.params; // ID الوثيقة الفيزيائية المبدئية
     const {
-      aiData, 
-      saveAction, 
+      aiDataArray, // 👈 تم التعديل لتستقبل مصفوفة
+      saveAction,
       selectedPropertyId,
       uploadNotes,
       isFinalApproval,
-      userId
+      userId,
     } = req.body;
 
     const currentUserId = req.user?.id || req.user?.userId || userId || null;
-
-    // بما أنه اعتماد نهائي، الحالة تصبح مؤكدة
     const newDocStatus = isFinalApproval ? "CONFIRMED" : "NEEDS_REVIEW";
 
-    // تجهيز المصفوفات الجديدة
-    const propertiesToCreate = (aiData.properties || []).map(p => ({
-      city: p.city,
-      district: p.district,
-      planNumber: String(p.planNumber || ""),
-      plotNumber: String(p.plotNumber || ""),
-      area: parseFloat(p.area) || 0,
-      usageType: p.usageType,
-      propertyType: p.propertyType,
-      boundariesData: p.boundaries ? JSON.stringify(p.boundaries) : null
-    }));
+    // 1. التأكد أن الملف الأصلي موجود
+    const originalDoc = await prisma.propertyDocumentArchive.findUnique({
+      where: { id },
+    });
 
-    const ownersToCreate = (aiData.owners || []).map(o => ({
-      ownerName: o.name || "غير محدد",
-      identityNumber: o.identityNumber,
-      ownershipPercentage: parseFloat(o.percentage) || 100,
-      isMainOwner: o.isMain || false
-    }));
+    if (!originalDoc) {
+      return res
+        .status(404)
+        .json({ success: false, message: "السجل الأصلي غير موجود." });
+    }
 
-    // الحفظ داخل Transaction لضمان سلامة البيانات
-    const updatedDoc = await prisma.$transaction(async (tx) => {
-      
-      // 1. مسح العقارات والملاك القديمة المرتبطة بهذه الوثيقة لتجنب التكرار
-      await tx.archivePropertyDetail.deleteMany({ where: { documentId: id } });
-      await tx.archiveOwnerDetail.deleteMany({ where: { documentId: id } });
+    if (!Array.isArray(aiDataArray) || aiDataArray.length === 0) {
+      return res
+        .status(400)
+        .json({ success: false, message: "لم يتم إرسال بيانات للاعتماد." });
+    }
 
-      // 2. تحديث السجل الرئيسي وإضافة البيانات الجديدة
-      const doc = await tx.propertyDocumentArchive.update({
-        where: { id },
-        data: {
+    // 2. استخدام Transaction لحفظ جميع الصكوك
+    const savedDocs = await prisma.$transaction(async (tx) => {
+      // داخل docArchiveController.js -> updateArchivedDoc
+      // استبدل حلقة الـ for loop بهذا الكود الآمن:
+
+      let createdDocs = [];
+
+      for (let i = 0; i < aiDataArray.length; i++) {
+        const deedData = aiDataArray[i];
+
+        // 🛡️ حماية ضد العناصر الفارغة
+        if (!deedData || typeof deedData !== "object") continue;
+
+        // 🛡️ استخدام ?. للحماية من الـ null
+        const propertiesToCreate = (deedData?.properties || []).map((p) => ({
+          city: String(p?.city || ""),
+          district: String(p?.district || ""),
+          planNumber: String(p?.planNumber || ""),
+          plotNumber: String(p?.plotNumber || ""),
+          area: parseFloat(p?.area) || 0,
+          areaText: String(p?.areaText || ""),
+          usageType: String(p?.usageType || ""),
+          propertyType: String(p?.propertyType || ""),
+          boundariesData: p?.boundaries ? JSON.stringify(p.boundaries) : null,
+        }));
+
+        const ownersToCreate = (deedData?.owners || []).map((o) => ({
+          ownerName: String(o?.name || "غير محدد"),
+          identityNumber: String(o?.identityNumber || ""),
+          ownershipPercentage: parseFloat(o?.percentage) || 100,
+          nationality: String(o?.nationality || "سعودي"),
+          isMainOwner: Boolean(o?.isMain),
+        }));
+
+        const docData = {
           status: newDocStatus,
-          docType: aiData.basic?.docType,
-          docSource: aiData.basic?.docSource,
-          documentNumber: aiData.basic?.documentNumber,
-          propertyNumber: aiData.basic?.propertyNumber,
-          issueDate: aiData.basic?.issueDate ? new Date(aiData.basic.issueDate) : null,
-          versionNumber: aiData.basic?.versionNumber,
-          operationType: aiData.basic?.operationType,
+          docType: deedData?.basic?.docType,
+          docSource: deedData?.basic?.docSource,
+          documentNumber: deedData?.basic?.documentNumber,
+          propertyNumber: deedData?.basic?.propertyNumber,
+          issueDate: deedData?.basic?.issueDate
+            ? new Date(deedData.basic.issueDate)
+            : null,
+          versionNumber: deedData?.basic?.versionNumber,
+          operationType: deedData?.basic?.operationType,
+          previousDocNumber: deedData?.basic?.previousDocNumber,
 
-          hasRestrictions: aiData.restrictions?.hasRestrictions || "NONE",
-          restrictedTo: aiData.restrictions?.restrictedTo,
-          restrictionValue: parseFloat(aiData.restrictions?.value) || 0,
-          restrictionText: aiData.restrictions?.text,
+          hasRestrictions: deedData?.restrictions?.hasRestrictions || "NONE",
+          restrictedTo: deedData?.restrictions?.restrictedTo,
+          restrictionValue: parseFloat(deedData?.restrictions?.value) || 0,
+          restrictionText: deedData?.restrictions?.text,
 
-          aiConfidenceScore: parseFloat(aiData.aiConfidenceScore || aiData.aiConfidence) || 0,
+          aiConfidenceScore: parseFloat(deedData?.aiConfidenceScore) || 100,
+          aiNotes: deedData?.aiNotes || uploadNotes,
 
           properties: { create: propertiesToCreate },
           owners: { create: ownersToCreate },
 
-          // الربط بالمشروع إن طُلب
-          ...(saveAction === "LINK_EXISTING" && selectedPropertyId && {
-             ownership: { connect: { id: selectedPropertyId } } 
-          })
-        }
-      });
+          ...(saveAction === "LINK_EXISTING" &&
+            selectedPropertyId && {
+              ownership: { connect: { id: selectedPropertyId } },
+            }),
+        };
 
-      // 3. تسجيل حركة الاعتماد في سجل التدقيق
+        if (i === 0) {
+          // الصك الأول: نحدث السجل الأصلي
+          await tx.archivePropertyDetail.deleteMany({
+            where: { documentId: id },
+          });
+          await tx.archiveOwnerDetail.deleteMany({ where: { documentId: id } });
+
+          const updated = await tx.propertyDocumentArchive.update({
+            where: { id },
+            data: docData,
+          });
+          createdDocs.push(updated);
+        } else {
+          // الصكوك الإضافية (إذا كان الملف يحتوي عدة صكوك): ننشئ سجلات جديدة بنفس رابط الملف
+          const newDoc = await tx.propertyDocumentArchive.create({
+            data: {
+              ...docData,
+              originalFileName: `${originalDoc.originalFileName} (صك ${i + 1})`,
+              fileUrl: originalDoc.fileUrl,
+              fileType: originalDoc.fileType,
+              fileSize: originalDoc.fileSize,
+              ...(currentUserId && {
+                uploadedBy: { connect: { id: currentUserId } },
+              }),
+            },
+          });
+          createdDocs.push(newDoc);
+        }
+      }
+
+      // 3. سجل التدقيق
       if (currentUserId) {
         await tx.archiveAuditLog.create({
           data: {
-            document: { connect: { id } },
-            user: { connect: { id: currentUserId } },
+            documentId: id,
+            userId: currentUserId,
             action: "MANUAL_APPROVAL",
-            details: `تمت مراجعة واعتماد الوثيقة (${aiData.basic?.docType || 'غير مصنف'}) وحفظ التعديلات النهائية.`
-          }
+            details: `تم اعتماد ${aiDataArray.length} صك/وثيقة من الملف المرفوع.`,
+          },
         });
       }
 
-      return doc;
+      return createdDocs;
     });
 
     res.status(200).json({
       success: true,
-      message: "تم اعتماد الوثيقة وحفظ التعديلات بنجاح",
-      data: updatedDoc
+      message: `تم اعتماد وحفظ ${savedDocs.length} وثيقة بنجاح.`,
+      data: savedDocs,
     });
-
   } catch (error) {
     console.error("Update Archive Doc Error:", error);
-    res.status(500).json({ success: false, message: "فشل اعتماد الوثيقة", error: error.message });
+    res
+      .status(500)
+      .json({
+        success: false,
+        message: "فشل اعتماد الوثيقة",
+        error: error.message,
+      });
   }
 };
 

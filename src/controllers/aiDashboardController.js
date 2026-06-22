@@ -32,6 +32,7 @@ exports.getDashboardStats = async (req, res) => {
 };
 
 // جلب آخر 50 مهمة (سجل العمليات الحي)
+// جلب آخر 50 مهمة (سجل العمليات الحي)
 exports.getRecentJobs = async (req, res) => {
   try {
     const jobs = await prisma.aiJob.findMany({
@@ -45,7 +46,8 @@ exports.getRecentJobs = async (req, res) => {
         errorMessage: true,
         startedAt: true,
         completedAt: true,
-        createdAt: true
+        createdAt: true,
+        result: true // 👈 🚀 هذا هو السطر الذهبي الذي كان مفقوداً!
       }
     });
     res.status(200).json({ success: true, data: jobs });
