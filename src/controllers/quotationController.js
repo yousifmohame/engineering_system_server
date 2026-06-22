@@ -1289,7 +1289,7 @@ const buildQuotationHtmlTemplate = (
   };
 
   // ================= Client Representation =================
-  let clientRepresentationHTML = "";
+
   if (signatureMethod !== "SELF" && signatureMethod) {
     const safeClientType = clientType
       ? String(clientType).replace(/_/g, " ")
@@ -1307,11 +1307,6 @@ const buildQuotationHtmlTemplate = (
         clientRepText += `بتاريخ ${formatDateParts(authDocIssueDate).gregorian}`;
     }
     clientRepText += ".";
-    clientRepresentationHTML = `
-      <div style="margin-top: 8px; margin-bottom: 16px; display: flex; align-items: flex-start; gap: 8px; font-size: 12px; font-weight: bold; color: #334155; background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; text-align: right;">
-        <div style="flex-shrink: 0; margin-top: 2px;">${icons.scale}</div>
-        <p style="margin: 0; line-height: 1.625;">${clientRepText}</p>
-      </div>`;
   }
 
   // ================= Plots Logic =================
@@ -1661,11 +1656,11 @@ const buildQuotationHtmlTemplate = (
     </head>
     <body>
       <div class="fixed-print-bg"></div>
-      <div class="page-container" style="display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 80px;">
+      <div class="page-container" style="display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 100px;">
         ${
           showSummaryTable
             ? `
-        <div style="position: absolute; bottom: -120px; left: 32px; right: 32px; z-index: 20;">
+        <div style="position: absolute; bottom: -100px; left: 32px; right: 32px; z-index: 20;">
           <table style="width: 100%; border-collapse: collapse; border: 2px solid ${accentColor}; background-color: rgba(255, 255, 255, 0.95); text-align: right; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);">
             <tbody>
               <tr>
@@ -1842,49 +1837,40 @@ const buildQuotationHtmlTemplate = (
         <table style="width: 100%; border: none; margin: 0; position: relative; z-index: 1;">
           <thead style="display: table-header-group;">
             <tr>
-              <td style="border: none; padding: 20px 30px;">
-                <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid ${accentColor}; padding-bottom: 16px; gap: 16px;">
+              <td style="border: none; padding: 50px 60px 20px 60px;">
+                <div style="display: flex; width: 100%; justify-content: space-between; align-items: stretch; border-bottom: 3px solid ${accentColor}; padding-bottom: 16px; background-color: transparent;">
                   
-                  <div style="flex: 1; display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start;">
-                    <img src="${logoUrl}" alt="Logo" style="max-height: 64px; max-width: 192px; object-fit: contain; mix-blend-mode: multiply;" />
-                    ${
-                      subject
-                        ? `
-                    <table style="margin-top: 12px; border: none; font-size: 13px; width: 100%; table-layout: fixed;">
-                      <tr>
-                        <td style="border: 1px solid rgba(18,63,89,0.267); padding: 6px 10px; font-weight: bold; color: #475569; font-size:14px; width: 80px; background-color: rgba(248, 250, 252, 0.5);">الموضوع</td>
-                        <td style="border: 1px solid rgba(18,63,89,0.267); padding: 6px 10px; font-weight: bold; color: ${accentColor};">${subject}</td>
-                      </tr>
-                    </table>`
-                        : ""
-                    }
+                  <div style="width: 240px; flex-shrink: 0; border: 1px solid rgba(18,63,89,0.267); display: flex; flex-direction: column; justify-content: center; padding: 12px; background-color: transparent; box-sizing: border-box;">
+                    <div style="color: #475569; font-size: 10px; margin-bottom: 4px; font-weight: bold;">الموضوع</div>
+                    <div style="font-size: 13px; font-weight: bold; color: #123f59; line-height: 1.6; word-wrap: break-word;">
+                      ${subject || "—"}
+                    </div>
                   </div>
 
-                  <div style="display: flex; justify-content: center; align-items: center;">
-                    ${
-                      verificationQrImage
-                        ? `<img src="${verificationQrImage}" alt="Verification QR" style="height: 90px; width: 90px; flex-shrink: 0; border: 1px solid #cbd5e1; border-radius: 8px; background-color: #fff; padding: 2px; box-sizing: border-box; image-rendering: -webkit-optimize-contrast; image-rendering: crisp-edges;" />`
-                        : `<div style="height: 90px; width: 90px; flex-shrink: 0; border: 1px dashed #cbd5e1; border-radius: 8px; background-color: rgba(248, 250, 252, 0.5); display: flex; align-items: center; justify-content: center; box-sizing: border-box;">
-                          <span style="font-size: 9px; color: #94a3b8; font-weight: 900; text-align: center; line-height: 1.2;">QR</span>
-                        </div>`
-                    }
+                  <div style="flex: 1; display: flex; align-items: center; justify-content: center; padding: 0 16px; background-color: transparent;">
+                    <img src="${logoUrl}" alt="Logo" style="height: 64px; width: auto; max-width: 100%; object-fit: contain; mix-blend-mode: multiply;" />
                   </div>
 
-                  <div style="width: 280px; flex-shrink: 0;">
-                    <table style="width: 100%; text-align: right; border-collapse: collapse; font-size: 10px; font-weight: bold; border: 1px solid rgba(18,63,89,0.267); background: transparent; margin:0;">
-                      <tr>
-                        <td style="border: 1px solid rgba(18,63,89,0.267); width: 35%; color: #475569; padding: 8px;">نوع المستند</td>
-                        <td style="border: 1px solid rgba(18,63,89,0.267); color: ${accentColor}; font-weight: 900; font-size: 12px; padding: 8px;">${documentType || "عرض سعر خدمات فنية"}</td>
-                      </tr> 
-                      <tr>
-                        <td style="border: 1px solid rgba(18,63,89,0.267); color: #475569; padding: 8px;">التاريخ</td>
-                        <td style="border: 1px solid rgba(18,63,89,0.267); color: ${accentColor}; font-size: 8px; font-weight: bold; padding: 8px;">${issueDateParts.combined}</td>
-                      </tr>
-                      <tr>
-                        <td style="border: 1px solid rgba(18,63,89,0.267); color: #475569; padding: 8px;">رقم المرجع</td>
-                        <td style="border: 1px solid rgba(18,63,89,0.267); font-weight: 900; color: ${accentColor}; font-family: monospace; font-size: 11px; padding: 8px;">${referenceNumber}</td>
-                      </tr>
-                    </table>
+                  <div style="width: 240px; flex-shrink: 0; border: 1px solid rgba(18,63,89,0.267); display: flex; flex-direction: column; background-color: transparent; box-sizing: border-box;">
+                    
+                    <div style="display: flex; flex: 1; border-bottom: 1px solid rgba(18,63,89,0.267); background-color: transparent;">
+                      <div style="width: 85px; flex-shrink: 0; padding: 8px; border-left: 1px solid rgba(18,63,89,0.267); color: #475569; font-size: 10px; font-weight: bold; display: flex; align-items: center; background-color: transparent; box-sizing: border-box;">
+                        التاريخ
+                      </div>
+                      <div style="flex: 1; padding: 8px; font-size: 9px; font-weight: bold; color: #123f59; display: flex; align-items: center; background-color: transparent; box-sizing: border-box;">
+                        ${issueDateParts.combined}
+                      </div>
+                    </div>
+                    
+                    <div style="display: flex; flex: 1; background-color: transparent;">
+                      <div style="width: 85px; flex-shrink: 0; padding: 8px; border-left: 1px solid rgba(18,63,89,0.267); color: #475569; font-size: 10px; font-weight: bold; display: flex; align-items: center; background-color: transparent; box-sizing: border-box;">
+                        رقم المرجع
+                      </div>
+                      <div style="flex: 1; padding: 8px; font-family: monospace; font-size: 11px; font-weight: 900; color: #123f59; display: flex; align-items: center; background-color: transparent; box-sizing: border-box;">
+                        ${referenceNumber}
+                      </div>
+                    </div>
+
                   </div>
 
                 </div>
@@ -1894,7 +1880,7 @@ const buildQuotationHtmlTemplate = (
 
           <tbody style="display: table-row-group; ">
             <tr>
-              <td style="border: none; padding: 20px 30px;">
+              <td style="border: none; padding: 20px 60px;">
                 
                 <table style="width: 100%; border-collapse: collapse; text-align: right; font-size: 10px; font-weight: bold; border: 1px solid rgba(18,63,89,0.267); margin-bottom: 24px; margin-top: 16px; background: transparent;">
                   <tr>
@@ -1919,7 +1905,7 @@ const buildQuotationHtmlTemplate = (
 
                 <div class="avoid-break bg-transparent" style="margin-bottom: 24px;">
                   <h4 style="margin: 0 0 16px 0; font-size: 13px; font-weight: 900; color: ${accentColor}; text-align: right;">${clientTitle} ${secondPartyName || clientNameForPreview}</h4>
-                  ${clientRepresentationHTML}
+                  
                   <p style="margin: 12px 0; font-size: 12px; font-weight: 900; color: ${accentColor}; text-align: right;">السلام عليكم ورحمة الله وبركاته ،،,</p>
                   <div style="font-size: 11.5px; font-weight: bold; color: #475569; line-height: 24px; text-align: right; white-space: pre-wrap; letter-spacing: 0px; margin-bottom: 16px;">${introText}</div>
                 </div>
@@ -2073,34 +2059,32 @@ const buildQuotationHtmlTemplate = (
 
                 <div class="avoid-break bg-transparent" style="margin-bottom: 24px;">
                   <h4 style="margin: 0 0 8px 0; font-size: 11.5px; font-weight: 900; display: flex; align-items: center; gap: 6px; color: ${accentColor};">
-                     ${icons.fileText} ${signatureMethod !== "SELF" ? "رابعاً" : "ثالثاً"}: نطاق الأعمال و التكلفة
+                    ${icons.fileText} ${signatureMethod !== "SELF" ? "رابعاً" : "ثالثاً"}: نطاق الأعمال و التكلفة
                   </h4>
                   <table style="width: 100%; border-collapse: collapse; text-align: center; font-size: 10.5px; border: 1px solid ${accentColor}; margin-bottom: 0; table-layout: fixed; background-color: transparent;">
                     <thead style="background-color: ${accentColor}; color: #fff; font-weight: 900;" class="avoid-break">
                       <tr>
                         <th style="padding: 10px; border: 1px solid ${accentColor}; width: 5%;">م</th>
-                        <th style="padding: 10px; text-align: right; border: 1px solid ${accentColor}; width: ${showQuantity ? "80%" : "95%"};">وصف الخدمة</th>
-                        ${showQuantity ? `<th style="padding: 10px; border: 1px solid ${accentColor}; width: 15%;">الكمية</th>` : ""}
+                        <th style="padding: 10px; text-align: right; border: 1px solid ${accentColor}; width: 95%;">وصف الخدمة</th>
                       </tr>
                     </thead>
                     <tbody class="font-bold text-[#123f59]">
                       ${
                         items.length === 0
-                          ? `<tr><td colspan="${showQuantity ? "3" : "2"}" style="padding: 24px; color: #94a3b8;">لا توجد بنود فنية مسجلة حتى الآن</td></tr>`
+                          ? `<tr><td colspan="2" style="padding: 24px; color: #94a3b8; text-align: center;">لا توجد بنود فنية مسجلة حتى الآن</td></tr>`
                           : items
                               .map(
                                 (item, index) => `
                       <tr class="avoid-break">
-                        <td class="font-mono" style="padding: 8px; border: 1px solid rgba(18,63,89,0.267); vertical-align: top;">${index + 1}</td>
-                        <td class="text-right" style="padding: 8px; border: 1px solid rgba(18,63,89,0.267); line-height: 1.625; word-wrap: break-word; white-space: pre-wrap;">${item.title}</td>
-                        ${showQuantity ? `<td class="font-mono" style="padding: 8px; border: 1px solid rgba(18,63,89,0.267); vertical-align: top;">${item.qty || item.quantity || 1} ${item.unit || ""}</td>` : ""}
+                        <td class="font-mono" style="padding: 8px; border: 1px solid rgba(18,63,89,0.267); vertical-align: top; text-align: center;">${index + 1}</td>
+                        <td style="padding: 8px; text-align: right; border: 1px solid rgba(18,63,89,0.267); line-height: 1.625; word-wrap: break-word; white-space: pre-wrap;">${item.title}</td>
                       </tr>`,
                               )
                               .join("")
                       }
                       
                       <tr class="avoid-break bg-slate-50" style="background-color: rgba(248, 250, 252, 0.5);">
-                        <td colspan="${showQuantity ? "3" : "2"}" style="padding: 0; border: 1px solid rgba(18,63,89,0.267);">
+                        <td colspan="2" style="padding: 0; border: 1px solid rgba(18,63,89,0.267);">
                           <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; padding: 10px 16px; box-sizing: border-box;">
                             <span class="font-black">المجموع الفرعي</span>
                             <span class="font-mono font-black text-slate-800" style="font-size: 12px;">${formatCurrency(subtotal)} ر.س</span>
@@ -2108,7 +2092,7 @@ const buildQuotationHtmlTemplate = (
                         </td>
                       </tr>
                       <tr class="avoid-break bg-transparent">
-                        <td colspan="${showQuantity ? "3" : "2"}" style="padding: 0; border: 1px solid rgba(18,63,89,0.267);">
+                        <td colspan="2" style="padding: 0; border: 1px solid rgba(18,63,89,0.267);">
                           <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; padding: 10px 16px; box-sizing: border-box;">
                             <span style="font-weight: bold; color: #64748b;">ضريبة القيمة المضافة ${taxRate || 15}% ${officeTaxBearing > 0 ? ` (يتحمل المكتب ${officeTaxBearing}%)` : ""}</span>
                             <span class="font-mono font-bold text-slate-700" style="font-size: 12px;">${formatCurrency(taxAmount)} ر.س</span>
@@ -2119,21 +2103,21 @@ const buildQuotationHtmlTemplate = (
                         officeTaxBearing > 0
                           ? `
                       <tr class="avoid-break bg-transparent text-emerald-700">
-                        <td colspan="${showQuantity ? "3" : "2"}" style="padding: 0; border: 1px solid rgba(18,63,89,0.267);">
-                           <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; padding: 8px 16px; box-sizing: border-box;">
+                        <td colspan="2" style="padding: 0; border: 1px solid rgba(18,63,89,0.267);">
+                          <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; padding: 8px 16px; box-sizing: border-box;">
                             <span style="font-weight: bold; color: #047857;">خصم إعفاء ضريبي ضِمني (المكتب يتحمل نسبة ${officeTaxBearing}%)</span>
                             <span class="font-mono font-black" style="font-size: 12px; color: #047857;">- ${formatCurrency(calculatedOfficeDiscount)} ر.س</span>
-                           </div>
+                          </div>
                         </td>
                       </tr>`
                           : ""
                       }
                       <tr class="avoid-break font-black" style="background-color: ${accentColor}; color: #ffffff;">
-                        <td colspan="${showQuantity ? "3" : "2"}" style="padding: 0; border: 1px solid rgba(18,63,89,0.267);">
-                           <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; padding: 12px 16px; box-sizing: border-box;">
+                        <td colspan="2" style="padding: 0; border: 1px solid rgba(18,63,89,0.267);">
+                          <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; padding: 12px 16px; box-sizing: border-box;">
                             <span style="font-size: 12.5px;">الإجمالي النهائي المستحق الصافي للدفع</span>
                             <span class="font-mono" style="font-size: 13.5px;">${formatCurrency(finalPayable)} ر.س</span>
-                           </div>
+                          </div>
                         </td>
                       </tr>
                     </tbody>
@@ -2257,9 +2241,9 @@ const buildQuotationHtmlTemplate = (
                       <tr>
                         <td style="padding: 12px; vertical-align: top; border-left: 1px solid rgba(18,63,89,0.267); border-bottom: none;">
                           <div style="display: flex; flex-direction: column; gap: 12px; line-height: 1.6;">
-                            <div><span style="color: #64748b; font-weight: bold;">اسم الجهة / العميل:</span> <span style="font-weight: 900; color: #1e293b;">${clientNameForPreview}</span></div>
+                            <div><span style="color: #64748b; font-weight: bold;">اسم الجهة / العميل:</span> <span style="font-weight: 900; color: #1e293b;">${clientNameForPreview || "---"}</span></div>
                             <div><span style="color: #64748b; font-weight: bold;">يمثلها في التوقيع:</span> <span style="font-weight: 900; color: #1e293b;">${signatureMethod === "SELF" ? "المالك الفعلي ذو العلاقة" : repName || "............................"}</span></div>
-                            <div><span style="color: #64748b; font-weight: bold;">الصفة والتمثيل الكياني:</span> <span style="font-weight: 900; color: #1e293b;">${signatureMethod === "SELF" ? "عن نفسه (المالك الأصلي)" : signatureMethod === "AGENT" ? "وكيل شرعي" : signatureMethod === "AUTHORIZED" ? "م مفوض نظامي" : "مستفيد"}</span></div>
+                            <div><span style="color: #64748b; font-weight: bold;">الصفة والتمثيل الكياني:</span> <span style="font-weight: 900; color: #1e293b;">${signatureMethod === "SELF" ? "عن نفسه (المالك الأصلي)" : signatureMethod === "AGENT" ? "وكيل شرعي" : signatureMethod === "AUTHORIZED" ? "مفوض نظامي" : "مستفيد"}</span></div>
                             
                             ${
                               signatureMethod !== "SELF"
@@ -2268,15 +2252,15 @@ const buildQuotationHtmlTemplate = (
                             <div style="display: flex; flex-direction: column; gap: 4px;">
                               <div>
                                 <span style="color: #64748b; font-weight: bold;">مستند التمثيل (${authDocType === "مستند انتفاع" && customUsufructType ? customUsufructType : authDocType || "الوكالة/التفويض"}):</span> 
-                                <span class="font-mono" style="font-weight: 900; color: #164e63;">${authDocNumber ? `رقم (${authDocNumber})` : "............................"}</span>
+                                <span class="font-mono" style="font-weight: 900; color: #164e63;">${authDocNumber ? `${authDocNumber}` : "............................"}</span>
                               </div>
                               ${
                                 showAuthDocIssueDate || showAuthDocExpiryDate
                                   ? `
-                                <div style="display: flex; align-items: center; gap: 16px; font-size: 9px; margin-top: 2px;">
-                                  ${showAuthDocIssueDate && authDocIssueDate ? `<span style="color: #64748b;">تاريخ الإصدار: <span class="font-mono" style="color: #334155; font-weight: bold;">${formatDateParts(authDocIssueDate).gregorian}</span></span>` : ""}
-                                  ${showAuthDocExpiryDate && authDocExpiryDate ? `<span style="color: #64748b;">تاريخ الانتهاء: <span class="font-mono" style="color: #e11d48; font-weight: bold;">${formatDateParts(authDocExpiryDate).gregorian}</span></span>` : ""}
-                                </div>`
+                              <div style="display: flex; align-items: center; gap: 16px; font-size: 9px; margin-top: 2px;">
+                                ${showAuthDocIssueDate && authDocIssueDate ? `<span style="color: #64748b;">تاريخ الإصدار: <span class="font-mono" style="color: #334155; font-weight: bold;">${formatDateParts(authDocIssueDate).gregorian}</span></span>` : ""}
+                                ${showAuthDocExpiryDate && authDocExpiryDate ? `<span style="color: #64748b;">تاريخ الانتهاء: <span class="font-mono" style="color: #e11d48; font-weight: bold;">${formatDateParts(authDocExpiryDate).gregorian}</span></span>` : ""}
+                              </div>`
                                   : ""
                               }
                             </div>`
@@ -2330,7 +2314,6 @@ const buildQuotationHtmlTemplate = (
 // 🌟 دالة مساعدة لتوليد قالب الفوتر الثابت أسفل كل صفحة لـ Gotenberg
 // ============================================================================
 const buildFooterHtml = (
-  verificationQrImage,
   accentColor = "#123f59",
   fontFamily = "tajawal",
 ) => {
@@ -2434,11 +2417,7 @@ const buildFooterHtml = (
     <body>
       <div class="footer-container">
         <div class="footer-content">
-          ${
-            verificationQrImage
-              ? `<img src="${verificationQrImage}" class="qr-box" />`
-              : `<div class="qr-box" style="display:flex; align-items:center; justify-content:center; text-align:center; font-size:6px; color:#94a3b8; border-style:dashed;">QR<br/>للتحقق</div>`
-          }
+          
           <div class="text-box">
             <div class="row-1">
               <div class="address-text">
@@ -2462,7 +2441,6 @@ const buildFooterHtml = (
         </div>
       </div>
       <script>
-        // سكريبت لتحويل أرقام الصفحات إلى عربي
         const arabicDigits = (str) => String(str).replace(/[0-9]/g, d => "٠١٢٣٤٥٦٧٨٩"[d]);
         setTimeout(() => {
           document.querySelectorAll('.pageNumber, .totalPages').forEach(el => {
@@ -2489,7 +2467,6 @@ const generatePdfPreview = async (req, res) => {
     const htmlContent = buildQuotationHtmlTemplate(data, "", data.employeeName);
 
     const footerHtml = buildFooterHtml(
-      "",
       "#123f59",
       data.fontFamily || "tajawal",
     );
@@ -2511,11 +2488,11 @@ const generatePdfPreview = async (req, res) => {
 
     form.append("marginBottom", "1.18");
     form.append("printBackground", "true");
-    
+
     // form.append("waitDelay", "1.5s");
 
     const response = await axios.post(
-      "http://127.0.0.1:3000/forms/chromium/convert/html", // 👈 تم التعديل هنا
+      "http://gotenberg:3000/forms/chromium/convert/html", // 👈 تم التعديل هنا
       form,
       {
         headers: { ...form.getHeaders() },
@@ -2591,7 +2568,10 @@ const generateAndSavePdf = async (req, res) => {
       data.employeeName,
     );
 
-    const footerHtml = buildFooterHtml(verificationQrImage, "#123f59", data.fontFamily || "tajawal",);
+    const footerHtml = buildFooterHtml(
+      "#123f59",
+      data.fontFamily || "tajawal",
+    );
 
     const form = new FormData();
     form.append("files", Buffer.from(htmlContent, "utf-8"), {
@@ -2609,7 +2589,6 @@ const generateAndSavePdf = async (req, res) => {
     form.append("marginRight", "0");
     form.append("marginBottom", "1.18");
     form.append("printBackground", "true");
-
 
     const response = await axios.post(
       "http://127.0.0.1:3000/forms/chromium/convert/html", // 👈 تم التعديل هنا
@@ -2865,7 +2844,10 @@ const approveQuotationWorkflow = async (req, res) => {
       userName,
     );
 
-    const footerHtml = buildFooterHtml(verificationQrImage, "#123f59", data.fontFamily || "tajawal",);
+    const footerHtml = buildFooterHtml(
+      "#123f59",
+      data.fontFamily || "tajawal",
+    );
 
     // 7. الاتصال بخدمة Gotenberg لتوليد الـ PDF
     console.log(
@@ -2887,7 +2869,6 @@ const approveQuotationWorkflow = async (req, res) => {
     form.append("marginRight", "0");
     form.append("marginBottom", "1.18");
     form.append("printBackground", "true");
-
 
     const response = await axios.post(
       "http://127.0.0.1:3000/forms/chromium/convert/html", // 👈 تم التعديل هنا
