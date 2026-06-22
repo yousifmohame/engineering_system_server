@@ -1,16 +1,13 @@
 const express = require("express");
 const router = express.Router();
-const docArchiveController = require("../controllers/docArchiveController");
+const propertyController = require("../controllers/propertyController");
+const upload = require("../middleware/uploadMiddleware");
 
-// 🚀 مسار الرفع والتحليل الذكي (الجديد)
-router.post("/upload-and-analyze", docArchiveController.uploadAndAnalyzeDoc);
+router.get("/", propertyController.getAllProperties); // الدوال المحدثة
+router.post("/", propertyController.createProperty); // الدالة المصححة
+router.get("/:id", propertyController.getPropertyById);
+router.put('/:id', propertyController.updateProperty);
 
-// 💾 مسار الحفظ النهائي (بعد مراجعة الموظف)
-router.post("/", docArchiveController.saveArchivedDoc);
-
-// 📊 مسارات جلب وعرض البيانات
-router.get("/", docArchiveController.getAllArchiveDocs);
-router.get("/:id", docArchiveController.getArchiveDocById);
-router.delete("/:id", docArchiveController.deleteArchiveDoc);
+router.post('/analyze-ai', propertyController.analyzeDeedAI);
 
 module.exports = router;
