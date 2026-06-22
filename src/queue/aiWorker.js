@@ -10,7 +10,7 @@ const permitAiService = require('../services/permitAiService'); // 👈 1. تم�
 const referenceAiService = require('../services/referenceAiService');
 const aiDeviceService = require('../services/aiDeviceService');
 const contractAiService = require('../services/contractAiService');
-
+const docArchiveAiService = require('../services/docArchiveAiService');
 
 const prisma = new PrismaClient();
 
@@ -72,6 +72,10 @@ const aiWorker = new Worker('AI_PROCESSING_QUEUE', async (job) => {
 
       case 'EXTRACT_DEVICE_SPECS': // 👈 إضافة هذه الحالة
         result = await aiDeviceService.processDeviceImageJob(job.data, updateProgress);
+        break;
+
+      case 'ANALYZE_DEED_ARCHIVE':
+        result = await docArchiveAiService.processArchiveDoc(job.data, updateProgress);
         break;
 
       default:

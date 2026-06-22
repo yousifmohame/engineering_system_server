@@ -280,6 +280,9 @@ app.use('/api/technical-reports', technicalReportRoutes);
 const jobOfferRoutes = require("./routes/jobOfferRoutes");
 app.use("/api/hr/job-offers", jobOfferRoutes);
 
+const docArchiveRoutes = require("./routes/docArchiveRoutes");
+app.use("/api/doc-archive", docArchiveRoutes);
+
 const { generateQRBuffer } = require('./utils/qrGenerator');
 
 // أضف هذا المسار في منطقة المسارات العامة (قبل الـ Auth Middleware)

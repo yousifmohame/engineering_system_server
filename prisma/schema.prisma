@@ -168,14 +168,16 @@ model Employee {
   // العروض الوظيفية التي قام هذا الموظف (موظف الموارد البشرية) بإنشائها
   createdJobOffers JobOffer[] @relation("CreatedJobOffers")
 
-  documents            EmployeeDocument[] @relation("EmployeeOwnedDocs")
-  uploadedDocs         EmployeeDocument[] @relation("EmployeeUploadedDocs")
-  leaves               EmployeeLeave[]    @relation("EmployeeLeaves")
+  documents            EmployeeDocument[]        @relation("EmployeeOwnedDocs")
+  uploadedDocs         EmployeeDocument[]        @relation("EmployeeUploadedDocs")
+  leaves               EmployeeLeave[]           @relation("EmployeeLeaves")
   contracts            EmployeeContract[]
-  createdQuotations    Quotation[]        @relation("QuoteCreator")
-  approvedQuotations   Quotation[]        @relation("QuoteApprover")
-  firstPartyQuotations Quotation[]        @relation("QuoteFirstParty")
-  quotationLogs        QuotationLog[]     @relation("QuotationLogsUser")
+  createdQuotations    Quotation[]               @relation("QuoteCreator")
+  approvedQuotations   Quotation[]               @relation("QuoteApprover")
+  firstPartyQuotations Quotation[]               @relation("QuoteFirstParty")
+  quotationLogs        QuotationLog[]            @relation("QuotationLogsUser")
+  uploadedArchives     PropertyDocumentArchive[] @relation("DocUploader")
+  archiveLogs          ArchiveAuditLog[]
 }
 
 // ==================================================
@@ -598,13 +600,14 @@ model Client {
   activityLogs          ActivityLog[]
   documents             Document[]
   // داخل model Client
-  privateTransactions   PrivateTransaction[] @relation("ClientPrivateTransactions")
+  privateTransactions   PrivateTransaction[]      @relation("ClientPrivateTransactions")
   TransactionFolder     TransactionFolder[]
   transactionOwnerships TransactionOwner[]
   OfficeTask            OfficeTask[]
   archivedProjects      ArchivedProject[]
   technicalReports      TechnicalReport[]
-  quotations            Quotation[]          @relation("ClientQuotations")
+  quotations            Quotation[]               @relation("ClientQuotations")
+  archivedDocuments     PropertyDocumentArchive[]
 }
 
 model ClientClassification {
@@ -663,11 +666,12 @@ model OwnershipFile {
 
   aiLogs AIAnalysisLog[] // سجل عمليات التحليل لهذا الصك
 
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
-  OfficeTask       OfficeTask[]
-  technicalReports TechnicalReport[]
-  quotations       Quotation[]       @relation("OwnershipQuotations")
+  createdAt         DateTime                  @default(now())
+  updatedAt         DateTime                  @updatedAt
+  OfficeTask        OfficeTask[]
+  technicalReports  TechnicalReport[]
+  quotations        Quotation[]               @relation("OwnershipQuotations")
+  archivedDocuments PropertyDocumentArchive[]
 
   @@index([deedNumber])
   @@index([district])
@@ -4283,4 +4287,129 @@ model TechnicalReport {
   @@index([transactionId])
   @@index([clientId])
   @@index([ownershipId])
+}
+
+// ==========================================
+// 🚀 1. نموذج أرشيف وثائق الملكية (المستودع الرئيسي)
+// ==========================================
+model PropertyDocumentArchive {
+  id String @id @default(cuid())
+
+  // بيانات الرفع الأساسية
+  uploadDate   DateTime  @default(now())
+  uploadedById String?
+  // ✅ التعديل هنا: استخدام Employee بدلاً من User
+  uploadedBy   Employee? @relation("DocUploader", fields: [uploadedById], references: [id])
+  status       String    @default("UPLOADED") // UPLOADED, ANALYZING, ANALYZED, NEEDS_REVIEW, CONFIRMED, REJECTED, ARCHIVED
+
+  // بيانات الملف الأصلي
+  originalFileName String
+  fileUrl          String
+  fileType         String // PDF, IMAGE
+  fileSize         Float?
+
+  // 🧠 القسم الأول: بيانات تعريف الوثيقة المستخرجة بالذكاء الاصطناعي 🧠
+  docType           String? // صك تسجيل ملكية, وثيقة تملك عقار, صك قديم, صك محدث
+  docSource         String? // السجل العقاري, وزارة العدل, البورصة العقارية, مصورة
+  documentNumber    String?   @unique // رقم الوثيقة أو الصك
+  propertyNumber    String? // رقم العقار (للسجل العقاري)
+  versionNumber     String? // رقم النسخة
+  issueDate         DateTime? // تاريخ الوثيقة
+  previousDocNumber String? // رقم الوثيقة السابقة إن وجدت
+  previousDocDate   DateTime?
+  operationType     String? // نوع العملية (انتقال، رهن، إلخ)
+
+  // روابط التحقق
+  verificationUrl String? @db.Text
+  hasQrCode       Boolean @default(false)
+  hasMap          Boolean @default(false)
+
+  // ⚠️ القيود والرهن (مستوى الوثيقة)
+  hasRestrictions  String?   @default("NONE") // NONE, MORTGAGED, RESTRICTED, UNKNOWN
+  restrictionType  String?
+  restrictedTo     String? // الجهة المرتهنة
+  restrictionValue Float? // قيمة الرهن
+  restrictionDate  DateTime?
+  restrictionText  String?   @db.Text // نص القيد
+
+  // 🧠 تقرير الذكاء الاصطناعي
+  aiConfidenceScore  Float? // نسبة مئوية
+  aiMissingFields    Json? // حقول لم يستطع قراءتها
+  aiNotes            String? @db.Text
+  isDuplicateSuspect Boolean @default(false)
+
+  // 🔗 الارتباطات التشغيلية
+  ownershipId String? // إذا تم ربطها بملف ملكية قائم
+  // ✅ التعديل هنا: استخدام OwnershipFile بدلاً من Ownership
+  ownership   OwnershipFile? @relation(fields: [ownershipId], references: [id])
+  clientId    String?
+  client      Client?        @relation(fields: [clientId], references: [id])
+
+  // العلاقات الداخلية
+  properties ArchivePropertyDetail[] // القطع والعقارات داخل الوثيقة
+  owners     ArchiveOwnerDetail[] // ملاك الوثيقة
+  auditLogs  ArchiveAuditLog[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([documentNumber, propertyNumber])
+}
+
+// ==========================================
+// 🚀 2. تفاصيل العقارات/القطع داخل وثيقة الملكية
+// ==========================================
+model ArchivePropertyDetail {
+  id         String                  @id @default(cuid())
+  documentId String
+  document   PropertyDocumentArchive @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  propertyIndex String? // العقار 1 من 5
+  city          String?
+  district      String?
+  planNumber    String?
+  blockNumber   String?
+  plotNumber    String?
+  propertyType  String? // أرض، مبنى
+  usageType     String? // سكني، تجاري
+  area          Float?
+  areaText      String? // المساحة كما وردت نصاً
+
+  // الحدود الأربعة
+  boundariesData Json? // [{direction: "شمالاً", type: "شارع", desc: "شارع 20م", length: 20}]
+
+  notes String? @db.Text
+}
+
+// ==========================================
+// 🚀 3. تفاصيل الملاك داخل وثيقة الملكية
+// ==========================================
+model ArchiveOwnerDetail {
+  id         String                  @id @default(cuid())
+  documentId String
+  document   PropertyDocumentArchive @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  isMainOwner         Boolean @default(false)
+  ownerName           String
+  identityType        String? // هوية وطنية، سجل تجاري
+  identityNumber      String?
+  nationality         String?
+  ownershipPercentage Float? // نسبة التملك
+  ownerRole           String? // مالك، وريث، وكيل
+}
+
+// ==========================================
+// 🚀 4. سجل المراجعة (Audit Log)
+// ==========================================
+model ArchiveAuditLog {
+  id         String                  @id @default(cuid())
+  documentId String
+  document   PropertyDocumentArchive @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  userId    String
+  // ✅ التعديل هنا: استخدام Employee بدلاً من User
+  user      Employee @relation(fields: [userId], references: [id])
+  action    String // UPLOAD, AI_ANALYZE, MANUAL_EDIT, CONFIRM, LINK_OWNERSHIP
+  details   String?  @db.Text
+  createdAt DateTime @default(now())
 }
