@@ -2313,10 +2313,7 @@ const buildQuotationHtmlTemplate = (
 // ============================================================================
 // 🌟 دالة مساعدة لتوليد قالب الفوتر الثابت أسفل كل صفحة لـ Gotenberg
 // ============================================================================
-const buildFooterHtml = (
-  accentColor = "#123f59",
-  fontFamily = "tajawal",
-) => {
+const buildFooterHtml = (accentColor = "#123f59", fontFamily = "tajawal") => {
   const safeFontFamily = fontFamily.toLowerCase();
   const selectedFontBase64 = fontsBase64[safeFontFamily] || fontsBase64.tajawal;
 
@@ -2466,10 +2463,7 @@ const generatePdfPreview = async (req, res) => {
     // إنشاء قالب الـ HTML (مسودة - بدون QR)
     const htmlContent = buildQuotationHtmlTemplate(data, "", data.employeeName);
 
-    const footerHtml = buildFooterHtml(
-      "#123f59",
-      data.fontFamily || "tajawal",
-    );
+    const footerHtml = buildFooterHtml("#123f59", data.fontFamily || "tajawal");
 
     const form = new FormData();
     form.append("files", Buffer.from(htmlContent, "utf-8"), {
@@ -2489,10 +2483,8 @@ const generatePdfPreview = async (req, res) => {
     form.append("marginBottom", "1.18");
     form.append("printBackground", "true");
 
-    // form.append("waitDelay", "1.5s");
-
     const response = await axios.post(
-      "http://127.0.0.1:3000/forms/chromium/convert/html", // 👈 تم التعديل هنا
+      "http://gotenberg:3000/forms/chromium/convert/html", // 👈 تم التعديل هنا
       form,
       {
         headers: { ...form.getHeaders() },
@@ -2518,6 +2510,9 @@ const generatePdfPreview = async (req, res) => {
     });
   }
 };
+// ============================================================================
+// دالة: توليد وحفظ الـ PDF تلقائياً (تُستدعى عند حفظ مسودة أو عرض جديد)
+// ============================================================================
 const generateAndSavePdf = async (req, res) => {
   try {
     const data = req.body;
@@ -2528,6 +2523,16 @@ const generateAndSavePdf = async (req, res) => {
         .status(400)
         .json({ success: false, message: "معرف العرض غير موجود" });
     }
+
+    // 🚀 1. تطبيق نفس المعالجات الموجودة في دالة Preview لضمان عدم نقص البيانات
+    if (!data.signatureMethod) {
+      data.signatureMethod =
+        data.client?.representative || data.repName ? "AUTHORIZED" : "SELF";
+    }
+    data.bgType = data.bgType || "official1";
+    data.fontFamily = data.fontFamily || "tajawal";
+    data.firstPartyRep =
+      data.firstPartyRep || data.employeeName || "__________________";
 
     // توليد صورة الـ QR في حال كان العرض معتمداً
     let verificationQrImage = "";
@@ -2548,12 +2553,9 @@ const generateAndSavePdf = async (req, res) => {
       }
     }
 
-    // 🚀 التعديل هنا: إزالة `isActive` وجلب البنوك المختارة فقط (أو كل البنوك إذا لم يكن هناك تحديد)
     let bankWhereClause = {};
     if (data.selectedBankAccounts && data.selectedBankAccounts.length > 0) {
-      bankWhereClause = {
-        id: { in: data.selectedBankAccounts },
-      };
+      bankWhereClause = { id: { in: data.selectedBankAccounts } };
     }
 
     const allBanks = await prisma.bankAccount.findMany({
@@ -2561,17 +2563,14 @@ const generateAndSavePdf = async (req, res) => {
     });
     data.bankAccountsData = allBanks;
 
-    // إنشاء قالب الـ HTML (مع تمرير الـ QR)
+    // إنشاء قالب الـ HTML
     const htmlContent = buildQuotationHtmlTemplate(
       data,
       verificationQrImage,
       data.employeeName,
     );
 
-    const footerHtml = buildFooterHtml(
-      "#123f59",
-      data.fontFamily || "tajawal",
-    );
+    const footerHtml = buildFooterHtml("#123f59", data.fontFamily);
 
     const form = new FormData();
     form.append("files", Buffer.from(htmlContent, "utf-8"), {
@@ -2591,12 +2590,9 @@ const generateAndSavePdf = async (req, res) => {
     form.append("printBackground", "true");
 
     const response = await axios.post(
-      "http://127.0.0.1:3000/forms/chromium/convert/html", // 👈 تم التعديل هنا
+      "http://gotenberg:3000/forms/chromium/convert/html",
       form,
-      {
-        headers: { ...form.getHeaders() },
-        responseType: "arraybuffer",
-      },
+      { headers: { ...form.getHeaders() }, responseType: "arraybuffer" },
     );
 
     const pdfBuffer = Buffer.from(response.data);
@@ -2624,13 +2620,16 @@ const generateAndSavePdf = async (req, res) => {
       "❌ [BACKEND - CRITICAL ERROR]:",
       error.response?.data?.toString() || error.message,
     );
-    res.status(500).json({
-      success: false,
-      message: "فشل توليد وحفظ الملف",
-      error: error.message,
-    });
+    res
+      .status(500)
+      .json({
+        success: false,
+        message: "فشل توليد وحفظ الملف",
+        error: error.message,
+      });
   }
 };
+
 // ===============================================
 // دورة الاعتماد: 4. الاعتماد النهائي (توليد QR + بناء القالب الأصلي + إنشاء PDF)
 // ===============================================
@@ -2642,6 +2641,7 @@ const approveQuotationWorkflow = async (req, res) => {
     const { id } = req.params;
     const userId = req.user?.id;
     const userName = req.user?.name || "المشرف";
+    const reqData = req.body || {}; // 🚀 البيانات المرسلة من الفرونت إند (التعديلات المباشرة والإعدادات)
 
     // 1. جلب العرض بالكامل من الداتا بيز
     const quote = await prisma.quotation.findUnique({
@@ -2659,10 +2659,12 @@ const approveQuotationWorkflow = async (req, res) => {
     });
 
     if (!quote || quote.status !== "PENDING_APPROVAL") {
-      return res.status(400).json({
-        success: false,
-        message: "العرض ليس قيد المراجعة أو تم اعتماده مسبقاً",
-      });
+      return res
+        .status(400)
+        .json({
+          success: false,
+          message: "العرض ليس قيد المراجعة أو تم اعتماده مسبقاً",
+        });
     }
 
     // 2. توليد بيانات الحماية والـ QR
@@ -2715,7 +2717,6 @@ const approveQuotationWorkflow = async (req, res) => {
       return updated;
     });
 
-    // 5. 🌟 تجهيز البيانات وإرسالها للقالب الموحد
     let parsedPlots = [];
     try {
       if (quote.ownership?.plots)
@@ -2725,134 +2726,193 @@ const approveQuotationWorkflow = async (req, res) => {
             : quote.ownership.plots;
     } catch (e) {}
 
-    // ✅ جلب البنوك بدون فلتر isActive (الإصلاح السابق)
     const allBanks = await prisma.bankAccount.findMany();
     const parsedAcceptedMethods =
       typeof quote.acceptedMethods === "string"
         ? JSON.parse(quote.acceptedMethods)
         : quote.acceptedMethods || ["bank"];
 
+    // 5. 🌟 تجهيز البيانات (دمج req.body مع قاعدة البيانات للحفاظ على التعديلات الحية)
     const data = {
+      ...reqData, // 👈 دمج قوي للبيانات المرسلة من الشاشة
       quotationId: quote.id,
       transactionType:
-        quote.transactionType?.name || "خدمات هندسية واستشارية استراتيجية",
-      licenseNumber: quote.licenseNumber,
-      subject: quote.subject, // 👈 أضف هذا السطر
-      address: quote.address,
-      licenseYear: quote.licenseYear,
-      serviceNumber: quote.serviceNumber,
-      serviceYear: quote.serviceYear,
-      clientTitle: mapTitleToArabic(quote.clientTitle),
+        reqData.transactionType ||
+        quote.transactionType?.name ||
+        "خدمات هندسية واستشارية استراتيجية",
+      licenseNumber: reqData.licenseNumber || quote.licenseNumber,
+      subject: reqData.subject || quote.subject,
+      address: reqData.address || quote.address,
+      licenseYear: reqData.licenseYear || quote.licenseYear,
+      serviceNumber: reqData.serviceNumber || quote.serviceNumber,
+      serviceYear: reqData.serviceYear || quote.serviceYear,
+      clientTitle: reqData.clientTitle || mapTitleToArabic(quote.clientTitle),
       clientNameForPreview:
-        quote.client?.name?.ar || quote.client?.name || "عميل غير محدد",
-      clientCodeForPreview: quote.client?.clientCode || "---",
-      validityDays: quote.validityDays,
-      showPropertyCode: quote.showPropertyCode,
-      propertyCodeForPreview: quote.ownership?.code || "---",
-      termsText: quote.terms,
-      conclusion: quote.conclusion,
-      items: quote.items.map((i) => ({
-        title: i.title,
-        qty: i.quantity,
-        unit: i.unit,
-        price: i.unitPrice,
-        discount: i.discount,
-        discountType: i.discountType,
-        taxRate: i.taxRate,
-      })),
-      subtotal: quote.subtotal,
-      taxAmount: quote.taxAmount,
-      grandTotal: quote.total,
-      officeTaxBearing: quote.officeTaxBearing,
-      paymentsList: quote.payments.map((p) => ({
-        percentage: p.percentage,
-        amount: p.amount,
-        condition: p.dueCondition,
-        label: `الدفعة ${p.installmentNumber}`,
-      })),
+        reqData.clientNameForPreview ||
+        quote.client?.name?.ar ||
+        quote.client?.name ||
+        "عميل غير محدد",
+      clientCodeForPreview:
+        reqData.clientCodeForPreview || quote.client?.clientCode || "---",
+      validityDays: reqData.validityDays || quote.validityDays,
+      showPropertyCode: reqData.showPropertyCode ?? quote.showPropertyCode,
+      propertyCodeForPreview:
+        reqData.propertyCodeForPreview || quote.ownership?.code || "---",
+      termsText: reqData.termsText || quote.terms,
+      conclusion: reqData.conclusion || quote.conclusion,
+      items:
+        reqData.items?.length > 0
+          ? reqData.items
+          : quote.items.map((i) => ({
+              title: i.title,
+              qty: i.quantity,
+              unit: i.unit,
+              price: i.unitPrice,
+              discount: i.discount,
+              discountType: i.discountType,
+              taxRate: i.taxRate,
+            })),
+      subtotal: reqData.subtotal || quote.subtotal,
+      taxAmount: reqData.taxAmount || quote.taxAmount,
+      grandTotal: reqData.grandTotal || quote.total,
+      officeTaxBearing: reqData.officeTaxBearing || quote.officeTaxBearing,
+      paymentsList:
+        reqData.paymentsList?.length > 0
+          ? reqData.paymentsList
+          : quote.payments.map((p) => ({
+              percentage: p.percentage,
+              amount: p.amount,
+              condition: p.dueCondition,
+              label: `الدفعة ${p.installmentNumber}`,
+            })),
       showQuantity: true,
-      plots: parsedPlots,
+      plots: reqData.plots?.length > 0 ? reqData.plots : parsedPlots,
       boundaries: [],
-      employeeName: userName,
-      employeeId: userId,
-      taxRate: quote.taxRate * 100,
-      acceptedMethods: parsedAcceptedMethods,
-      missingDocs: quote.missingDocs,
-      showMissingDocs: quote.showMissingDocs,
-      deedNumber: quote.ownership?.deedNumber,
-      clientType: quote.clientType || quote.client?.type || "فرد",
-      // 🚀 أولوية سحب طريقة التوقيع والتمثيل من العرض، ثم من بيانات العميل كاحتياطي
+      employeeName: reqData.employeeName || userName,
+      employeeId: reqData.employeeId || userId,
+      taxRate: reqData.taxRate || quote.taxRate * 100,
+      acceptedMethods:
+        reqData.acceptedMethods?.length > 0
+          ? reqData.acceptedMethods
+          : parsedAcceptedMethods,
+      missingDocs: reqData.missingDocs || quote.missingDocs,
+      showMissingDocs: reqData.showMissingDocs ?? quote.showMissingDocs,
+      deedNumber: reqData.deedNumber || quote.ownership?.deedNumber,
+      clientType:
+        reqData.clientType || quote.clientType || quote.client?.type || "فرد",
       signatureMethod:
+        reqData.signatureMethod ||
         quote.signatureMethod ||
         (quote.client?.representative ? "AUTHORIZED" : "SELF"),
-      repName: quote.repName || quote.client?.representative?.name || "",
+      repName:
+        reqData.repName ||
+        quote.repName ||
+        quote.client?.representative?.name ||
+        "",
       repIdNumber:
-        quote.repIdNumber || quote.client?.representative?.idNumber || "",
+        reqData.repIdNumber ||
+        quote.repIdNumber ||
+        quote.client?.representative?.idNumber ||
+        "",
       repPhone:
+        reqData.repPhone ||
         quote.repPhone ||
         quote.client?.mobile ||
         quote.client?.contact?.mobile ||
         "",
       repCapacity:
-        quote.repCapacity || quote.client?.representative?.type || "",
-
+        reqData.repCapacity ||
+        quote.repCapacity ||
+        quote.client?.representative?.type ||
+        "",
       authDocType:
+        reqData.authDocType ||
         quote.authDocType ||
         (quote.client?.representative?.type === "وكيل" ? "وكالة" : "تفويض"),
       authDocNumber:
-        quote.authDocNumber || quote.client?.representative?.docNumber || "",
-      authDocDate: quote.authDocDate || "",
-      issueDate: quote.issueDate,
-      handlingMethod: mapHandlingMethod(quote.handlingMethod),
-      firstPartyName: quote.firstPartyName,
+        reqData.authDocNumber ||
+        quote.authDocNumber ||
+        quote.client?.representative?.docNumber ||
+        "",
+      authDocDate: reqData.authDocDate || quote.authDocDate || "",
+      issueDate: reqData.issueDate || quote.issueDate,
+      handlingMethod:
+        reqData.handlingMethod || mapHandlingMethod(quote.handlingMethod),
+
+      firstPartyName: reqData.firstPartyName || quote.firstPartyName,
       firstPartyRep:
+        reqData.firstPartyRep ||
+        quote.firstPartyRep ||
         quote.firstPartyEmployee?.name ||
         quote.firstPartyEmployee?.fullName ||
         "__________________",
-      secondPartyName: quote.client?.name?.ar || quote.client?.name,
-      secondPartyRep: "",
-      selectedBankAccounts: allBanks.map((b) => b.id),
+      secondPartyName:
+        reqData.secondPartyName || quote.client?.name?.ar || quote.client?.name,
+      secondPartyRep: reqData.secondPartyRep || "",
+      selectedBankAccounts:
+        reqData.selectedBankAccounts?.length > 0
+          ? reqData.selectedBankAccounts
+          : allBanks.map((b) => b.id),
       bankAccountsData: allBanks,
-      propertyDistrict: quote.ownership?.district || "---",
-      propertyPlanNumber: quote.ownership?.planNumber || "---",
+      propertyDistrict:
+        reqData.propertyDistrict || quote.ownership?.district || "---",
+      propertyPlanNumber:
+        reqData.propertyPlanNumber || quote.ownership?.planNumber || "---",
       status: "APPROVED",
-      transactionRefForPreview: quote.transaction?.transactionCode || "",
-      meetingTitleForPreview: quote.meetingMinute?.title || "",
+      transactionRefForPreview:
+        reqData.transactionRefForPreview ||
+        quote.transaction?.transactionCode ||
+        "",
+      meetingTitleForPreview:
+        reqData.meetingTitleForPreview || quote.meetingMinute?.title || "",
       firstPartyRepCapacity:
-        quote.firstPartyRepCapacity || "إدارة المشاريع وعقود العملاء",
-      firstPartyEmpCode: quote.firstPartyEmployee?.employeeCode || "SYS-XXX",
-      showFirstPartyEmpId: quote.showFirstPartyEmpId ?? true,
-      firstPartySignatureType: quote.firstPartySignatureType || "MANUAL",
-      employeeSignatureUrl: quote.firstPartyEmployee?.signatureUrl || null,
-      bgType: "official1",
-      authDocIssueDate: quote.authDocIssueDate,
-      showAuthDocIssueDate: quote.showAuthDocIssueDate,
-      authDocExpiryDate: quote.authDocExpiryDate,
-      showAuthDocExpiryDate: quote.showAuthDocExpiryDate,
-      customUsufructType: quote.customUsufructType,
+        reqData.firstPartyRepCapacity ||
+        quote.firstPartyRepCapacity ||
+        "إدارة المشاريع وعقود العملاء",
+      firstPartyEmpCode:
+        reqData.firstPartyEmpCode ||
+        quote.firstPartyEmployee?.employeeCode ||
+        "SYS-XXX",
+      showFirstPartyEmpId:
+        reqData.showFirstPartyEmpId !== undefined
+          ? reqData.showFirstPartyEmpId
+          : quote.showFirstPartyEmpId !== false,
+      firstPartySignatureType:
+        reqData.firstPartySignatureType ||
+        quote.firstPartySignatureType ||
+        "MANUAL",
+      employeeSignatureUrl:
+        reqData.employeeSignatureUrl ||
+        quote.firstPartyEmployee?.signatureUrl ||
+        null,
+
+      bgType: reqData.bgType || quote.bgType || "official1",
+      fontFamily: reqData.fontFamily || quote.fontFamily || "tajawal",
+
+      authDocIssueDate: reqData.authDocIssueDate || quote.authDocIssueDate,
+      showAuthDocIssueDate:
+        reqData.showAuthDocIssueDate ?? quote.showAuthDocIssueDate,
+      authDocExpiryDate: reqData.authDocExpiryDate || quote.authDocExpiryDate,
+      showAuthDocExpiryDate:
+        reqData.showAuthDocExpiryDate ?? quote.showAuthDocExpiryDate,
+      customUsufructType:
+        reqData.customUsufructType || quote.customUsufructType,
       documentType:
-        quote.templateType === "DETAILED"
+        reqData.documentType ||
+        (quote.templateType === "DETAILED"
           ? "عرض سعر تفصيلي"
-          : "عرض سعر فني ومالي",
-      referenceNumber: quote.number,
+          : "عرض سعر فني ومالي"),
+      referenceNumber: reqData.referenceNumber || quote.number,
     };
 
-    // 6. 🌟 الاعتماد على الدالة المساعدة המوحدة (DRY Principle) 🌟
+    // 6. بناء القوالب وإرسالها
     const htmlContent = buildQuotationHtmlTemplate(
       data,
       verificationQrImage,
       userName,
     );
+    const footerHtml = buildFooterHtml("#123f59", data.fontFamily);
 
-    const footerHtml = buildFooterHtml(
-      "#123f59",
-      data.fontFamily || "tajawal",
-    );
-
-    // 7. الاتصال بخدمة Gotenberg لتوليد الـ PDF
-    console.log(
-      "⏳ [BACKEND - APPROVAL] جاري إرسال الـ HTML لخدمة Gotenberg...",
-    );
     const form = new FormData();
     form.append("files", Buffer.from(htmlContent, "utf-8"), {
       filename: "index.html",
@@ -2871,15 +2931,11 @@ const approveQuotationWorkflow = async (req, res) => {
     form.append("printBackground", "true");
 
     const response = await axios.post(
-      "http://127.0.0.1:3000/forms/chromium/convert/html", // 👈 تم التعديل هنا
+      "http://gotenberg:3000/forms/chromium/convert/html",
       form,
-      {
-        headers: { ...form.getHeaders() },
-        responseType: "arraybuffer",
-      },
+      { headers: { ...form.getHeaders() }, responseType: "arraybuffer" },
     );
 
-    // 8. حفظ ملف الـ PDF في السيرفر
     const uploadsDir = path.join(__dirname, "../../uploads/quotations");
     if (!fs.existsSync(uploadsDir))
       fs.mkdirSync(uploadsDir, { recursive: true });
@@ -2891,7 +2947,6 @@ const approveQuotationWorkflow = async (req, res) => {
 
     console.log(`✅ [BACKEND - APPROVAL] تم توليد وحفظ الـ PDF في: ${fileUrl}`);
 
-    // 9. التحديث النهائي لقاعدة البيانات لحفظ مسار الـ PDF الجديد
     const finalUpdate = await prisma.quotation.update({
       where: { id },
       data: { pdfUrl: fileUrl },
@@ -2904,10 +2959,12 @@ const approveQuotationWorkflow = async (req, res) => {
     });
   } catch (error) {
     console.error("❌ [BACKEND - APPROVAL ERROR]:", error);
-    res.status(500).json({
-      success: false,
-      message: error.message || "حدث خطأ أثناء الاعتماد والتوليد",
-    });
+    res
+      .status(500)
+      .json({
+        success: false,
+        message: error.message || "حدث خطأ أثناء الاعتماد والتوليد",
+      });
   }
 };
 
