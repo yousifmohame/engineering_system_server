@@ -136,8 +136,13 @@ const generateSecurityData = (quoteNumber) => {
   return { barcodeData, qrVerificationUrl };
 };
 
+const isValidId = (val) => {
+  // معرفات Prisma (CUID/UUID) لا تحتوي على مسافات وطولها 20 حرفاً على الأقل
+  return typeof val === "string" && val.length >= 20 && !val.includes(" ");
+};
+
 // ===============================================
-// 1. إنشاء عرض سعر جديد (محدث بكافة الحقول)
+// 1. إنشاء عرض سعر جديد
 // ===============================================
 const createQuotation = async (req, res) => {
   try {
@@ -204,8 +209,9 @@ const createQuotation = async (req, res) => {
         .digest("hex");
     }
 
+    // 🛡️ حماية الـ ID (يمنع الـ Crash)
     let validTransactionTypeId = undefined;
-    if (data.transactionTypeId && data.transactionTypeId.length >= 20) {
+    if (isValidId(data.transactionTypeId)) {
       const existingType = await prisma.transactionType.findUnique({
         where: { id: data.transactionTypeId },
       });
@@ -240,7 +246,6 @@ const createQuotation = async (req, res) => {
           transactionType: validTransactionTypeId
             ? { connect: { id: validTransactionTypeId } }
             : undefined,
-          // 🚀 حفظ اسم الخدمة دائماً (سواء كانت من القائمة أو يدوية)
           transactionTypeName:
             data.transactionTypeName ||
             data.transactionTypeId ||
@@ -254,7 +259,6 @@ const createQuotation = async (req, res) => {
           showClientCode: data.showClientCode ?? true,
           showPropertyCode: data.showPropertyCode ?? true,
 
-          // 🚀 حفظ إعدادات إظهار الجداول والأسماء المخصصة
           showSummaryTable: data.showSummaryTable ?? true,
           secondPartyName: data.secondPartyName || null,
           secondPartyRep: data.secondPartyRep || null,
@@ -270,7 +274,7 @@ const createQuotation = async (req, res) => {
             : null,
           showAuthDocExpiryDate: data.showAuthDocExpiryDate || false,
 
-          firstPartyEmployee: data.firstPartyEmployeeId
+          firstPartyEmployee: isValidId(data.firstPartyEmployeeId)
             ? { connect: { id: data.firstPartyEmployeeId } }
             : undefined,
           firstPartyRepCapacity: data.firstPartyRepCapacity,
@@ -306,13 +310,11 @@ const createQuotation = async (req, res) => {
           terms: data.terms,
           conclusion: data.conclusion,
 
-          // 🚀 الحقول النصية للأسلوب والألقاب
           clientTitle: data.clientTitle || "MR",
           handlingMethod: data.handlingMethod || "DIRECT",
           acceptedMethods: data.acceptedMethods || ["bank"],
           selectedBankAccounts: data.selectedBankAccounts || [],
 
-          // 🚀 حقول التمثيل القانوني وبيانات الوكالة
           clientType: data.clientType || "فرد",
           signatureMethod: data.signatureMethod || "SELF",
           repName: data.repName || null,
@@ -360,28 +362,8 @@ const createQuotation = async (req, res) => {
           notes: "تم إنشاء مسودة عرض السعر الأولي",
         },
       });
-
       return createdQuote;
     });
-
-    if (data.templateId) {
-      try {
-        const templateExists = await prisma.quotationTemplate.findUnique({
-          where: { code: data.templateId },
-        });
-        if (templateExists) {
-          await prisma.quotationTemplate.update({
-            where: { code: data.templateId },
-            data: { usesCount: { increment: 1 } },
-          });
-        } else {
-          await prisma.quotationTemplate.update({
-            where: { id: data.templateId },
-            data: { usesCount: { increment: 1 } },
-          });
-        }
-      } catch (templateError) {}
-    }
 
     res.status(201).json({ success: true, data: newQuotation });
   } catch (error) {
@@ -395,7 +377,7 @@ const createQuotation = async (req, res) => {
 };
 
 // ===============================================
-// 2. تحديث عرض سعر (مصحح وآمن)
+// 2. تحديث عرض سعر (مصحح ضد خطأ P2025)
 // ===============================================
 const updateQuotation = async (req, res) => {
   try {
@@ -434,26 +416,19 @@ const updateQuotation = async (req, res) => {
       } else if (data.items || data.payments) {
         return res.status(400).json({
           success: false,
-          message:
-            "هذا العرض معتمد. لتعديله، يرجى تقديم سبب التعديل ليتم فك القفل.",
+          message: "هذا العرض معتمد. لتعديله، يرجى تقديم سبب التعديل.",
         });
       }
     }
 
-    let issueDate = existingQuote.issueDate;
-    let expiryDate = existingQuote.expiryDate;
-    let validityDays = existingQuote.validityDays;
-
-    if (data.issueDate || data.validityDays) {
-      issueDate = data.issueDate
-        ? new Date(data.issueDate)
-        : existingQuote.issueDate;
-      validityDays = data.validityDays
-        ? parseInt(data.validityDays)
-        : existingQuote.validityDays;
-      expiryDate = new Date(issueDate);
-      expiryDate.setDate(expiryDate.getDate() + validityDays);
-    }
+    let issueDate = data.issueDate
+      ? new Date(data.issueDate)
+      : existingQuote.issueDate;
+    let validityDays = data.validityDays
+      ? parseInt(data.validityDays)
+      : existingQuote.validityDays;
+    let expiryDate = new Date(issueDate);
+    expiryDate.setDate(expiryDate.getDate() + validityDays);
 
     const baseUpdateData = {
       ...resetSecurityData,
@@ -471,8 +446,6 @@ const updateQuotation = async (req, res) => {
       ...(data.showPropertyCode !== undefined && {
         showPropertyCode: data.showPropertyCode,
       }),
-
-      // 🚀 الحقول الجديدة (إظهار الجداول والأسماء المخصصة)
       ...(data.showSummaryTable !== undefined && {
         showSummaryTable: data.showSummaryTable,
       }),
@@ -514,7 +487,6 @@ const updateQuotation = async (req, res) => {
       validityDays,
       expiryDate,
 
-      // 🚀 حقول الممثل والوكالة
       ...(data.clientType !== undefined && { clientType: data.clientType }),
       ...(data.signatureMethod !== undefined && {
         signatureMethod: data.signatureMethod,
@@ -550,7 +522,6 @@ const updateQuotation = async (req, res) => {
         customUsufructType: data.customUsufructType,
       }),
 
-      // 🚀 الجدول الزمني
       ...(data.showTimeline !== undefined && {
         showTimeline: data.showTimeline,
       }),
@@ -586,10 +557,35 @@ const updateQuotation = async (req, res) => {
         data.firstPartySignatureType || existingQuote.firstPartySignatureType,
     };
 
-    if (data.transactionTypeId && data.transactionTypeId.length >= 20) {
-      baseUpdateData.transactionType = {
-        connect: { id: data.transactionTypeId },
-      };
+    // 🛡️ الحماية القوية ضد خطأ Prisma (P2025)
+    if (isValidId(data.transactionTypeId)) {
+      try {
+        const existingTx = await prisma.transactionType.findUnique({
+          where: { id: data.transactionTypeId },
+        });
+        if (existingTx)
+          baseUpdateData.transactionType = {
+            connect: { id: data.transactionTypeId },
+          };
+      } catch (e) {}
+    }
+
+    if (isValidId(data.firstPartyEmployeeId)) {
+      try {
+        const existingEmp = await prisma.employee.findUnique({
+          where: { id: data.firstPartyEmployeeId },
+        });
+        if (existingEmp)
+          baseUpdateData.firstPartyEmployee = {
+            connect: { id: data.firstPartyEmployeeId },
+          };
+        else baseUpdateData.firstPartyEmployee = { disconnect: true };
+      } catch (e) {}
+    } else if (
+      data.firstPartyEmployeeId === null ||
+      data.firstPartyEmployeeId === ""
+    ) {
+      baseUpdateData.firstPartyEmployee = { disconnect: true };
     }
 
     if (data.clientId)
@@ -600,16 +596,6 @@ const updateQuotation = async (req, res) => {
       baseUpdateData.transaction = { connect: { id: data.transactionId } };
     if (data.meetingId)
       baseUpdateData.meetingMinute = { connect: { id: data.meetingId } };
-    if (data.firstPartyEmployeeId) {
-      baseUpdateData.firstPartyEmployee = {
-        connect: { id: data.firstPartyEmployeeId },
-      };
-    } else if (
-      data.firstPartyEmployeeId === null ||
-      data.firstPartyEmployeeId === ""
-    ) {
-      baseUpdateData.firstPartyEmployee = { disconnect: true };
-    }
 
     const newAttachmentsToCreate = processAndSaveAttachments(
       data.ownerAttachments,
@@ -721,8 +707,8 @@ const updateQuotation = async (req, res) => {
           userId: req.user?.id || "SYSTEM",
           userName: req.user?.name || "النظام",
           notes: isPostApprovalEdit
-            ? `تم فك القفل والتعديل. السبب: ${data.editReason}`
-            : "قام المستخدم بتحديث بيانات العرض",
+            ? `تم التعديل. السبب: ${data.editReason}`
+            : "تحديث بيانات العرض",
         },
       });
       return result;
@@ -730,14 +716,14 @@ const updateQuotation = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      message: isPostApprovalEdit ? "تم فك القفل والتعديل" : "تم التحديث بنجاح",
+      message: "تم التحديث بنجاح",
       data: updatedQuotation,
     });
   } catch (error) {
     console.error("Update Quotation Error:", error);
     res.status(500).json({
       success: false,
-      message: "حدث خطأ أثناء تحديث العرض",
+      message: "حدث خطأ أثناء التحديث",
       error: error.message,
     });
   }
@@ -1638,20 +1624,27 @@ const buildQuotationHtmlTemplate = (
 
   // 🚀 تجهيز مصفوفة الشروط والأحكام لتحويلها إلى جدول
   const termsArray = (termsText || "خاضع للشروط العامة المسجلة بالمكتب.")
-    .split('\n')
-    .map(term => term.trim())
-    .filter(term => term !== '');
+    .split("\n")
+    .map((term) => term.trim())
+    .filter((term) => term !== "");
 
-  const termsHtmlRows = termsArray.length > 0 ? termsArray.map((term, index) => `
-    <tr style="background-color: ${index % 2 === 0 ? 'rgba(248, 250, 252, 0.5)' : 'transparent'}; border-bottom: 1px solid ${accentColor}22;">
+  const termsHtmlRows =
+    termsArray.length > 0
+      ? termsArray
+          .map(
+            (term, index) => `
+    <tr style="background-color: ${index % 2 === 0 ? "rgba(248, 250, 252, 0.5)" : "transparent"}; border-bottom: 1px solid ${accentColor}22;">
       <td style="padding: 8px; border-left: 1px solid ${accentColor}44; text-align: center; font-family: monospace;">
         ${index + 1}
       </td>
       <td style="padding: 8px; line-height: 1.6; border-left: 1px solid ${accentColor}44;">
-        ${term.replace(/^[*-•\d.)]+\s*/, '')}
+        ${term.replace(/^[*-•\d.)]+\s*/, "")}
       </td>
     </tr>
-  `).join('') : `
+  `,
+          )
+          .join("")
+      : `
     <tr>
        <td colspan="2" style="padding: 16px; text-align: center; color: #64748b;">لا توجد شروط وأحكام مسجلة</td>
     </tr>
@@ -2740,7 +2733,6 @@ const approveQuotationWorkflow = async (req, res) => {
     const userName = req.user?.name || "المشرف";
     const reqData = req.body || {};
 
-    // 1. جلب العرض بالكامل من الداتا بيز
     const quote = await prisma.quotation.findUnique({
       where: { id },
       include: {
@@ -2756,13 +2748,14 @@ const approveQuotationWorkflow = async (req, res) => {
     });
 
     if (!quote || quote.status !== "PENDING_APPROVAL") {
-      return res.status(400).json({
-        success: false,
-        message: "العرض ليس قيد المراجعة أو تم اعتماده مسبقاً",
-      });
+      return res
+        .status(400)
+        .json({
+          success: false,
+          message: "العرض ليس قيد المراجعة أو تم اعتماده مسبقاً",
+        });
     }
 
-    // 2. توليد بيانات الحماية والـ QR
     const randomStr = crypto.randomBytes(3).toString("hex").toUpperCase();
     const barcodeData = `815-${quote.number}-${randomStr}`;
     const qrVerificationUrl = `${process.env.FRONTEND_URL || "https://details-worksystem1.com"}/verify/quote/${barcodeData}`;
@@ -2771,7 +2764,6 @@ const approveQuotationWorkflow = async (req, res) => {
       .update(`${quote.number}-${quote.total}`)
       .digest("hex");
 
-    // 3. توليد صورة الـ QR كـ Base64
     let verificationQrImage = "";
     try {
       verificationQrImage = await QRCode.toDataURL(qrVerificationUrl, {
@@ -2779,11 +2771,8 @@ const approveQuotationWorkflow = async (req, res) => {
         margin: 1,
         color: { dark: "#123f59", light: "#ffffff" },
       });
-    } catch (err) {
-      console.error("QR Generation Error:", err);
-    }
+    } catch (err) {}
 
-    // 4. تحديث الداتا بيز بحالة الاعتماد والروابط
     const updatedQuote = await prisma.$transaction(async (tx) => {
       const updated = await tx.quotation.update({
         where: { id },
@@ -2821,7 +2810,7 @@ const approveQuotationWorkflow = async (req, res) => {
           toStatus: "APPROVED",
           userId,
           userName,
-          notes: "تم اعتماد وختم العرض وتوليد PDF",
+          notes: "تم الاعتماد وتوليد الـ PDF",
         },
       });
       return updated;
@@ -2838,12 +2827,11 @@ const approveQuotationWorkflow = async (req, res) => {
 
     let parsedStartConditions = ["DOCUMENTS_RECEIVED"];
     try {
-      if (quote.startConditions) {
+      if (quote.startConditions)
         parsedStartConditions =
           typeof quote.startConditions === "string"
             ? JSON.parse(quote.startConditions)
             : quote.startConditions;
-      }
     } catch (e) {}
 
     const allBanks = await prisma.bankAccount.findMany();
@@ -2881,14 +2869,29 @@ const approveQuotationWorkflow = async (req, res) => {
       timelineNotes:
         reqData.timelineNotes ||
         quote.timelineNotes ||
-        "المدة الموضحة أعلاه تقديرية وتُحتسب كأيام عمل...",
+        "المدة الموضحة أعلاه تقديرية...",
     };
 
-    // 5. 🌟 تجهيز البيانات النهائية لتمريرها لمحرك الطباعة HTML
+    // 💡 سحب اسم النموذج الفعلي
+    let templateTitle =
+      quote.templateType === "DETAILED"
+        ? "عرض سعر تفصيلي"
+        : "عرض سعر فني ومالي";
+    if (quote.templateId) {
+      try {
+        const tpl = await prisma.quotationTemplate.findUnique({
+          where: { id: quote.templateId },
+        });
+        if (tpl && tpl.title) templateTitle = tpl.title;
+      } catch (e) {}
+    }
+
+    // 5. 🌟 تجهيز البيانات النهائية
     const data = {
       ...reqData,
       quotationId: quote.id,
 
+      documentType: reqData.documentType || templateTitle,
       transactionType:
         reqData.transactionTypeName ||
         reqData.transactionType ||
@@ -2910,7 +2913,6 @@ const approveQuotationWorkflow = async (req, res) => {
       serviceNumber: reqData.serviceNumber || quote.serviceNumber,
       serviceYear: reqData.serviceYear || quote.serviceYear,
 
-      // 🚀 هنا تم إضافة المترجم الذكي للتعامل مع البيانات القديمة
       clientTitle: translateTitle(reqData.clientTitle || quote.clientTitle),
       handlingMethod: translateHandling(
         reqData.handlingMethod || quote.handlingMethod,
@@ -2934,21 +2936,7 @@ const approveQuotationWorkflow = async (req, res) => {
       items:
         reqData.items?.length > 0
           ? reqData.items
-          : quote.items.map((i) => ({
-              id: i.id,
-              title: i.title,
-              qty: i.quantity,
-              unit: i.unit,
-              price: i.unitPrice,
-              discount: i.discount,
-              discountType: i.discountType,
-              taxRate: i.taxRate,
-              executionDuration: i.executionDuration,
-              durationUnit: i.durationUnit,
-              timelineNotes: i.timelineNotes,
-              showInTimeline: i.showInTimeline,
-            })),
-
+          : quote.items.map((i) => ({ ...i, qty: i.quantity })),
       subtotal: reqData.subtotal || quote.subtotal,
       taxAmount: reqData.taxAmount || quote.taxAmount,
       grandTotal: reqData.grandTotal || quote.total,
@@ -2965,7 +2953,6 @@ const approveQuotationWorkflow = async (req, res) => {
 
       showQuantity: true,
       plots: reqData.plots?.length > 0 ? reqData.plots : parsedPlots,
-      boundaries: [],
       employeeName: reqData.employeeName || userName,
       employeeId: reqData.employeeId || userId,
       taxRate: reqData.taxRate || quote.taxRate * 100,
@@ -3025,13 +3012,23 @@ const approveQuotationWorkflow = async (req, res) => {
 
       issueDate: reqData.issueDate || quote.issueDate,
 
+      // 🚀 ربط الأسماء والأرقام بشكل ذكي مع القيم المطلوبة
       firstPartyName: reqData.firstPartyName || quote.firstPartyName,
       firstPartyRep:
         reqData.firstPartyRep ||
         quote.firstPartyRep ||
         quote.firstPartyEmployee?.name ||
         quote.firstPartyEmployee?.fullName ||
-        "__________________",
+        "المدير العام",
+      firstPartyRepCapacity:
+        reqData.firstPartyRepCapacity ||
+        quote.firstPartyRepCapacity ||
+        "إدارة المشاريع وعقود العملاء",
+      firstPartyEmpCode:
+        reqData.firstPartyEmpCode ||
+        quote.firstPartyEmployee?.employeeCode ||
+        "EMP-ADMIN-01",
+
       secondPartyName:
         reqData.secondPartyName ||
         quote.secondPartyName ||
@@ -3055,15 +3052,6 @@ const approveQuotationWorkflow = async (req, res) => {
         "",
       meetingTitleForPreview:
         reqData.meetingTitleForPreview || quote.meetingMinute?.title || "",
-
-      firstPartyRepCapacity:
-        reqData.firstPartyRepCapacity ||
-        quote.firstPartyRepCapacity ||
-        "إدارة المشاريع وعقود العملاء",
-      firstPartyEmpCode:
-        reqData.firstPartyEmpCode ||
-        quote.firstPartyEmployee?.employeeCode ||
-        "SYS-XXX",
       firstPartySignatureType:
         reqData.firstPartySignatureType ||
         quote.firstPartySignatureType ||
@@ -3072,21 +3060,12 @@ const approveQuotationWorkflow = async (req, res) => {
         reqData.employeeSignatureUrl ||
         quote.firstPartyEmployee?.signatureUrl ||
         null,
-
       bgType: reqData.bgType || quote.bgType || "official1",
       fontFamily: reqData.fontFamily || quote.fontFamily || "tajawal",
-
-      documentType:
-        reqData.documentType ||
-        (quote.templateType === "DETAILED"
-          ? "عرض سعر تفصيلي"
-          : "عرض سعر فني ومالي"),
       referenceNumber: reqData.referenceNumber || quote.number,
-
       timelineState: timelineState,
     };
 
-    // 6. بناء القوالب وإرسالها
     const htmlContent = buildQuotationHtmlTemplate(
       data,
       verificationQrImage,
@@ -3126,12 +3105,7 @@ const approveQuotationWorkflow = async (req, res) => {
     fs.writeFileSync(filePath, Buffer.from(response.data));
     const fileUrl = `/uploads/quotations/${fileName}`;
 
-    console.log(`✅ [BACKEND - APPROVAL] تم توليد وحفظ الـ PDF في: ${fileUrl}`);
-
-    const finalUpdate = await prisma.quotation.update({
-      where: { id },
-      data: { pdfUrl: fileUrl },
-    });
+    await prisma.quotation.update({ where: { id }, data: { pdfUrl: fileUrl } });
 
     res.json({
       success: true,
@@ -3140,10 +3114,12 @@ const approveQuotationWorkflow = async (req, res) => {
     });
   } catch (error) {
     console.error("❌ [BACKEND - APPROVAL ERROR]:", error);
-    res.status(500).json({
-      success: false,
-      message: error.message || "حدث خطأ أثناء الاعتماد والتوليد",
-    });
+    res
+      .status(500)
+      .json({
+        success: false,
+        message: error.message || "حدث خطأ أثناء الاعتماد",
+      });
   }
 };
 
