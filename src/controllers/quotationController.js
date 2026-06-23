@@ -1655,13 +1655,13 @@ const buildQuotationHtmlTemplate = (
   `;
 
   // ================= HTML Output =================
+  // ================= HTML Output =================
   return `
     <!DOCTYPE html>
     <html dir="rtl" lang="ar">
     <head>
       <meta charset="UTF-8">
       <style>
-        /* 🚀 2. وضع علامات تنصيص "" حول الرابط واستخدام النص المنظف */
         @font-face {
           font-family: '${fontFamily}';
           src: url("data:font/ttf;base64,${cleanBase64}") format("truetype");
@@ -1671,7 +1671,6 @@ const buildQuotationHtmlTemplate = (
         @page { size: A4; margin: 0; }
         
         body, html { 
-            /* 🚀 3. تأكيد الاتجاه يمين-يسار إجبارياً */
             direction: rtl;
             text-align: right;
             height: 100%; 
@@ -1683,7 +1682,6 @@ const buildQuotationHtmlTemplate = (
             print-color-adjust: exact !important; 
         }
         
-        /* 🚀 1. كلاس الخلفية الثابتة لملء كل الصفحات 🚀 */
         .fixed-print-bg {
           position: fixed;
           top: 0;
@@ -1720,12 +1718,14 @@ const buildQuotationHtmlTemplate = (
     </head>
     <body>
       <div class="fixed-print-bg"></div>
-      <div class="page-container" style="display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 100px;">
+
+      <div class="page-container" style="display: flex; flex-direction: column; min-height: 100vh; box-sizing: border-box; align-items: center; text-align: center; padding: 40px; position: relative;">
+        
         ${
           showSummaryTable
             ? `
-        <div style="position: absolute; bottom: -100px; left: 32px; right: 32px; z-index: 20;">
-          <table style="width: 100%; border-collapse: collapse; border: 2px solid ${accentColor}; background-color: rgba(255, 255, 255, 0.95); text-align: right; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);">
+        <div style="position: absolute; bottom: 40px; left: 40px; right: 40px; z-index: 20;">
+          <table style="width: 100%; border-collapse: collapse; border: 2px solid ${accentColor}; background-color: rgba(255, 255, 255, 0.97); text-align: right; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);">
             <tbody>
               <tr>
                 <td style="width: 30%; padding: 8px; text-align: center; vertical-align: middle; border-left: 2px solid ${accentColor};">
@@ -1779,123 +1779,126 @@ const buildQuotationHtmlTemplate = (
         `
             : ""
         }
-        <div class="content" style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 48px; margin-top: 48px; flex: 1;">
-          <div style="width: 300px; display: flex; align-items: center; justify-content: center;">
-            <img src="${logoUrl}" alt="Logo" style="max-height: 100%; max-width: 100%; mix-blend-mode: multiply; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.1));" />
-          </div>
 
-          ${
-            address
-              ? `
-          <div style="display: flex; flex-direction: column; align-items: center; text-align: center; max-width: 768px; padding: 0 24px; gap: 20px;">
-            <div style="width: 80px; height: 6px; background-color: ${goldColor}; border-radius: 9999px; opacity: 0.8;"></div>
-            <h1 style="font-size: 36px; font-weight: 900; color: #123f59; line-height: 1.4; letter-spacing: 0.025em; margin: 0;">${address}</h1>
-            <div style="width: 80px; height: 6px; background-color: ${goldColor}; border-radius: 9999px; opacity: 0.8;"></div>
-          </div>
-          `
-              : ""
-          }
-        </div>
-
-        <div style="width: 100%; display: flex; flex-direction: column; align-items: center;">
-          <div style="width: 80%; border-top: 5px solid ${accentColor}; border-bottom: 5px solid ${accentColor}; padding: 48px 0; margin-bottom: 32px;">
-            <h1 style="font-size: 42px; font-weight: 900; color: ${accentColor}; margin-bottom: 24px; margin-top: 0; line-height: 1.25;">
-              ${documentType || "عرض سعر فني ومالي"}
-            </h1>
-            <h2 style="font-size: 22px; font-weight: bold; color: #475569; margin: 0;">${transactionType || "خدمات هندسية واستشارية استراتيجية"}</h2>
-          </div>
-        </div>
-
-        <div style="width: 100%; text-align: center; background-color: transparent; padding: 32px; border-radius: 24px; border: 1px solid rgba(216,180,106,0.3); box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05); box-sizing: border-box;">
-          <p style="font-size: 16px; font-weight: 900; color: #64748b; margin-top: 0; margin-bottom: 12px;">مقدم إلى السادة / الطرف الثاني:</p>
-          <p style="font-size: 25px; font-weight: 900; color: ${accentColor}; margin-top: 0; margin-bottom: ${signatureMethod !== "SELF" ? "8px" : "30px"}; line-height: 1.25;">${clientTitle} / ${secondPartyName || clientNameForPreview}</p>
+        <div style="display: flex; flex-direction: column; justify-content: center; align-items: center; width: 100%; flex: 1; padding-bottom: ${showSummaryTable ? "240px" : "40px"};">
           
-          ${
-            signatureMethod !== "SELF"
-              ? `
-          <p style="font-size: 11px; text-align:center; font-weight: 900; color: #e11d48; margin-top: 0; margin-bottom: 24px;">
-            ${[
-              (
-                authDocType === "مستند انتفاع" && customUsufructType
-                  ? customUsufructType
-                  : authDocType
-              )
-                ? `معلومات التفويض: ${authDocType === "مستند انتفاع" && customUsufructType ? customUsufructType : authDocType}`
-                : "",
-              authDocNumber ? `رقم المستند: ${authDocNumber}` : "",
-              showAuthDocExpiryDate && authDocExpiryDate
-                ? `تاريخ انتهاء المستند: ${formatDateParts(authDocExpiryDate).gregorian}`
-                : "",
-            ]
-              .filter(Boolean)
-              .join(" | ")}
-          </p>
-          `
-              : ""
-          }
+          <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 36px; margin-bottom: 36px; width: 100%;">
+            <div style="width: 280px; display: flex; align-items: center; justify-content: center;">
+              <img src="${logoUrl}" alt="Logo" style="max-height: 100%; max-width: 100%; mix-blend-mode: multiply; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.1));" />
+            </div>
 
-          <table style="width: 100%; border-collapse: collapse; text-align: right; font-size: 12px; font-weight: bold; color: #334155; margin-bottom: 0;">
-            <tr>
-              <td style="border: none; text-align: right; border-bottom: 1px dashed #cbd5e1; padding: 0 0 4px 0; width: 45%; vertical-align: top;">
-                <div style="display: flex; justify-content: space-between; padding-left: 32px;">
-                  <span style="color: #64748b; font-size: 10px;">رقم العرض /الرقم المرجعي:</span> 
-                  <span style="color: #0f172a; font-weight: 900; font-size: 10px; font-family: monospace;">${referenceNumber}</span>
-                </div>
-              </td>
-              <td style="border: none; text-align: right; border-bottom: 1px dashed #cbd5e1; padding: 0 0 4px 0; width: 55%; vertical-align: top;">
-                 <div style="display: flex; justify-content: space-between;">
-                  <span style="color: #64748b; font-size: 14px;">تاريخ الإصدار:</span> 
-                  <span style="color: #0f172a; font-family: monospace;">${formatDateParts(authDocIssueDate).gregorian}</span>
-                 </div>
-              </td>
-            </tr>
             ${
-              transactionRefForPreview || meetingTitleForPreview
+              address
                 ? `
-            <tr>
-              ${
-                transactionRefForPreview
-                  ? `
-              <td colspan="${meetingTitleForPreview ? "1" : "2"}" style="border: none; text-align: right; border-bottom: 1px dashed #cbd5e1; padding: 8px 0 4px 0; vertical-align: top;">
-                 <div style="display: flex; justify-content: space-between; ${meetingTitleForPreview ? "padding-left: 32px;" : ""}">
-                  <span style="color: #64748b;">الرقم الداخلي للمعاملة:</span> 
-                  <span style="color: #0f172a; font-weight: 900; font-size: 10px; font-family: monospace;">${transactionRefForPreview}</span>
-                 </div>
-              </td>`
-                  : '<td style="border: none; border-bottom: 1px dashed #cbd5e1;"></td>'
-              }
-              ${
-                meetingTitleForPreview
-                  ? `
-              <td colspan="${transactionRefForPreview ? "1" : "2"}" style="border: none; text-align: right; border-bottom: 1px dashed #cbd5e1; padding: 8px 0 4px 0; vertical-align: top;">
-                 <div style="display: flex; justify-content: space-between;">
-                  <span style="color: #64748b;">استناداً لمحضر اجتماع:</span> 
-                  <span style="color: #0f172a; font-weight: 900; font-family: monospace; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${meetingTitleForPreview}</span>
-                 </div>
-              </td>`
-                  : '<td style="border: none; border-bottom: 1px dashed #cbd5e1;"></td>'
-              }
-            </tr>`
+            <div style="display: flex; flex-direction: column; align-items: center; text-align: center; max-width: 768px; padding: 0 24px; gap: 16px;">
+              <div style="width: 80px; height: 5px; background-color: ${goldColor}; border-radius: 9999px; opacity: 0.8;"></div>
+              <h1 style="font-size: 34px; font-weight: 900; color: #123f59; line-height: 1.4; letter-spacing: 0.025em; margin: 0;">${address}</h1>
+              <div style="width: 80px; height: 5px; background-color: ${goldColor}; border-radius: 9999px; opacity: 0.8;"></div>
+            </div>
+            `
                 : ""
             }
+          </div>
+
+          <div style="width: 100%; display: flex; flex-direction: column; align-items: center; margin-bottom: 32px;">
+            <div style="width: 85%; border-top: 4px solid ${accentColor}; border-bottom: 4px solid ${accentColor}; padding: 36px 0;">
+              <h1 style="font-size: 38px; font-weight: 900; color: ${accentColor}; margin-bottom: 16px; margin-top: 0; line-height: 1.25;">
+                ${documentType || "عرض سعر فني ومالي"}
+              </h1>
+              <h2 style="font-size: 20px; font-weight: bold; color: #475569; margin: 0;">${transactionType || "خدمات هندسية واستشارية استراتيجية"}</h2>
+            </div>
+          </div>
+
+          <div style="width: 100%; text-align: center; background-color: transparent; padding: 28px 32px; border-radius: 20px; border: 1px solid rgba(216,180,106,0.3); box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05); box-sizing: border-box;">
+            <p style="font-size: 15px; font-weight: 900; color: #64748b; margin-top: 0; margin-bottom: 12px;">مقدم إلى السادة / الطرف الثاني:</p>
+            <p style="font-size: 24px; font-weight: 900; color: ${accentColor}; margin-top: 0; margin-bottom: ${signatureMethod !== "SELF" ? "8px" : "24px"}; line-height: 1.25;">${clientTitle} / ${secondPartyName || clientNameForPreview}</p>
+            
             ${
-              propertyCodeForPreview
+              signatureMethod !== "SELF"
                 ? `
-            <tr>
-              <td colspan="2" style="border: none; text-align: right; border-bottom: 1px dashed #cbd5e1; padding: 8px 0 4px 0;">
-                <div style="display: flex; justify-content: space-between;">
-                  <span style="color: #64748b;">المشروع/الملكية:</span> 
-                  <span style="color: #0f172a; font-weight: 900; font-family: monospace;">${propertyCodeForPreview}</span>
-                </div>
-              </td>
-            </tr>`
+            <p style="font-size: 11px; text-align:center; font-weight: 900; color: #e11d48; margin-top: 0; margin-bottom: 24px;">
+              ${[
+                (
+                  authDocType === "مستند انتفاع" && customUsufructType
+                    ? customUsufructType
+                    : authDocType
+                )
+                  ? `معلومات التفويض: ${authDocType === "مستند انتفاع" && customUsufructType ? customUsufructType : authDocType}`
+                  : "",
+                authDocNumber ? `رقم المستند: ${authDocNumber}` : "",
+                showAuthDocExpiryDate && authDocExpiryDate
+                  ? `تاريخ انتهاء المستند: ${formatDateParts(authDocExpiryDate).gregorian}`
+                  : "",
+              ]
+                .filter(Boolean)
+                .join(" | ")}
+            </p>
+            `
                 : ""
             }
-          </table>
-        </div>
-        
-        
-      </div>
+
+            <table style="width: 100%; border-collapse: collapse; text-align: right; font-size: 11.5px; font-weight: bold; color: #334155; margin-bottom: 0;">
+              <tr>
+                <td style="border: none; text-align: right; border-bottom: 1px dashed #cbd5e1; padding: 0 0 4px 0; width: 45%; vertical-align: top;">
+                  <div style="display: flex; justify-content: space-between; padding-left: 32px;">
+                    <span style="color: #64748b; font-size: 10px;">رقم العرض /الرقم المرجعي:</span> 
+                    <span style="color: #0f172a; font-weight: 900; font-size: 10px; font-family: monospace;">${referenceNumber}</span>
+                  </div>
+                </td>
+                <td style="border: none; text-align: right; border-bottom: 1px dashed #cbd5e1; padding: 0 0 4px 0; width: 55%; vertical-align: top;">
+                   <div style="display: flex; justify-content: space-between;">
+                    <span style="color: #64748b; font-size: 13px;">تاريخ الإصدار:</span> 
+                    <span style="color: #0f172a; font-family: monospace;">${formatDateParts(authDocIssueDate).gregorian}</span>
+                   </div>
+                </td>
+              </tr>
+              ${
+                transactionRefForPreview || meetingTitleForPreview
+                  ? `
+              <tr>
+                ${
+                  transactionRefForPreview
+                    ? `
+                <td colspan="${meetingTitleForPreview ? "1" : "2"}" style="border: none; text-align: right; border-bottom: 1px dashed #cbd5e1; padding: 8px 0 4px 0; vertical-align: top;">
+                   <div style="display: flex; justify-content: space-between; ${meetingTitleForPreview ? "padding-left: 32px;" : ""}">
+                    <span style="color: #64748b;">الرقم الداخلي للمعاملة:</span> 
+                    <span style="color: #0f172a; font-weight: 900; font-size: 10px; font-family: monospace;">${transactionRefForPreview}</span>
+                   </div>
+                </td>`
+                    : '<td style="border: none; border-bottom: 1px dashed #cbd5e1;"></td>'
+                }
+                ${
+                  meetingTitleForPreview
+                    ? `
+                <td colspan="${transactionRefForPreview ? "1" : "2"}" style="border: none; text-align: right; border-bottom: 1px dashed #cbd5e1; padding: 8px 0 4px 0; vertical-align: top;">
+                   <div style="display: flex; justify-content: space-between;">
+                    <span style="color: #64748b;">استناداً لمحضر اجتماع:</span> 
+                    <span style="color: #0f172a; font-weight: 900; font-family: monospace; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${meetingTitleForPreview}</span>
+                   </div>
+                </td>`
+                    : '<td style="border: none; border-bottom: 1px dashed #cbd5e1;"></td>'
+                }
+              </tr>`
+                  : ""
+              }
+              ${
+                propertyCodeForPreview
+                  ? `
+              <tr>
+                <td colspan="2" style="border: none; text-align: right; border-bottom: 1px dashed #cbd5e1; padding: 8px 0 4px 0;">
+                  <div style="display: flex; justify-content: space-between;">
+                    <span style="color: #64748b;">المشروع/الملكية:</span> 
+                    <span style="color: #0f172a; font-weight: 900; font-family: monospace;">${propertyCodeForPreview}</span>
+                  </div>
+                </td>
+              </tr>`
+                  : ""
+              }
+            </table>
+          </div>
+
+        </div> </div>
+
 
       <div class="page-container" style="padding: 0;">
         <table style="width: 100%; border: none; margin: 0; position: relative; z-index: 1;">
