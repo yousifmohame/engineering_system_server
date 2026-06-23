@@ -3105,31 +3105,31 @@ const approveQuotationWorkflow = async (req, res) => {
     fs.writeFileSync(filePath, Buffer.from(response.data));
     const fileUrl = `/uploads/quotations/${fileName}`;
 
-    // 🚀 إضافة "const finalUpdate =" قبل التحديث
-    const finalUpdate = await prisma.quotation.update({ 
-      where: { id }, 
-      data: { pdfUrl: fileUrl } 
+    console.log(`✅ [BACKEND - APPROVAL] تم توليد وحفظ الـ PDF في: ${fileUrl}`);
+
+    // 1. تحديث مسار الملف في قاعدة البيانات
+    const finalUpdate = await prisma.quotation.update({
+      where: { id },
+      data: { pdfUrl: fileUrl },
     });
 
-    res.json({ 
-      success: true, 
-      message: "تم الاعتماد وتوليد الـ PDF والختم بنجاح", 
-      data: finalUpdate // الآن المتغير معرف ولن يحدث خطأ
-    });
-
-    res.json({
+    // 2. إرسال الاستجابة (تأكد أن هذا هو السطر الوحيد لـ res.json في نهاية الدالة)
+    return res.json({
       success: true,
       message: "تم الاعتماد وتوليد الـ PDF والختم بنجاح",
       data: finalUpdate,
     });
+
   } catch (error) {
     console.error("❌ [BACKEND - APPROVAL ERROR]:", error);
-    res
-      .status(500)
-      .json({
+    
+    // 3. 🛡️ حماية ذكية: لا ترسل استجابة خطأ إذا تم إرسال استجابة سابقة بالفعل
+    if (!res.headersSent) {
+      return res.status(500).json({
         success: false,
-        message: error.message || "حدث خطأ أثناء الاعتماد",
+        message: error.message || "حدث خطأ أثناء الاعتماد والتوليد",
       });
+    }
   }
 };
 
