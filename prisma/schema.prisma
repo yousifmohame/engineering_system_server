@@ -1180,11 +1180,26 @@ model Quotation {
   showMissingDocs Boolean @default(false)
 
   // الشروط
-  terms          String?        @db.Text
-  conclusion     String?        @db.Text
-  notes          String?        @db.Text
-  clientTitle    ClientTitle    @default(MR)
-  handlingMethod HandlingMethod @default(DIRECT)
+  terms          String? @db.Text
+  conclusion     String? @db.Text
+  notes          String? @db.Text
+  // ----------------------------------------------------
+  // التعديل 1: تحويل الـ Enums إلى نصوص لتقبل القيم المخصصة
+  // ----------------------------------------------------
+  clientTitle    String? @default("MR") // تم التعديل إلى String
+  handlingMethod String? @default("DIRECT") // تم التعديل إلى String
+
+  // ----------------------------------------------------
+  // التعديل 2: حقول إخفاء/إظهار مفقودة
+  // ----------------------------------------------------
+  showSummaryTable Boolean @default(true) // حقل إظهار جدول الخلاصة العلوي
+
+  // ----------------------------------------------------
+  // التعديل 3: حقول لحفظ الأسماء التي تُعدل يدوياً في المعاينة
+  // ----------------------------------------------------
+  secondPartyName String? // حفظ اسم العميل إذا تم تعديله يدوياً
+  secondPartyRep  String? // حفظ اسم ممثل العميل إذا تم تعديله يدوياً
+  firstPartyRep   String? // حفظ اسم ممثل المكتب إذا تم تعديله يدوياً
 
   // حقول التمثيل النظامي الإضافية
   authDocIssueDate      DateTime?
@@ -1204,18 +1219,19 @@ model Quotation {
   // 🔗 6. العلاقة مع العقد
   contract Contract? // العلاقة موجودة مسبقاً من جهة العقد
 
-  clientType        String?
-  signatureMethod   String?
-  repName           String?
-  repIdNumber       String?
-  repPhone          String?
-  repCapacity       String?
-  authDocType       String?
-  authDocNumber     String?
-  authDocDate       DateTime?
-  authDocIssuer     String?
-  isAuthDocAttached Boolean   @default(false)
-  pdfUrl            String?   @db.Text
+  clientType          String?
+  signatureMethod     String?
+  repName             String?
+  repIdNumber         String?
+  repPhone            String?
+  repCapacity         String?
+  authDocType         String?
+  authDocNumber       String?
+  authDocDate         DateTime?
+  authDocIssuer       String?
+  isAuthDocAttached   Boolean   @default(false)
+  pdfUrl              String?   @db.Text
+  transactionTypeName String? // عمود جديد لحفظ اسم المعاملة المكتوب يدوياً
 
   showTimeline      Boolean   @default(true)
   totalDuration     Int       @default(20)
