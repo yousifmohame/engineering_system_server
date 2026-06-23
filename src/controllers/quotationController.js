@@ -3105,7 +3105,17 @@ const approveQuotationWorkflow = async (req, res) => {
     fs.writeFileSync(filePath, Buffer.from(response.data));
     const fileUrl = `/uploads/quotations/${fileName}`;
 
-    await prisma.quotation.update({ where: { id }, data: { pdfUrl: fileUrl } });
+    // 🚀 إضافة "const finalUpdate =" قبل التحديث
+    const finalUpdate = await prisma.quotation.update({ 
+      where: { id }, 
+      data: { pdfUrl: fileUrl } 
+    });
+
+    res.json({ 
+      success: true, 
+      message: "تم الاعتماد وتوليد الـ PDF والختم بنجاح", 
+      data: finalUpdate // الآن المتغير معرف ولن يحدث خطأ
+    });
 
     res.json({
       success: true,
