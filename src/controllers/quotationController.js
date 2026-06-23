@@ -229,6 +229,8 @@ const createQuotation = async (req, res) => {
           number: quotationNumber,
           subject: data.subject || null,
           address: data.address || null,
+          bgType: data.bgType || "official1",
+          fontFamily: data.fontFamily || "Tajawal",
 
           client: data.clientId
             ? { connect: { id: data.clientId } }
@@ -437,6 +439,8 @@ const updateQuotation = async (req, res) => {
       ...(data.notes !== undefined && { notes: data.notes }),
       ...(data.subject !== undefined && { subject: data.subject }),
       ...(data.address !== undefined && { address: data.address }),
+      ...(data.bgType && { bgType: data.bgType }),
+      ...(data.fontFamily && { fontFamily: data.fontFamily }),
       ...(data.terms !== undefined && { terms: data.terms }),
       ...(data.conclusion !== undefined && { conclusion: data.conclusion }),
       ...(data.templateType && { templateType: data.templateType }),
