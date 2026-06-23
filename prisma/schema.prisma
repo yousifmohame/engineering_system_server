@@ -1232,6 +1232,7 @@ model Quotation {
   isAuthDocAttached   Boolean   @default(false)
   pdfUrl              String?   @db.Text
   transactionTypeName String? // عمود جديد لحفظ اسم المعاملة المكتوب يدوياً
+  documentTitle       String?
 
   showTimeline      Boolean   @default(true)
   totalDuration     Int       @default(20)

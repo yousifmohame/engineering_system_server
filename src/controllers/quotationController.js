@@ -246,6 +246,7 @@ const createQuotation = async (req, res) => {
           transactionType: validTransactionTypeId
             ? { connect: { id: validTransactionTypeId } }
             : undefined,
+          documentTitle: data.documentTitle || data.documentType,
           transactionTypeName:
             data.transactionTypeName ||
             data.transactionTypeId ||
@@ -457,6 +458,9 @@ const updateQuotation = async (req, res) => {
       }),
       ...(data.firstPartyRep !== undefined && {
         firstPartyRep: data.firstPartyRep,
+      }),
+      ...(data.documentTitle !== undefined && {
+        documentTitle: data.documentTitle,
       }),
       ...(data.transactionTypeName !== undefined && {
         transactionTypeName: data.transactionTypeName,
@@ -2748,12 +2752,10 @@ const approveQuotationWorkflow = async (req, res) => {
     });
 
     if (!quote || quote.status !== "PENDING_APPROVAL") {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "العرض ليس قيد المراجعة أو تم اعتماده مسبقاً",
-        });
+      return res.status(400).json({
+        success: false,
+        message: "العرض ليس قيد المراجعة أو تم اعتماده مسبقاً",
+      });
     }
 
     const randomStr = crypto.randomBytes(3).toString("hex").toUpperCase();
@@ -2891,7 +2893,11 @@ const approveQuotationWorkflow = async (req, res) => {
       ...reqData,
       quotationId: quote.id,
 
-      documentType: reqData.documentType || templateTitle,
+      documentType:
+        reqData.documentTitle ||
+        quote.documentTitle ||
+        reqData.documentType ||
+        templateTitle,
       transactionType:
         reqData.transactionTypeName ||
         reqData.transactionType ||
@@ -3119,10 +3125,9 @@ const approveQuotationWorkflow = async (req, res) => {
       message: "تم الاعتماد وتوليد الـ PDF والختم بنجاح",
       data: finalUpdate,
     });
-
   } catch (error) {
     console.error("❌ [BACKEND - APPROVAL ERROR]:", error);
-    
+
     // 3. 🛡️ حماية ذكية: لا ترسل استجابة خطأ إذا تم إرسال استجابة سابقة بالفعل
     if (!res.headersSent) {
       return res.status(500).json({
