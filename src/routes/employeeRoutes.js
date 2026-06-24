@@ -7,26 +7,24 @@ const fs = require("fs");
 const { protect } = require("../middleware/authMiddleware");
 
 const { analyzeEmploymentContract } = require("../controllers/contractAiController");
-
-// مسار لتحليل عقد العمل باستخدام الذكاء الاصطناعي
-
 // ==============================================================
 // 🛠️ إعداد Multer المخصص لمرفقات الموظفين
 // ==============================================================
+
 const employeeStorage = multer.diskStorage({
   destination: (req, file, cb) => {
-    // المسار المخصص لمرفقات الـ HR
     const dest = path.join(__dirname, "../../uploads/employees");
-    
-    // إنشاء المجلد إذا لم يكن موجوداً
     if (!fs.existsSync(dest)) fs.mkdirSync(dest, { recursive: true });
-    
     cb(null, dest);
   },
   filename: (req, file, cb) => {
-    // تنظيف الاسم وإنشاء اسم فريد
-    const cleanName = file.originalname.replace(/[^a-zA-Z0-9.\-_أ-ي]/g, "_").replace(/\s+/g, "_");
+    // 🚀 الحل هنا: تحويل الترميز من Latin-1 إلى UTF-8 لفك تشفير الحروف العربية
+    const originalNameUtf8 = Buffer.from(file.originalname, 'latin1').toString('utf8');
+    
+    // تنظيف الاسم وإنشاء اسم فريد باستخدام الاسم المعالج
+    const cleanName = originalNameUtf8.replace(/[^a-zA-Z0-9.\-_أ-ي]/g, "_").replace(/\s+/g, "_");
     const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    
     cb(null, `${uniqueSuffix}-${cleanName}`);
   },
 });
@@ -64,7 +62,8 @@ const {
   getEmployeeAttendanceAnalysis,
   getEmployeeById,
   createEmployeeContract,
-  getAllEmployeeContracts
+  getAllEmployeeContracts,
+  renewEmployeeAttachment,
 } = require("../controllers/employeeController");
 
 router.route("/").get(getAllEmployees).post(createEmployee);
@@ -103,7 +102,10 @@ router.get("/:id/attachments", protect, getEmployeeAttachments);
 // 2. رفع مرفق لموظف معين
 router.post("/:id/attachments", protect, uploadEmployeeDoc.single("file"), uploadEmployeeAttachment);
 
-// 3. حذف مرفق (للموظف) - لاحظ أننا نستخدم :attachmentId
+// 3. 🚀 تجديد مستند منتهي (المسار الجديد)
+router.post("/attachments/:attachmentId/renew", protect, uploadEmployeeDoc.single("file"), renewEmployeeAttachment);
+
+// 4. حذف مرفق (للموظف)
 router.delete("/attachments/:attachmentId", protect, deleteEmployeeAttachment);
 
 module.exports = router;

@@ -9,9 +9,6 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ===============================================
-// 1. نماذج المستخدمين والصلاحيات (Core Identity & Access)
-// ===============================================
 // ==================================================
 // 1. سياسات الدوام والإجازات (Time & Leave Policies)
 // ==================================================
@@ -200,13 +197,26 @@ model EmployeeLeave {
 // 4. مركز مستندات الموظف المعزز بالذكاء الاصطناعي (AI Document Center)
 // ==================================================
 model EmployeeDocument {
-  id        String   @id @default(cuid())
-  fileName  String
-  filePath  String   @unique
-  fileType  String
-  fileSize  Int
-  notes     String?  @db.Text
-  category  String   @default("OTHER") // "CONTRACT", "ID_PASSPORT", "CERTIFICATE", "OTHER"
+  id         String  @id @default(cuid())
+  fileName   String // اسم الملف الأصلي وقت الرفع
+  customName String? // 🚀 الاسم المعرب (مثال: هوية وطنية)
+  filePath   String // @unique تم إزالة الـ unique للسماح بتجديد نفس الملف إذا لزم الأمر
+  fileType   String
+  fileSize   Int
+  notes      String? @db.Text
+  category   String  @default("OTHER") // "CONTRACT", "ID_PASSPORT", "CERTIFICATE", "OTHER"
+
+  // 🚀 حقول التواريخ والحالة الجديدة
+  issueDate   DateTime? @db.Date
+  expiryDate  DateTime? @db.Date
+  isPermanent Boolean   @default(false)
+  status      String    @default("ACTIVE") // ACTIVE: ساري, ARCHIVED: مؤرشف/مجدد
+
+  // 🚀 حقول التجديد (لربط المستند الجديد بالقديم)
+  parentDocId String?
+  parentDoc   EmployeeDocument?  @relation("DocumentRenewals", fields: [parentDocId], references: [id])
+  renewals    EmployeeDocument[] @relation("DocumentRenewals")
+
   createdAt DateTime @default(now())
 
   // الموظف صاحب المستند (الذي يُرفع المستند في ملفه)

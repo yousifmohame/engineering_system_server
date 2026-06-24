@@ -1058,15 +1058,18 @@ const getEmployeeById = async (req, res) => {
   }
 };
 
-// 1. جلب مرفقات الموظف
+// 1. جلب مرفقات الموظف (النشطة فقط)
 // GET /api/employees/:id/attachments
 const getEmployeeAttachments = async (req, res) => {
   try {
     const { id } = req.params;
     const documents = await prisma.employeeDocument.findMany({
-      where: { employeeId: id },
+      where: { 
+        employeeId: id,
+        status: "ACTIVE" // 👈 جلب المستندات السارية فقط (لإخفاء الأرشيف القديم)
+      },
       include: {
-        uploadedBy: { select: { name: true } } // جلب اسم من قام بالرفع
+        uploadedBy: { select: { name: true } }
       },
       orderBy: { createdAt: "desc" },
     });
@@ -1078,12 +1081,12 @@ const getEmployeeAttachments = async (req, res) => {
   }
 };
 
-// 2. رفع مرفق للموظف
+// 2. رفع مرفق جديد للموظف
 // POST /api/employees/:id/attachments
 const uploadEmployeeAttachment = async (req, res) => {
   try {
     const { id: employeeId } = req.params;
-    const { category, notes } = req.body; 
+    const { category, notes, customName, issueDate, expiryDate, isPermanent } = req.body; 
     const uploaderId = req.user?.id || req.employee?.id; 
 
     if (!uploaderId) {
@@ -1103,24 +1106,26 @@ const uploadEmployeeAttachment = async (req, res) => {
 
     const dbFilePath = `/uploads/employees/${req.file.filename}`;
 
-    // ✅ التنفيذ المتوافق مع الـ Schema الخاص بك
+    const originalNameUtf8 = Buffer.from(req.file.originalname, 'latin1').toString('utf8');
+
     const newDocument = await prisma.employeeDocument.create({
       data: {
-        fileName: req.file.originalname,
+        fileName: originalNameUtf8, // 👈 استخدام الاسم المعالج
+        customName: customName || originalNameUtf8,
         filePath: dbFilePath,
         fileType: req.file.mimetype,
         fileSize: req.file.size,
         notes: notes || null,
-        category: category || "OTHER", // 👈 تم استخدام category كما في الداتا بيز
-        employee: {
-          connect: { id: employeeId }
-        },
-        uploadedBy: {
-          connect: { id: uploaderId }
-        }
+        category: category || "OTHER",
+        issueDate: issueDate && issueDate !== "null" ? new Date(issueDate) : null, // 👈 تواريخ
+        expiryDate: expiryDate && expiryDate !== "null" && isPermanent !== 'true' ? new Date(expiryDate) : null,
+        isPermanent: isPermanent === 'true' || isPermanent === true, // 👈 هل هو دائم؟
+        status: "ACTIVE",
+        employee: { connect: { id: employeeId } },
+        uploadedBy: { connect: { id: uploaderId } }
       },
       include: {
-        uploadedBy: { select: { name: true } } // لإرجاع الاسم فوراً للفرونت إند
+        uploadedBy: { select: { name: true } }
       }
     });
 
@@ -1129,6 +1134,74 @@ const uploadEmployeeAttachment = async (req, res) => {
     console.error("Error uploading employee document:", error);
     if (req.file) fs.unlinkSync(req.file.path);
     res.status(500).json({ message: "خطأ في الخادم أثناء حفظ المستند" });
+  }
+};
+
+// 3. 🚀 جديد: تجديد مستند منتهي 
+// POST /api/employees/attachments/:attachmentId/renew
+const renewEmployeeAttachment = async (req, res) => {
+  try {
+    const { attachmentId } = req.params;
+    const { customName, issueDate, expiryDate, isPermanent, notes } = req.body;
+    const uploaderId = req.user?.id || req.employee?.id;
+
+    // جلب المستند القديم
+    const oldDocument = await prisma.employeeDocument.findUnique({
+      where: { id: attachmentId }
+    });
+
+    if (!oldDocument) {
+      if (req.file) fs.unlinkSync(req.file.path);
+      return res.status(404).json({ message: "المستند المراد تجديده غير موجود" });
+    }
+
+    // تحديد مسار الملف (إما ملف جديد مرفوع، أو استخدام نفس الملف القديم إذا تم تحديث التواريخ فقط)
+    let dbFilePath = oldDocument.filePath;
+    let fileType = oldDocument.fileType;
+    let fileSize = oldDocument.fileSize;
+    let fileName = oldDocument.fileName;
+
+    if (req.file) {
+      dbFilePath = `/uploads/employees/${req.file.filename}`;
+      fileType = req.file.mimetype;
+      fileSize = req.file.size;
+      fileName = Buffer.from(req.file.originalname, 'latin1').toString('utf8');
+    }
+
+    // 1. أرشفة المستند القديم (إيقاف تنشيطه)
+    await prisma.employeeDocument.update({
+      where: { id: attachmentId },
+      data: { status: "ARCHIVED" }
+    });
+
+    // 2. إنشاء المستند الجديد وربطه بالقديم
+    const renewedDocument = await prisma.employeeDocument.create({
+      data: {
+        fileName: fileName,
+        customName: customName || oldDocument.customName,
+        filePath: dbFilePath,
+        fileType: fileType,
+        fileSize: fileSize,
+        notes: notes || null,
+        category: oldDocument.category,
+        issueDate: issueDate && issueDate !== "null" ? new Date(issueDate) : null,
+        expiryDate: expiryDate && expiryDate !== "null" && isPermanent !== 'true' ? new Date(expiryDate) : null,
+        isPermanent: isPermanent === 'true' || isPermanent === true,
+        status: "ACTIVE",
+        parentDocId: oldDocument.id, // 👈 ربط بالأرشيف
+        employee: { connect: { id: oldDocument.employeeId } },
+        uploadedBy: { connect: { id: uploaderId } }
+      },
+      include: {
+        uploadedBy: { select: { name: true } }
+      }
+    });
+
+    res.status(201).json({ message: "تم تجديد المستند بنجاح", attachment: renewedDocument });
+  } catch (error) {
+    console.error("Error renewing employee document:", error);
+    if (req.file) fs.unlinkSync(req.file.path);
+    res.status(500).json({ message: "خطأ أثناء محاولة تجديد المستند" });
   }
 };
 
@@ -1334,5 +1407,6 @@ module.exports = {
   uploadEmployeeAttachment,
   deleteEmployeeAttachment,
   createEmployeeContract,
-  getAllEmployeeContracts
+  getAllEmployeeContracts,
+  renewEmployeeAttachment
 };
