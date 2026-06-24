@@ -1234,8 +1234,8 @@ model Quotation {
   transactionTypeName String? // عمود جديد لحفظ اسم المعاملة المكتوب يدوياً
   documentTitle       String?
 
-  bgType        String?  @default("official1")
-  fontFamily    String?  @default("Tajawal")
+  bgType     String? @default("official1")
+  fontFamily String? @default("Tajawal")
 
   showTimeline      Boolean   @default(true)
   totalDuration     Int       @default(20)

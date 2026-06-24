@@ -1066,6 +1066,7 @@ const mapHandlingMethod = (method) => {
 // ============================================================================
 // 🌟 دالة توليد قالب HTML لعروض الأسعار (مصححة لإظهار QR الوثيقة) 🌟
 // ============================================================================
+// src/controllers/quotationController.js
 const buildQuotationHtmlTemplate = (
   data,
   verificationQrImage = "",
@@ -1427,9 +1428,6 @@ const buildQuotationHtmlTemplate = (
       const bank = bankAccountsData.find((b) => b.id === bankId);
       if (!bank) return "";
 
-      // 🌟 التعديل الحاسم هنا:
-      // 1. استخدام bank.bankLogo بدلاً من bank.logo
-      // 2. تحويل الصورة إلى Base64 لضمان رؤية Gotenberg لها
       const base64BankLogo = getLocalImageAsBase64(bank.logo || bank.bankLogo);
 
       return `
@@ -1466,7 +1464,7 @@ const buildQuotationHtmlTemplate = (
         </tr>`;
     });
     bankAccountsHTML = `
-      <div style="border-top: 1px solid rgba(216,180,106,0.2); margin-top: 4px; padding-top: 12px;">
+      <div style="border-top: 1px solid rgba(216,180,106,0.2); margin-top: 4px; padding-top: 12px; page-break-inside: avoid;">
         <span style="font-weight: 900; color: #123f59; display: block; margin-bottom: 8px; text-align: right; font-size: 11px;">البيانات البنكية المعتمدة للسداد:</span>
         <table style="width: 100%; border-collapse: collapse; background-color: transparent; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05); text-align: center;">
           <thead style="background-color: rgba(241, 245, 249, 0.8);">
@@ -1565,15 +1563,15 @@ const buildQuotationHtmlTemplate = (
     }
 
     timelineHTML = `
-      <div class="avoid-break bg-transparent" style="margin-bottom: 24px;">
-        <h4 style="margin: 0 0 12px 0; font-size: 11.5px; font-weight: 900; display: flex; align-items: center; gap: 6px; color: ${accentColor};">
+      <div class="bg-transparent" style="margin-bottom: 24px;">
+        <h4 style="margin: 0 0 12px 0; font-size: 11.5px; font-weight: 900; display: flex; align-items: center; gap: 6px; color: ${accentColor}; page-break-after: avoid;">
             ${icons.calendar} ${signatureMethod !== "SELF" ? "خامساً" : "رابعاً"}: الجدول الزمني لتنفيذ الخدمات
         </h4>
-        <div style="margin-bottom: 12px; font-size: 10.5px; font-weight: bold; color: #475569; background-color: rgba(248, 250, 252, 0.5); padding: 10px; border-radius: 8px; border: 1px solid #f1f5f9; line-height: 1.6;">
+        <div style="margin-bottom: 12px; font-size: 10.5px; font-weight: bold; color: #475569; background-color: rgba(248, 250, 252, 0.5); padding: 10px; border-radius: 8px; border: 1px solid #f1f5f9; line-height: 1.6; page-break-after: avoid;">
           ${timelineStartText}
         </div>
         <table style="width: 100%; border-collapse: collapse; text-align: center; font-size: 10.5px; border: 1px solid ${accentColor}; margin-bottom: 0; background-color: transparent;">
-          <thead style="background-color: ${accentColor}; color: #fff; font-weight: 900;" class="avoid-break">
+          <thead style="background-color: ${accentColor}; color: #fff; font-weight: 900;">
             <tr>
               <th style="padding: 8px; border: 1px solid ${accentColor}; width: 8%;">م</th>
               <th style="padding: 8px; border: 1px solid ${accentColor}; width: 45%;">الخدمة / المرحلة</th>
@@ -1592,7 +1590,7 @@ const buildQuotationHtmlTemplate = (
             </tr>
           </tbody>
         </table>
-        ${timelineState.showTimelineNotes && timelineState.timelineNotes ? `<div style="margin-top: 8px; font-size: 10px; font-weight: bold; color: #64748b; line-height: 1.6; text-align: justify;">* ${timelineState.timelineNotes}</div>` : ""}
+        ${timelineState.showTimelineNotes && timelineState.timelineNotes ? `<div style="margin-top: 8px; font-size: 10px; font-weight: bold; color: #64748b; line-height: 1.6; text-align: justify; page-break-inside: avoid;">* ${timelineState.timelineNotes}</div>` : ""}
       </div>
     `;
   }
@@ -1659,7 +1657,6 @@ const buildQuotationHtmlTemplate = (
   `;
 
   // ================= HTML Output =================
-  // ================= HTML Output =================
   return `
     <!DOCTYPE html>
     <html dir="rtl" lang="ar">
@@ -1675,41 +1672,31 @@ const buildQuotationHtmlTemplate = (
         @page { size: A4; margin: 0; }
         
         body, html { 
-            direction: rtl;
-            text-align: right;
-            height: 100%; 
-            margin: 0; 
-            padding: 0; 
-            font-family: '${fontFamily}', sans-serif !important; 
-            color: #123f59; 
-            -webkit-print-color-adjust: exact !important; 
-            print-color-adjust: exact !important; 
+            direction: rtl; text-align: right; height: 100%; margin: 0; padding: 0; 
+            font-family: '${fontFamily}', sans-serif !important; color: #123f59; 
+            -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; 
         }
         
         .fixed-print-bg {
-          position: fixed;
-          top: 0;
-          left: 0;
-          width: 100%;
-          height: 100vh;
+          position: fixed; top: 0; left: 0; width: 100%; height: 100vh;
           background-image: ${SECURITY_BACKGROUNDS[bgType] || SECURITY_BACKGROUNDS["none"]};
-          background-size: 100% 100%;
-          background-repeat: no-repeat;
-          background-position: center;
-          z-index: -10;
+          background-size: 100% 100%; background-repeat: no-repeat; background-position: center; z-index: -10;
         }
 
         .page-container { 
-          width: 100%; 
-          box-sizing: border-box; 
-          position: relative; 
-          page-break-after: always; 
-          background-color: transparent !important; 
-          box-shadow: none !important;
+          width: 100%; box-sizing: border-box; position: relative; page-break-after: always; 
+          background-color: transparent !important; box-shadow: none !important;
         }
         
-        table { width: 100%; border-collapse: collapse; margin-bottom: 24px; font-size: 10.5px; } 
-        .avoid-break { break-inside: avoid; page-break-inside: avoid; }
+        /* 🚀 الإعدادات السحرية لانقسام الجداول بشكل ذكي */
+        table { width: 100%; border-collapse: collapse; margin-bottom: 24px; font-size: 10.5px; page-break-inside: auto; } 
+        tr { page-break-inside: avoid; page-break-after: auto; }
+        thead { display: table-header-group; }
+        tfoot { display: table-footer-group; }
+        
+        /* 🚀 ضمان حماية العناصر المهمة باستخدام important */
+        .avoid-break { break-inside: avoid !important; page-break-inside: avoid !important; }
+        
         .bg-slate-50 { background-color: #f8fafc; }
         .text-slate-500 { color: #64748b; }
         .text-slate-700 { color: #334155; }
@@ -1717,14 +1704,13 @@ const buildQuotationHtmlTemplate = (
         .font-bold { font-weight: bold; }
         .font-black { font-weight: 900; }
         .font-mono { font-family: monospace; }
-        .section-title { font-size: 11.5px; font-weight: 900; color: #123f59; margin-bottom: 8px; border-bottom: 2px solid #123f59; padding-bottom: 4px; display: inline-block; }
+        .section-title { font-size: 11.5px; font-weight: 900; color: #123f59; margin-bottom: 8px; border-bottom: 2px solid #123f59; padding-bottom: 4px; display: inline-block; page-break-after: avoid; }
       </style>
     </head>
     <body>
       <div class="fixed-print-bg"></div>
 
       <div class="page-container" style="display: flex; flex-direction: column; min-height: 100vh; box-sizing: border-box; align-items: center; text-align: center; padding: 40px; position: relative;">
-        
         ${
           showSummaryTable
             ? `
@@ -1742,7 +1728,6 @@ const buildQuotationHtmlTemplate = (
                     <span style="font-size: 8px; font-weight: 900; color: #123f59; line-height: 1.2;">شركة ديتيلز كونسولتس<br/>للاستشارات الهندسية</span>
                   </div>
                 </td>
-
                 <td style="width: 40%; padding: 0; vertical-align: top; border-left: 2px solid ${accentColor};">
                   <div style="display: flex; flex-direction: column; height: 100%;">
                     <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; border-bottom: 1px solid #cbd5e1; flex: 1;">
@@ -1759,7 +1744,6 @@ const buildQuotationHtmlTemplate = (
                     </div>
                   </div>
                 </td>
-
                 <td style="width: 30%; padding: 0; vertical-align: top;">
                   <div style="display: flex; flex-direction: column; height: 100%;">
                     <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; border-bottom: 1px solid #cbd5e1; flex: 1;">
@@ -1779,18 +1763,15 @@ const buildQuotationHtmlTemplate = (
               </tr>
             </tbody>
           </table>
-        </div>
-        `
+        </div>`
             : ""
         }
 
         <div style="display: flex; flex-direction: column; justify-content: center; align-items: center; width: 100%; flex: 1; padding-bottom: ${showSummaryTable ? "240px" : "40px"};">
-          
           <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 36px; margin-bottom: 36px; width: 100%;">
             <div style="width: 280px; display: flex; align-items: center; justify-content: center;">
               <img src="${logoUrl}" alt="Logo" style="max-height: 100%; max-width: 100%; mix-blend-mode: multiply; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.1));" />
             </div>
-
             ${
               address
                 ? `
@@ -1798,8 +1779,7 @@ const buildQuotationHtmlTemplate = (
               <div style="width: 80px; height: 5px; background-color: ${goldColor}; border-radius: 9999px; opacity: 0.8;"></div>
               <h1 style="font-size: 34px; font-weight: 900; color: #123f59; line-height: 1.4; letter-spacing: 0.025em; margin: 0;">${address}</h1>
               <div style="width: 80px; height: 5px; background-color: ${goldColor}; border-radius: 9999px; opacity: 0.8;"></div>
-            </div>
-            `
+            </div>`
                 : ""
             }
           </div>
@@ -1822,13 +1802,11 @@ const buildQuotationHtmlTemplate = (
                 ? `
             <p style="font-size: 11px; text-align:center; font-weight: 900; color: #e11d48; margin-top: 0; margin-bottom: 24px;">
               ${[
-                (
-                  authDocType === "مستند انتفاع" && customUsufructType
-                    ? customUsufructType
-                    : authDocType
-                )
-                  ? `معلومات التفويض: ${authDocType === "مستند انتفاع" && customUsufructType ? customUsufructType : authDocType}`
-                  : "",
+                authDocType === "مستند انتفاع" && customUsufructType
+                  ? customUsufructType
+                  : authDocType
+                    ? `معلومات التفويض: ${authDocType === "مستند انتفاع" && customUsufructType ? customUsufructType : authDocType}`
+                    : "",
                 authDocNumber ? `رقم المستند: ${authDocNumber}` : "",
                 showAuthDocExpiryDate && authDocExpiryDate
                   ? `تاريخ انتهاء المستند: ${formatDateParts(authDocExpiryDate).gregorian}`
@@ -1836,8 +1814,7 @@ const buildQuotationHtmlTemplate = (
               ]
                 .filter(Boolean)
                 .join(" | ")}
-            </p>
-            `
+            </p>`
                 : ""
             }
 
@@ -1900,9 +1877,8 @@ const buildQuotationHtmlTemplate = (
               }
             </table>
           </div>
-
-        </div> </div>
-
+        </div> 
+      </div>
 
       <div class="page-container" style="padding: 0;">
         <table style="width: 100%; border: none; margin: 0; position: relative; z-index: 1;">
@@ -1910,46 +1886,29 @@ const buildQuotationHtmlTemplate = (
             <tr>
               <td style="border: none; padding: 50px 60px 20px 60px;">
                 <div style="display: flex; width: 100%; justify-content: space-between; align-items: stretch; border-bottom: 3px solid ${accentColor}; padding-bottom: 16px; background-color: transparent;">
-                  
                   <div style="width: 240px; flex-shrink: 0; border: 1px solid rgba(18,63,89,0.267); display: flex; flex-direction: column; justify-content: center; padding: 12px; background-color: transparent; box-sizing: border-box;">
                     <div style="color: #475569; font-size: 10px; margin-bottom: 4px; font-weight: bold;">الموضوع</div>
-                    <div style="font-size: 13px; font-weight: bold; color: #123f59; line-height: 1.6; word-wrap: break-word;">
-                      ${subject || "—"}
-                    </div>
+                    <div style="font-size: 13px; font-weight: bold; color: #123f59; line-height: 1.6; word-wrap: break-word;">${subject || "—"}</div>
                   </div>
-
                   <div style="flex: 1; display: flex; align-items: center; justify-content: center; padding: 0 16px; background-color: transparent;">
                     <img src="${logoUrl}" alt="Logo" style="height: 64px; width: auto; max-width: 100%; object-fit: contain; mix-blend-mode: multiply;" />
                   </div>
-
                   <div style="width: 240px; flex-shrink: 0; border: 1px solid rgba(18,63,89,0.267); display: flex; flex-direction: column; background-color: transparent; box-sizing: border-box;">
-                    
                     <div style="display: flex; flex: 1; border-bottom: 1px solid rgba(18,63,89,0.267); background-color: transparent;">
-                      <div style="width: 85px; flex-shrink: 0; padding: 8px; border-left: 1px solid rgba(18,63,89,0.267); color: #475569; font-size: 10px; font-weight: bold; display: flex; align-items: center; background-color: transparent; box-sizing: border-box;">
-                        التاريخ
-                      </div>
-                      <div style="flex: 1; padding: 8px; font-size: 9px; font-weight: bold; color: #123f59; display: flex; align-items: center; background-color: transparent; box-sizing: border-box;">
-                        ${issueDateParts.combined}
-                      </div>
+                      <div style="width: 85px; flex-shrink: 0; padding: 8px; border-left: 1px solid rgba(18,63,89,0.267); color: #475569; font-size: 10px; font-weight: bold; display: flex; align-items: center; background-color: transparent; box-sizing: border-box;">التاريخ</div>
+                      <div style="flex: 1; padding: 8px; font-size: 9px; font-weight: bold; color: #123f59; display: flex; align-items: center; background-color: transparent; box-sizing: border-box;">${issueDateParts.combined}</div>
                     </div>
-                    
                     <div style="display: flex; flex: 1; background-color: transparent;">
-                      <div style="width: 85px; flex-shrink: 0; padding: 8px; border-left: 1px solid rgba(18,63,89,0.267); color: #475569; font-size: 10px; font-weight: bold; display: flex; align-items: center; background-color: transparent; box-sizing: border-box;">
-                        رقم المرجع
-                      </div>
-                      <div style="flex: 1; padding: 8px; font-family: monospace; font-size: 11px; font-weight: 900; color: #123f59; display: flex; align-items: center; background-color: transparent; box-sizing: border-box;">
-                        ${referenceNumber}
-                      </div>
+                      <div style="width: 85px; flex-shrink: 0; padding: 8px; border-left: 1px solid rgba(18,63,89,0.267); color: #475569; font-size: 10px; font-weight: bold; display: flex; align-items: center; background-color: transparent; box-sizing: border-box;">رقم المرجع</div>
+                      <div style="flex: 1; padding: 8px; font-family: monospace; font-size: 11px; font-weight: 900; color: #123f59; display: flex; align-items: center; background-color: transparent; box-sizing: border-box;">${referenceNumber}</div>
                     </div>
-
                   </div>
-
                 </div>
               </td>
             </tr>
           </thead>
 
-          <tbody style="display: table-row-group; ">
+          <tbody style="display: table-row-group;">
             <tr>
               <td style="border: none; padding: 20px 60px;">
                 
@@ -1974,16 +1933,15 @@ const buildQuotationHtmlTemplate = (
                   </tr>
                 </table>
 
-                <div class="avoid-break bg-transparent" style="margin-bottom: 24px;">
-                  <h4 style="margin: 0 0 16px 0; font-size: 13px; font-weight: 900; color: ${accentColor}; text-align: right;">${clientTitle} ${secondPartyName || clientNameForPreview}</h4>
-                  
-                  <p style="margin: 12px 0; font-size: 12px; font-weight: 900; color: ${accentColor}; text-align: right;">السلام عليكم ورحمة الله وبركاته ،،,</p>
-                  <div style="font-size: 11.5px; font-weight: bold; color: #475569; line-height: 24px; text-align: right; white-space: pre-wrap; letter-spacing: 0px; margin-bottom: 16px;">${introText}</div>
+                <div class="bg-transparent" style="margin-bottom: 24px;">
+                  <h4 style="margin: 0 0 16px 0; font-size: 13px; font-weight: 900; color: ${accentColor}; text-align: right; page-break-after: avoid;">${clientTitle} ${secondPartyName || clientNameForPreview}</h4>
+                  <p style="margin: 12px 0; font-size: 12px; font-weight: 900; color: ${accentColor}; text-align: right; page-break-after: avoid;">السلام عليكم ورحمة الله وبركاته ،،,</p>
+                  <div style="font-size: 11.5px; font-weight: bold; color: #475569; line-height: 24px; text-align: right; white-space: pre-wrap; margin-bottom: 16px; page-break-after: avoid;">${introText}</div>
                 </div>
 
-                <div class="avoid-break bg-transparent" style="margin-bottom: 24px;">
-                  <h4 style="margin: 0 0 8px 0; font-size: 11.5px; font-weight: 900; display: flex; align-items: center; gap: 6px; color: ${accentColor};">
-                     ${icons.userCheck} أولاً: بيانات العميل والمالك وصاحب العلاقة الأصلي
+                <div class="bg-transparent" style="margin-bottom: 24px;">
+                  <h4 style="margin: 0 0 8px 0; font-size: 11.5px; font-weight: 900; display: flex; align-items: center; gap: 6px; color: ${accentColor}; page-break-after: avoid;">
+                      ${icons.userCheck} أولاً: بيانات العميل والمالك وصاحب العلاقة الأصلي
                   </h4>
                   <table style="width: 100%; border-collapse: collapse; text-align: right; font-size: 10.5px; border: 1px solid ${accentColor}; margin-bottom: 0; background-color: transparent;">
                     <tbody class="font-bold text-[#123f59]">
@@ -2006,8 +1964,8 @@ const buildQuotationHtmlTemplate = (
                 ${
                   signatureMethod !== "SELF"
                     ? `
-                <div class="avoid-break bg-transparent" style="margin-bottom: 24px;">
-                  <div class="section-title">ثانياً: بيانات التمثيل النظامي والمفوض بالتوقيع الشرعي</div>
+                <div class="bg-transparent" style="margin-bottom: 24px;">
+                  <div class="section-title" style="page-break-after: avoid;">ثانياً: بيانات التمثيل النظامي والمفوض بالتوقيع الشرعي</div>
                   <table style="width: 100%; border-collapse: collapse; text-align: right; font-size: 10.5px; border: 1px solid ${accentColor}; margin-bottom: 0;">
                     <tbody class="font-bold text-[#123f59]">
                       <tr>
@@ -2018,17 +1976,13 @@ const buildQuotationHtmlTemplate = (
                       </tr>
                       <tr>
                         <td class="bg-slate-50" style="border: 1px solid rgba(18,63,89,0.267); padding: 8px;">الصفة القانونية للتمثيل</td>
-                        <td style="border: 1px solid rgba(18,63,89,0.267); padding: 8px;">
-                          ${signatureMethod === "AGENT" ? "وكيل شرعي" : signatureMethod === "AUTHORIZED" ? "مفوض نظامي" : "مستفيد"}
-                        </td>
+                        <td style="border: 1px solid rgba(18,63,89,0.267); padding: 8px;">${signatureMethod === "AGENT" ? "وكيل شرعي" : signatureMethod === "AUTHORIZED" ? "مفوض نظامي" : "مستفيد"}</td>
                         <td class="bg-slate-50" style="border: 1px solid rgba(18,63,89,0.267); padding: 8px;">رقم جوال الممثل</td>
                         <td class="font-mono text-blue-700" style="border: 1px solid rgba(18,63,89,0.267); padding: 8px;">${repPhone || "---"}</td>
                       </tr>
                       <tr>
                         <td class="bg-slate-50" style="border: 1px solid rgba(18,63,89,0.267); padding: 8px;">نوع مستند التفويض والصفة</td>
-                        <td class="font-black text-slate-700" style="border: 1px solid rgba(18,63,89,0.267); padding: 8px;">
-                           ${authDocType === "مستند انتفاع" && customUsufructType ? customUsufructType : authDocType || "---"}
-                        </td>
+                        <td class="font-black text-slate-700" style="border: 1px solid rgba(18,63,89,0.267); padding: 8px;">${authDocType === "مستند انتفاع" && customUsufructType ? customUsufructType : authDocType || "---"}</td>
                         <td class="bg-slate-50" style="border: 1px solid rgba(18,63,89,0.267); padding: 8px;">بيانات المستند المعتمد</td>
                         <td class="font-mono font-bold text-cyan-800" style="border: 1px solid rgba(18,63,89,0.267); padding: 8px; line-height: 1.6;">
                           <div style="display: flex; flex-direction: column; gap: 2px;">
@@ -2044,8 +1998,8 @@ const buildQuotationHtmlTemplate = (
                     : ""
                 }
 
-                <div class="avoid-break bg-transparent" style="margin-bottom: 24px;">
-                  <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 8px;">
+                <div class="bg-transparent" style="margin-bottom: 24px;">
+                  <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 8px; page-break-after: avoid;">
                     <h4 style="margin: 0; font-size: 11.5px; font-weight: 900; display: flex; align-items: center; gap: 6px; color: ${accentColor};">
                       ${icons.building} ${signatureMethod !== "SELF" ? "ثالثاً" : "ثانياً"}: بيانات المشروع والملكية العقارية
                     </h4>
@@ -2096,9 +2050,7 @@ const buildQuotationHtmlTemplate = (
                     </tbody>
                   </table>`
                       : `
-                  <div style="padding: 16px; border: 1px dashed #cbd5e1; border-radius: 12px; text-align: center; color: #94a3b8; font-size: 12px; font-weight: bold;">
-                    لا توجد قطع مضافة في ملف الملكية المرفق
-                  </div>`
+                  <div style="padding: 16px; border: 1px dashed #cbd5e1; border-radius: 12px; text-align: center; color: #94a3b8; font-size: 12px; font-weight: bold;">لا توجد قطع مضافة في ملف الملكية المرفق</div>`
                   }
                   
                   ${
@@ -2107,20 +2059,8 @@ const buildQuotationHtmlTemplate = (
                   <table style="width: 100%; border-collapse: collapse; text-align: right; font-size: 10.5px; border: 1px solid ${accentColor}; background-color: transparent; margin-top: 12px; margin-bottom: 0;">
                     <tbody class="font-bold text-[#123f59]">
                       <tr>
-                        ${
-                          licenseNumber
-                            ? `
-                        <td class="bg-slate-50" style="border: 1px solid rgba(18,63,89,0.267); padding: 8px; width: 25%;">رقم وتاريخ رخصة البناء</td>
-                        <td class="font-mono" style="border: 1px solid rgba(18,63,89,0.267); padding: 8px; width: ${licenseNumber && serviceNumber ? "25%" : "75%"};">${licenseNumber} لعام ${licenseYear}هـ</td>`
-                            : ""
-                        }
-                        ${
-                          serviceNumber
-                            ? `
-                        <td class="bg-slate-50" style="border: 1px solid rgba(18,63,89,0.267); padding: 8px; width: 25%;">رقم وتاريخ المعاملة / الطلب</td>
-                        <td class="font-mono" style="border: 1px solid rgba(18,63,89,0.267); padding: 8px; width: ${licenseNumber && serviceNumber ? "25%" : "75%"};">${serviceNumber} لعام ${serviceYear}هـ</td>`
-                            : ""
-                        }
+                        ${licenseNumber ? `<td class="bg-slate-50" style="border: 1px solid rgba(18,63,89,0.267); padding: 8px; width: 25%;">رقم وتاريخ رخصة البناء</td><td class="font-mono" style="border: 1px solid rgba(18,63,89,0.267); padding: 8px; width: ${licenseNumber && serviceNumber ? "25%" : "75%"};">${licenseNumber} لعام ${licenseYear}هـ</td>` : ""}
+                        ${serviceNumber ? `<td class="bg-slate-50" style="border: 1px solid rgba(18,63,89,0.267); padding: 8px; width: 25%;">رقم وتاريخ المعاملة / الطلب</td><td class="font-mono" style="border: 1px solid rgba(18,63,89,0.267); padding: 8px; width: ${licenseNumber && serviceNumber ? "25%" : "75%"};">${serviceNumber} لعام ${serviceYear}هـ</td>` : ""}
                       </tr>
                     </tbody>
                   </table>`
@@ -2128,12 +2068,12 @@ const buildQuotationHtmlTemplate = (
                   }
                 </div>
 
-                <div class="avoid-break bg-transparent" style="margin-bottom: 24px;">
-                  <h4 style="margin: 0 0 8px 0; font-size: 11.5px; font-weight: 900; display: flex; align-items: center; gap: 6px; color: ${accentColor};">
+                <div class="bg-transparent" style="margin-bottom: 24px;">
+                  <h4 style="margin: 0 0 8px 0; font-size: 11.5px; font-weight: 900; display: flex; align-items: center; gap: 6px; color: ${accentColor}; page-break-after: avoid;">
                     ${icons.fileText} ${signatureMethod !== "SELF" ? "رابعاً" : "ثالثاً"}: نطاق الأعمال و التكلفة
                   </h4>
                   <table style="width: 100%; border-collapse: collapse; text-align: center; font-size: 10.5px; border: 1px solid ${accentColor}; margin-bottom: 0; table-layout: fixed; background-color: transparent;">
-                    <thead style="background-color: ${accentColor}; color: #fff; font-weight: 900;" class="avoid-break">
+                    <thead style="background-color: ${accentColor}; color: #fff; font-weight: 900;">
                       <tr>
                         <th style="padding: 10px; border: 1px solid ${accentColor}; width: 5%;">م</th>
                         <th style="padding: 10px; text-align: right; border: 1px solid ${accentColor}; width: 95%;">وصف الخدمة</th>
@@ -2146,15 +2086,17 @@ const buildQuotationHtmlTemplate = (
                           : items
                               .map(
                                 (item, index) => `
-                      <tr class="avoid-break">
+                      <tr>
                         <td class="font-mono" style="padding: 8px; border: 1px solid rgba(18,63,89,0.267); vertical-align: top; text-align: center;">${index + 1}</td>
                         <td style="padding: 8px; text-align: right; border: 1px solid rgba(18,63,89,0.267); line-height: 1.625; word-wrap: break-word; white-space: pre-wrap;">${item.title}</td>
                       </tr>`,
                               )
                               .join("")
                       }
-                      
-                      <tr class="avoid-break bg-slate-50" style="background-color: rgba(248, 250, 252, 0.5);">
+                    </tbody>
+                    
+                    <tbody class="avoid-break font-bold text-[#123f59]">
+                      <tr class="bg-slate-50" style="background-color: rgba(248, 250, 252, 0.5);">
                         <td colspan="2" style="padding: 0; border: 1px solid rgba(18,63,89,0.267);">
                           <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; padding: 10px 16px; box-sizing: border-box;">
                             <span class="font-black">المجموع الفرعي</span>
@@ -2162,7 +2104,7 @@ const buildQuotationHtmlTemplate = (
                           </div>
                         </td>
                       </tr>
-                      <tr class="avoid-break bg-transparent">
+                      <tr class="bg-transparent">
                         <td colspan="2" style="padding: 0; border: 1px solid rgba(18,63,89,0.267);">
                           <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; padding: 10px 16px; box-sizing: border-box;">
                             <span style="font-weight: bold; color: #64748b;">ضريبة القيمة المضافة ${taxRate || 15}% ${officeTaxBearing > 0 ? ` (يتحمل المكتب ${officeTaxBearing}%)` : ""}</span>
@@ -2173,7 +2115,7 @@ const buildQuotationHtmlTemplate = (
                       ${
                         officeTaxBearing > 0
                           ? `
-                      <tr class="avoid-break bg-transparent text-emerald-700">
+                      <tr class="bg-transparent text-emerald-700">
                         <td colspan="2" style="padding: 0; border: 1px solid rgba(18,63,89,0.267);">
                           <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; padding: 8px 16px; box-sizing: border-box;">
                             <span style="font-weight: bold; color: #047857;">خصم إعفاء ضريبي ضِمني (المكتب يتحمل نسبة ${officeTaxBearing}%)</span>
@@ -2183,7 +2125,7 @@ const buildQuotationHtmlTemplate = (
                       </tr>`
                           : ""
                       }
-                      <tr class="avoid-break font-black" style="background-color: ${accentColor}; color: #ffffff;">
+                      <tr class="font-black" style="background-color: ${accentColor}; color: #ffffff;">
                         <td colspan="2" style="padding: 0; border: 1px solid rgba(18,63,89,0.267);">
                           <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; padding: 12px 16px; box-sizing: border-box;">
                             <span style="font-size: 12.5px;">الإجمالي النهائي المستحق الصافي للدفع</span>
@@ -2201,8 +2143,8 @@ const buildQuotationHtmlTemplate = (
                   (paymentsList && paymentsList.length > 0) ||
                   (acceptedMethodsList && acceptedMethodsList.length > 0)
                     ? `
-                <div class="avoid-break bg-transparent" style="margin-bottom: 24px;">
-                  <h4 style="margin: 0 0 8px 0; font-size: 11.5px; font-weight: 900; display: flex; align-items: center; gap: 6px; color: ${accentColor};">
+                <div class="bg-transparent" style="margin-bottom: 24px;">
+                  <h4 style="margin: 0 0 8px 0; font-size: 11.5px; font-weight: 900; display: flex; align-items: center; gap: 6px; color: ${accentColor}; page-break-after: avoid;">
                      ${icons.dollarSign} ${signatureMethod !== "SELF" ? "سادساً" : "خامساً"}: الجدول الزمني للدفعات المالية
                   </h4>
                   <table style="width: 100%; border-collapse: collapse; text-align: center; font-size: 10.5px; border: 1px solid ${accentColor}; background-color: transparent; margin-bottom: 0;">
@@ -2262,13 +2204,13 @@ const buildQuotationHtmlTemplate = (
                       <span style="color: ${accentColor}; font-weight: 900; font-size: 10px;">نأمل منكم التكرم بتجهيز المستندات التالية وتسليمها إلي الطرف الأول ليتسنى لنا البدء في تنفيذ الأعمال:</span>
                     </div>
                     <div style="padding: 16px;">
-                      <div style="display: flex; flex-direction: column; gap: 8px;">
+                      <div style="display: block;">
                         ${missingDocs
                           .split(/\r?\n/)
                           .filter((d) => d.trim() !== "")
                           .map(
                             (doc, idx) => `
-                          <div style="display: flex; align-items: flex-start; gap: 10px; padding: 8px 10px; border-radius: 8px; background-color: transparent; border: 1px solid rgba(241,245,249,0.5);">
+                          <div style="display: flex; align-items: flex-start; gap: 10px; padding: 8px 10px; border-radius: 8px; background-color: transparent; border: 1px solid rgba(241,245,249,0.5); margin-bottom: 8px; page-break-inside: avoid;">
                             <span style="flex-shrink: 0; display: flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 50%; font-size: 9px; font-weight: bold; color: #fff; background-color: ${accentColor}; margin-top: 2px; box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);">
                               ${idx + 1}
                             </span>
@@ -2283,13 +2225,12 @@ const buildQuotationHtmlTemplate = (
                     : ""
                 }
 
-                <div class="avoid-break bg-transparent" style="margin-bottom: 32px;">
-                  <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 12px;">
+                <div class="bg-transparent" style="margin-bottom: 32px;">
+                  <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 12px; page-break-after: avoid;">
                     <h4 style="margin: 0; font-size: 11.5px; font-weight: 900; color: ${accentColor};">
                        ${signatureMethod !== "SELF" ? "ثامناً" : "سابعاً"}: الشروط والأحكام والالتزامات العامة
                     </h4>
                   </div>
-
                   <table style="width: 100%; border-collapse: collapse; text-align: right; font-size: 10.5px; border: 1px solid ${accentColor}; background-color: transparent; margin-bottom: 0;">
                     <thead style="background-color: ${accentColor}; color: white; font-weight: 900;">
                       <tr>
@@ -2383,14 +2324,12 @@ const buildQuotationHtmlTemplate = (
           </tbody>
           <tfoot style="display: table-footer-group;">
             <tr>
-              <td colspan="10" style="border: none; height: 120px; background-color: transparent;">
-                </td>
+              <td colspan="10" style="border: none; height: 120px; background-color: transparent;"></td>
             </tr>
           </tfoot>
           
         </table>
       </div>
-
     </body>
     </html>
   `;
