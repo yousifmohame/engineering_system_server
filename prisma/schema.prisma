@@ -451,23 +451,35 @@ model JobOffer {
   employeeAsUser Employee? @relation("AcceptedJobOffer", fields: [employeeId], references: [id])
 }
 
-// نموذج الرواتب و المسيرات
+enum PayrollSource {
+  SYSTEM
+  MUDAD
+}
+
+enum PayrollStatus {
+  PENDING // مسودة عند الموارد البشرية
+  UNDER_REVIEW // تم الإرسال لمشرف العمليات للمراجعة
+  APPROVED // معتمد من مشرف العمليات
+  PAID // تم التحويل (يتم التحديث آلياً عبر ملف مدد)
+}
+
 model PayrollRecord {
-  id             String @id @default(cuid())
+  id             String        @id @default(uuid())
   employeeId     String
-  month          String // مثال: "2026-05"
-  baseSalary     Float  @default(0)
-  housingAllow   Float  @default(0)
-  transportAllow Float  @default(0)
-  deductions     Float  @default(0)
-  netSalary      Float  @default(0)
-  status         String @default("PENDING") // PENDING, APPROVED, PAID
+  month          String // e.g., "2026-05"
+  baseSalary     Float         @default(0)
+  housingAllow   Float         @default(0)
+  transportAllow Float         @default(0)
+  deductions     Float         @default(0)
+  netSalary      Float         @default(0)
+  source         PayrollSource @default(SYSTEM) // <--- الحقل الجديد
+  status         PayrollStatus @default(PENDING) // <--- تم التحديث
 
   employee  Employee @relation(fields: [employeeId], references: [id])
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([employeeId, month]) // لمنع تكرار راتب نفس الموظف في نفس الشهر
+  @@unique([employeeId, month])
 }
 
 // ------ نموذج الأدوار الوظيفية (شاشة 903) ------
