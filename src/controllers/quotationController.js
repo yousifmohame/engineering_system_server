@@ -1882,31 +1882,43 @@ const buildQuotationHtmlTemplate = (
 
       <div class="page-container" style="padding: 0;">
         <table style="width: 100%; border: none; margin: 0; position: relative; z-index: 1;">
-          <thead style="display: table-header-group;">
-            <tr>
-              <td style="border: none; padding: 50px 60px 20px 60px;">
-                <div style="display: flex; width: 100%; justify-content: space-between; align-items: stretch; border-bottom: 3px solid ${accentColor}; padding-bottom: 16px; background-color: transparent;">
-                  <div style="width: 240px; flex-shrink: 0; border: 1px solid rgba(18,63,89,0.267); display: flex; flex-direction: column; justify-content: center; padding: 12px; background-color: transparent; box-sizing: border-box;">
-                    <div style="color: #475569; font-size: 10px; margin-bottom: 4px; font-weight: bold;">الموضوع</div>
-                    <div style="font-size: 13px; font-weight: bold; color: #123f59; line-height: 1.6; word-wrap: break-word;">${subject || "—"}</div>
-                  </div>
-                  <div style="flex: 1; display: flex; align-items: center; justify-content: center; padding: 0 16px; background-color: transparent;">
-                    <img src="${logoUrl}" alt="Logo" style="height: 64px; width: auto; max-width: 100%; object-fit: contain; mix-blend-mode: multiply;" />
-                  </div>
-                  <div style="width: 240px; flex-shrink: 0; border: 1px solid rgba(18,63,89,0.267); display: flex; flex-direction: column; background-color: transparent; box-sizing: border-box;">
-                    <div style="display: flex; flex: 1; border-bottom: 1px solid rgba(18,63,89,0.267); background-color: transparent;">
-                      <div style="width: 85px; flex-shrink: 0; padding: 8px; border-left: 1px solid rgba(18,63,89,0.267); color: #475569; font-size: 10px; font-weight: bold; display: flex; align-items: center; background-color: transparent; box-sizing: border-box;">التاريخ</div>
-                      <div style="flex: 1; padding: 8px; font-size: 9px; font-weight: bold; color: #123f59; display: flex; align-items: center; background-color: transparent; box-sizing: border-box;">${issueDateParts.combined}</div>
-                    </div>
-                    <div style="display: flex; flex: 1; background-color: transparent;">
-                      <div style="width: 85px; flex-shrink: 0; padding: 8px; border-left: 1px solid rgba(18,63,89,0.267); color: #475569; font-size: 10px; font-weight: bold; display: flex; align-items: center; background-color: transparent; box-sizing: border-box;">رقم المرجع</div>
-                      <div style="flex: 1; padding: 8px; font-family: monospace; font-size: 11px; font-weight: 900; color: #123f59; display: flex; align-items: center; background-color: transparent; box-sizing: border-box;">${referenceNumber}</div>
-                    </div>
-                  </div>
-                </div>
-              </td>
-            </tr>
-          </thead>
+          <div style="position: relative;">
+
+  <div style="position: absolute; top: 50px; right: 60px; width: 240px; border: 1px solid rgba(18,63,89,0.267); display: flex; flex-direction: column; justify-content: center; padding: 12px; background-color: #ffffff; box-sizing: border-box; z-index: 50;">
+    <div style="color: #475569; font-size: 10px; margin-bottom: 4px; font-weight: bold;">الموضوع</div>
+    <div style="font-size: 13px; font-weight: bold; color: #123f59; line-height: 1.6; word-wrap: break-word;">${subject || "—"}</div>
+  </div>
+
+  <table style="width: 100%; border-collapse: collapse;">
+    <thead style="display: table-header-group;">
+      <tr>
+        <td style="border: none; padding: 50px 60px 20px 60px;">
+          <div style="display: flex; width: 100%; justify-content: space-between; align-items: stretch; border-bottom: 3px solid ${accentColor}; padding-bottom: 16px; background-color: transparent;">
+            
+            <div style="width: 240px; flex-shrink: 0; border: 1px solid rgba(18,63,89,0.267); display: flex; flex-direction: column; justify-content: center; padding: 12px; background-color: transparent; box-sizing: border-box;">
+              <div style="color: transparent; font-size: 10px; margin-bottom: 4px; font-weight: bold;">الموضوع</div>
+              <div style="font-size: 13px; font-weight: bold; color: transparent; line-height: 1.6; word-wrap: break-word;">${subject || "—"}</div>
+            </div>
+
+            <div style="flex: 1; display: flex; align-items: center; justify-content: center; padding: 0 16px; background-color: transparent;">
+              <img src="${logoUrl}" alt="Logo" style="height: 64px; width: auto; max-width: 100%; object-fit: contain; mix-blend-mode: multiply;" />
+            </div>
+            
+            <div style="width: 240px; flex-shrink: 0; border: 1px solid rgba(18,63,89,0.267); display: flex; flex-direction: column; background-color: transparent; box-sizing: border-box;">
+              <div style="display: flex; flex: 1; border-bottom: 1px solid rgba(18,63,89,0.267); background-color: transparent;">
+                <div style="width: 85px; flex-shrink: 0; padding: 8px; border-left: 1px solid rgba(18,63,89,0.267); color: #475569; font-size: 10px; font-weight: bold; display: flex; align-items: center; background-color: transparent; box-sizing: border-box;">التاريخ</div>
+                <div style="flex: 1; padding: 8px; font-size: 9px; font-weight: bold; color: #123f59; display: flex; align-items: center; background-color: transparent; box-sizing: border-box;">${issueDateParts.combined}</div>
+              </div>
+              <div style="display: flex; flex: 1; background-color: transparent;">
+                <div style="width: 85px; flex-shrink: 0; padding: 8px; border-left: 1px solid rgba(18,63,89,0.267); color: #475569; font-size: 10px; font-weight: bold; display: flex; align-items: center; background-color: transparent; box-sizing: border-box;">رقم المرجع</div>
+                <div style="flex: 1; padding: 8px; font-family: monospace; font-size: 11px; font-weight: 900; color: #123f59; display: flex; align-items: center; background-color: transparent; box-sizing: border-box;">${referenceNumber}</div>
+              </div>
+            </div>
+
+          </div>
+        </td>
+      </tr>
+    </thead>
 
           <tbody style="display: table-row-group;">
             <tr>
@@ -2334,15 +2346,14 @@ const buildQuotationHtmlTemplate = (
     </html>
   `;
 };
-
 // ============================================================================
-// 🌟 دالة مساعدة لتوليد قالب الفوتر الثابت أسفل كل صفحة لـ Gotenberg
+// 🌟 دالة مساعدة لتوليد قالب الفوتر الثابت أسفل كل صفحة لـ Gotenberg (بدون QR Code)
 // ============================================================================
 const buildFooterHtml = (accentColor = "#123f59", fontFamily = "tajawal") => {
   const safeFontFamily = fontFamily.toLowerCase();
   const selectedFontBase64 = fontsBase64[safeFontFamily] || fontsBase64.tajawal;
 
-  // 🚀 تنظيف الـ Base64 للفوتر أيضاً
+  // 🚀 تنظيف الـ Base64 للفوتر
   const cleanBase64 = selectedFontBase64.replace(/[\r\n\s]+/g, "");
 
   return `
@@ -2351,7 +2362,6 @@ const buildFooterHtml = (accentColor = "#123f59", fontFamily = "tajawal") => {
     <head>
       <meta charset="UTF-8">
       <style>
-        /* 🚀 وضع علامات التنصيص واستخدام النص المنظف */
         @font-face {
           font-family: '${fontFamily}';
           src: url("data:font/ttf;base64,${cleanBase64}") format("truetype");
@@ -2369,70 +2379,68 @@ const buildFooterHtml = (accentColor = "#123f59", fontFamily = "tajawal") => {
           -webkit-print-color-adjust: exact !important;
           print-color-adjust: exact !important;
         }
+        
         .footer-container {
           width: 100%;
           padding: 0 40px;
           box-sizing: border-box;
-          font-family: '${fontFamily}', sans-serif !important;
         }
+        
         .footer-content {
           border-top: 2.5px solid ${accentColor};
-          padding-top: 10px;
+          padding-top: 12px;
           display: flex;
-          align-items: flex-start;
-          gap: 12px;
-          color: ${accentColor};
-          direction: ltr; /* للحفاظ على التنسيق الإنجليزي/العربي */
           width: 100%;
         }
-        .qr-box {
-          height: 16mm; 
-          width: 16mm; 
-          flex-shrink: 0;
-          border: 1px solid #cbd5e1; 
-          border-radius: 8px; 
-          background-color: #fff; 
-          padding: 2px;
-          box-sizing: border-box;
-          object-fit: contain;
-        }
+
         .text-box {
           flex: 1; 
           display: flex; 
           flex-direction: column; 
-          justify-content: center; 
-          padding-top: 2px;
+          gap: 6px;
         }
+
         .row-1 {
           display: flex; 
           align-items: center; 
-          justify-content: space-between; 
+          justify-content: space-between; /* النص يمين، ورقم الصفحة يسار */
           direction: rtl;
         }
+
         .address-text {
-          font-size: 8px; 
+          color: ${accentColor};
+          font-size: 8.5px; 
           font-weight: 900; 
           line-height: 1.4;
+          display: flex;
+          align-items: center;
+          gap: 6px;
         }
+
         .page-numbers {
           font-size: 9px;
           font-weight: 900;
           color: #64748b;
           background: #f8fafc;
-          padding: 2px 8px;
-          border-radius: 4px;
+          padding: 3px 10px;
+          border-radius: 6px;
           border: 1px solid #e2e8f0;
+          direction: rtl;
         }
+
         .row-2 {
-          margin-top: 4px; 
           display: flex; 
           align-items: center; 
-          justify-content: flex-start; 
-          gap: 4px;
-          font-size: 7.5px; 
+          justify-content: flex-end; /* النص الإنجليزي يبدأ من اليمين (تحت العربي) */
+          gap: 8px;
+          font-size: 8px; 
           font-weight: 900; 
-          line-height: 1.4; 
-          direction: ltr;
+          color: #475569;
+          direction: ltr; /* اتجاه الكتابة إنجليزي */
+        }
+
+        .dot {
+          opacity: 0.5;
         }
       </style>
     </head>
@@ -2444,25 +2452,31 @@ const buildFooterHtml = (accentColor = "#123f59", fontFamily = "tajawal") => {
             <div class="row-1">
               <div class="address-text">
                 <span>📍 حي الملك فهد - الرياض - المملكة العربية السعودية - الرمز البريدي : ١٢٢٧٤</span>
-                <span style="opacity: 0.5; margin: 0 4px;">·</span>
+                <span class="dot">•</span>
                 <span>جوال : ٠٥٩٠٧٢٢٨٢٧</span>
-                <span style="opacity: 0.5; margin: 0 4px;">·</span>
+                <span class="dot">•</span>
                 <span>الرقم الوطني الموحد : ٧٠٥٢٣٠٣٨٢٨</span>
               </div>
               <div class="page-numbers">
                 صفحة <span class="pageNumber"></span> من <span class="totalPages"></span>
               </div>
             </div>
+            
             <div class="row-2">
               <span>📍 King Fahd Dist - RIYADH - Kingdom of Saudi Arabia - POSTAL CODE : 12274</span>
-              <span style="margin-left: 4px;">☎ 0590722827</span>
-              <span style="margin-left: 4px;">- N.N: 7052303828</span>
-              <span style="margin-left: 4px;">✉ info@details-consults.sa</span>
+              <span class="dot">•</span>
+              <span>📱 0590722827</span>
+              <span class="dot">•</span>
+              <span>🏢 N.N: 7052303828</span>
+              <span class="dot">•</span>
+              <span>✉ info@details-consults.sa</span>
             </div>
           </div>
+
         </div>
       </div>
       <script>
+        // سكريبت لتحويل أرقام الصفحات إلى أرقام عربية (هندية)
         const arabicDigits = (str) => String(str).replace(/[0-9]/g, d => "٠١٢٣٤٥٦٧٨٩"[d]);
         setTimeout(() => {
           document.querySelectorAll('.pageNumber, .totalPages').forEach(el => {
