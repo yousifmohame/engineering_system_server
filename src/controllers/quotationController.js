@@ -2509,7 +2509,7 @@ const generatePdfPreview = async (req, res) => {
     form.append("printBackground", "true");
 
     const response = await axios.post(
-      "http://127.0.01:3000/forms/chromium/convert/html", // 👈 تم التعديل هنا
+      "http://127.0.0.1:3000/forms/chromium/convert/html", // 👈 تم التعديل هنا
       form,
       {
         headers: { ...form.getHeaders() },
