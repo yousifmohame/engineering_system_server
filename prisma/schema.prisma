@@ -175,6 +175,7 @@ model Employee {
   quotationLogs        QuotationLog[]            @relation("QuotationLogsUser")
   uploadedArchives     PropertyDocumentArchive[] @relation("DocUploader")
   archiveLogs          ArchiveAuditLog[]
+  cashVaultLogs        CashVaultAuditLog[]
 }
 
 // ==================================================
@@ -2220,6 +2221,202 @@ model OfficeExpense {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+// ===============================================
+// إدارة الخزنة (نظام إرث)
+// ===============================================
+
+enum VaultStatus {
+  ACTIVE
+  SUSPENDED
+  ARCHIVED
+}
+
+enum TransactionDirection {
+  INBOUND
+  OUTBOUND
+  INTERNAL_TRANSFER
+}
+
+enum TransactionCategory {
+  FEES
+  RESERVE
+  BANK_SUPPORT
+  PENDING
+  CUSTODY
+}
+
+enum SettleStatus {
+  NOT_STARTED
+  OPEN
+  AWAITING_SETTLEMENT
+  SETTLED
+  PARTIALLY_SETTLED
+  CANCELLED
+  REFUNDED
+  NEEDS_REVIEW
+}
+
+model CashVault {
+  id                    String                 @id @default(uuid())
+  vaultCode             String                 @unique
+  vaultName             String
+  responsibleEmployeeId String
+  openingBalance        Decimal                @db.Decimal(18, 4)
+  openingBalanceDate    DateTime
+  currentBalance        Decimal                @default(0) @db.Decimal(18, 4)
+  feesBalance           Decimal                @default(0) @db.Decimal(18, 4)
+  reserveBalance        Decimal                @default(0) @db.Decimal(18, 4)
+  bankSupportBalance    Decimal                @default(0) @db.Decimal(18, 4)
+  pendingBalance        Decimal                @default(0) @db.Decimal(18, 4)
+  targetReserveAmount   Decimal?               @db.Decimal(18, 4)
+  minimumAlertAmount    Decimal?               @db.Decimal(18, 4)
+  status                VaultStatus            @default(ACTIVE)
+  notes                 String?                @db.Text
+  createdBy             String
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  transactions          CashVaultTransaction[]
+}
+
+model CashVaultTransaction {
+  id              String               @id @default(uuid())
+  transactionNo   String               @unique
+  vaultId         String
+  vault           CashVault            @relation(fields: [vaultId], references: [id])
+  transactionType String
+  direction       TransactionDirection
+  amount          Decimal              @db.Decimal(18, 4)
+  category        TransactionCategory
+  transactionDate DateTime
+  balanceBefore   Decimal              @db.Decimal(18, 4)
+  balanceAfter    Decimal              @db.Decimal(18, 4)
+  description     String               @db.Text
+  reason          String?              @db.Text
+  createdBy       String
+  deliveredBy     String?
+  receivedBy      String?
+  recipientName   String?
+  recipientType   String?
+
+  // الربط الداخلي والخارجي
+  linkedTransactionId      String?
+  linkedExternalDealId     String?
+  linkedCustomerId         String?
+  linkedContractId         String?
+  linkedInvoiceId          String?
+  linkedQuotationId        String?
+  linkedQuotationPaymentId String?
+  settlementId             String?
+
+  attachmentIds String[]
+  status        String    @default("APPROVED")
+  approvedBy    String?
+  approvedAt    DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  externalDeal ExternalDeal?   @relation(fields: [linkedExternalDealId], references: [id])
+  settlement   CashSettlement? @relation(fields: [settlementId], references: [id])
+}
+
+model ExternalDeal {
+  id                      String                   @id @default(uuid())
+  dealNo                  String                   @unique
+  dealName                String
+  ownerOrClientName       String
+  description             String?                  @db.Text
+  responsiblePerson       String
+  originalAgreementAmount Decimal                  @db.Decimal(18, 4)
+  actualCollectedAmount   Decimal                  @default(0) @db.Decimal(18, 4)
+  extraAmountsTotal       Decimal                  @default(0) @db.Decimal(18, 4)
+  obligationsTotal        Decimal                  @default(0) @db.Decimal(18, 4)
+  netProfit               Decimal                  @default(0) @db.Decimal(18, 4)
+  distributionMethod      String
+  settlementStatus        SettleStatus             @default(NOT_STARTED)
+  dealStatus              String                   @default("OPEN")
+  cancellationReason      String?
+  refundStatus            String?
+  attachmentIds           String[]
+  notes                   String?                  @db.Text
+  createdBy               String
+  createdAt               DateTime                 @default(now())
+  updatedAt               DateTime                 @updatedAt
+  obligations             ExternalDealObligation[]
+  vaultTransactions       CashVaultTransaction[]
+}
+
+model ExternalDealObligation {
+  id                String       @id @default(uuid())
+  externalDealId    String
+  externalDeal      ExternalDeal @relation(fields: [externalDealId], references: [id], onDelete: Cascade)
+  partyName         String
+  partyType         String
+  amount            Decimal      @db.Decimal(18, 4)
+  reason            String
+  isPaid            Boolean      @default(false)
+  paidTransactionId String?
+  notes             String?      @db.Text
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+}
+
+model CashSettlement {
+  id                     String                       @id @default(uuid())
+  settlementNo           String                       @unique
+  settlementType         String
+  vaultId                String
+  periodFrom             DateTime?
+  periodTo               DateTime?
+  grossCollected         Decimal                      @db.Decimal(18, 4)
+  extraAmounts           Decimal                      @db.Decimal(18, 4)
+  totalObligations       Decimal                      @db.Decimal(18, 4)
+  totalExpenses          Decimal                      @db.Decimal(18, 4)
+  netProfitBeforeReserve Decimal                      @db.Decimal(18, 4)
+  reserveAmount          Decimal                      @db.Decimal(18, 4)
+  bankSupportAmount      Decimal                      @db.Decimal(18, 4)
+  netDistributable       Decimal                      @db.Decimal(18, 4)
+  status                 String                       @default("PENDING")
+  createdBy              String
+  approvedBy             String?
+  createdAt              DateTime                     @default(now())
+  approvedAt             DateTime?
+  notes                  String?                      @db.Text
+  distributions          CashSettlementDistribution[]
+  vaultTransactions      CashVaultTransaction[]
+}
+
+model CashSettlementDistribution {
+  id                String         @id @default(uuid())
+  settlementId      String
+  settlement        CashSettlement @relation(fields: [settlementId], references: [id], onDelete: Cascade)
+  beneficiaryName   String
+  beneficiaryType   String
+  employeeId        String?
+  percentage        Decimal?       @db.Decimal(5, 2)
+  amount            Decimal        @db.Decimal(18, 4)
+  reason            String
+  paymentMethod     String
+  paidTransactionId String?
+  notes             String?        @db.Text
+  createdAt         DateTime       @default(now())
+}
+
+model CashVaultAuditLog {
+  id         String @id @default(uuid())
+  entityType String
+  entityId   String
+  action     String
+
+  // 👈 إضافة العلاقة المباشرة مع جدول الموظفين
+  userId String
+  user   Employee @relation(fields: [userId], references: [id])
+
+  oldValueJson String?  @db.Text
+  newValueJson String?  @db.Text
+  notes        String?  @db.Text
+  createdAt    DateTime @default(now())
 }
 
 // ===============================================
@@ -4335,8 +4532,7 @@ model TechnicalReport {
 // 🚀 1. نموذج أرشيف وثائق الملكية (المستودع الرئيسي)
 // ==========================================
 model PropertyDocumentArchive {
-  id String @id @default(cuid())
-
+  id           String    @id @default(cuid())
   // بيانات الرفع الأساسية
   uploadDate   DateTime  @default(now())
   uploadedById String?

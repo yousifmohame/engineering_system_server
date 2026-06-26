@@ -102,6 +102,9 @@ app.use("/api/office-expenses", officeExpenseRoutes);
 const treasuryRoutes = require("./routes/treasuryRoutes");
 app.use("/api/treasury", treasuryRoutes);
 
+const cashVaultRoutes = require("./routes/cashVaultRoutes");
+app.use("/api/accounts", cashVaultRoutes);
+
 const bankAccountRoutes = require("./routes/bankAccountRoutes");
 app.use("/api/bank-accounts", bankAccountRoutes);
 

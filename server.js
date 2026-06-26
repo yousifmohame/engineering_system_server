@@ -20,6 +20,7 @@ function ensureUploadsDirectory() {
   const assetsDir = path.join(__dirname, "uploads", "assets");
   const permitsDir = path.join(__dirname, "uploads", "permits");
   const tasksDir = path.join(__dirname, "uploads", "tasks");
+  const vaultsDir = path.join(__dirname, "uploads", "vaults");
 
   // مصفوفة تحتوي على كل المجلدات للتأكد من إنشائها
   const directories = [
@@ -33,7 +34,8 @@ function ensureUploadsDirectory() {
     quick_entriesDir,
     assetsDir,
     permitsDir,
-    tasksDir
+    tasksDir,
+    vaultsDir
   ];
 
   directories.forEach((dir) => {
