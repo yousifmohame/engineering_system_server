@@ -457,24 +457,27 @@ enum PayrollSource {
   MUDAD
 }
 
-enum PayrollStatus {
-  PENDING // مسودة عند الموارد البشرية
-  UNDER_REVIEW // تم الإرسال لمشرف العمليات للمراجعة
-  APPROVED // معتمد من مشرف العمليات
-  PAID // تم التحويل (يتم التحديث آلياً عبر ملف مدد)
+enum ApprovalStatus {
+  PENDING // مسودة (عند الموارد البشرية)
+  UNDER_REVIEW // بانتظار اعتماد المشرف
+  APPROVED // معتمد
+  RETURNED // مُرجع للتعديل
+  REJECTED // مرفوض نهائياً
+  PAID // مدفوع (من مدد)
 }
 
 model PayrollRecord {
-  id             String        @id @default(uuid())
+  id             String         @id @default(uuid())
   employeeId     String
   month          String // e.g., "2026-05"
-  baseSalary     Float         @default(0)
-  housingAllow   Float         @default(0)
-  transportAllow Float         @default(0)
-  deductions     Float         @default(0)
-  netSalary      Float         @default(0)
-  source         PayrollSource @default(SYSTEM) // <--- الحقل الجديد
-  status         PayrollStatus @default(PENDING) // <--- تم التحديث
+  baseSalary     Float          @default(0)
+  housingAllow   Float          @default(0)
+  transportAllow Float          @default(0)
+  deductions     Float          @default(0)
+  netSalary      Float          @default(0)
+  source         PayrollSource  @default(SYSTEM) // <--- الحقل الجديد
+  status         ApprovalStatus @default(PENDING)
+  supervisorNote String?        @db.Text // ملاحظات المشرف عند الاعتماد/الرفض/الإرجاع
 
   employee  Employee @relation(fields: [employeeId], references: [id])
   createdAt DateTime @default(now())

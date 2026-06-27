@@ -25,14 +25,17 @@ const upload = multer({ storage: storage });
 // العمليات الأساسية
 router.post('/generate', payrollController.generatePayroll);
 router.get('/', payrollController.getPayrolls);
+// أضف المسار الجديد *قبل* مسار /:id لتجنب تضارب التوجيه (Routing conflict)
+router.get('/stats', payrollController.getPayrollStats);
 router.put('/:id', payrollController.updatePayroll);
 
 // مسار رفع منصة مدد
 router.post('/upload-mudad', upload.single('file'), payrollController.uploadMudadPayroll);
 
-// مسارات سير العمل (Workflow) والاعتمادات
-// 1. الموارد البشرية ترسل للمراجعة
+// استبدل مسار الاعتماد القديم بالمسارات الجديدة
 router.patch('/:id/request-review', payrollController.requestSupervisorReview);
+router.post('/:id/supervisor-action', payrollController.handleSupervisorAction);
+router.patch('/:id/revoke', payrollController.revokeApproval);
 
 // 2. مشرف العمليات يعتمد المسير
 router.patch('/:id/approve', payrollController.approvePayroll);

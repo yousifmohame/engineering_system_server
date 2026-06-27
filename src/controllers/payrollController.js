@@ -186,11 +186,118 @@ const uploadMudadPayroll = async (req, res) => {
   }
 };
 
+// ===============================================
+// إجراءات المشرف (اعتماد / إرجاع / رفض)
+// POST /api/payrolls/:id/supervisor-action
+// ===============================================
+const handleSupervisorAction = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { action, note } = req.body; // action: 'APPROVE', 'RETURN', 'REJECT'
+
+    let newStatus = "UNDER_REVIEW";
+    if (action === "APPROVE") newStatus = "APPROVED";
+    else if (action === "RETURN") newStatus = "RETURNED";
+    else if (action === "REJECT") newStatus = "REJECTED";
+    else return res.status(400).json({ message: "إجراء غير صالح" });
+
+    const updated = await prisma.payrollRecord.update({
+      where: { id },
+      data: { 
+        status: newStatus,
+        supervisorNote: note || null 
+      },
+      include: { employee: { select: { name: true } } }
+    });
+
+    res.status(200).json({ message: `تم تسجيل الإجراء: ${newStatus}`, data: updated });
+  } catch (error) {
+    res.status(500).json({ message: "خطأ في تنفيذ إجراء المشرف" });
+  }
+};
+
+// ===============================================
+// إلغاء الاعتماد (Revoke Approval)
+// PATCH /api/payrolls/:id/revoke
+// ===============================================
+const revokeApproval = async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    // إرجاع الحالة إلى "مُرجع للتعديل" لكي يتمكن الموظف المختص من تعديل الأرقام
+    const updated = await prisma.payrollRecord.update({
+      where: { id, status: "APPROVED" }, // التأكد أنه معتمد فعلاً
+      data: { 
+        status: "RETURNED",
+        supervisorNote: "تم إلغاء الاعتماد لغرض التعديل وإعادة الرفع."
+      }
+    });
+
+    res.status(200).json({ message: "تم إلغاء الاعتماد وإرجاع المسير للتعديل", data: updated });
+  } catch (error) {
+    res.status(500).json({ message: "خطأ في إلغاء الاعتماد (قد يكون المسير مدفوعاً بالفعل)" });
+  }
+};
+
+// ===============================================
+// جلب إحصائيات الرواتب لشهر محدد
+// GET /api/payrolls/stats?month=2026-05
+// ===============================================
+const getPayrollStats = async (req, res) => {
+  try {
+    const { month } = req.query;
+    
+    // فلتر الشهر إذا تم تمريره
+    const whereClause = month ? { month } : {};
+
+    // 1. حساب الإجماليات باستخدام Prisma Aggregate
+    const aggregations = await prisma.payrollRecord.aggregate({
+      where: whereClause,
+      _sum: {
+        baseSalary: true,
+        housingAllow: true,
+        transportAllow: true,
+        deductions: true,
+        netSalary: true,
+      },
+      _count: {
+        id: true // إجمالي عدد المسيرات
+      }
+    });
+
+    // 2. حساب عدد المسيرات المدفوعة فقط
+    const paidCount = await prisma.payrollRecord.count({
+      where: {
+        ...whereClause,
+        status: 'PAID'
+      }
+    });
+
+    // تجهيز كائن الاستجابة
+    const stats = {
+      totalBaseSalary: aggregations._sum.baseSalary || 0,
+      totalAllowances: (aggregations._sum.housingAllow || 0) + (aggregations._sum.transportAllow || 0),
+      totalDeductions: aggregations._sum.deductions || 0,
+      totalNetSalary: aggregations._sum.netSalary || 0,
+      totalEmployees: aggregations._count.id || 0,
+      paidEmployeesCount: paidCount
+    };
+
+    res.status(200).json(stats);
+  } catch (error) {
+    console.error("Get Payroll Stats Error:", error);
+    res.status(500).json({ message: "حدث خطأ أثناء جلب إحصائيات الرواتب" });
+  }
+};
+
 module.exports = { 
   generatePayroll, 
   getPayrolls, 
   updatePayroll,
   requestSupervisorReview,
   approvePayroll,
-  uploadMudadPayroll
+  uploadMudadPayroll,
+  handleSupervisorAction,
+  revokeApproval,
+  getPayrollStats
 };
