@@ -6,7 +6,7 @@ const fs = require("fs");
 const path = require("path");
 
 // ===============================================
-// 1. جلب الموظف الحالي (من الـ Token)
+// 1. جلب الموظف الحالي (تغذي بوابة الموظف الشاملة)
 // GET /api/employees/me
 // ===============================================
 const getMe = async (req, res) => {
@@ -15,7 +15,7 @@ const getMe = async (req, res) => {
       return res.status(401).json({ message: "غير مصرح لك بالوصول" });
     }
 
-    // جلب بيانات الموظف الحقيقية من قاعدة البيانات لضمان تحديثها
+    // جلب بيانات الموظف الشاملة
     const employee = await prisma.employee.findUnique({
       where: { id: req.user.id },
       include: {
@@ -27,16 +27,44 @@ const getMe = async (req, res) => {
       return res.status(404).json({ message: "لم يتم العثور على الموظف" });
     }
 
-    // إزالة كلمة المرور المشفرة قبل إرسال البيانات للواجهة لدواعي أمنية
+    // إزالة كلمة المرور المشفرة لدواعي أمنية
     delete employee.password;
 
-    // إضافة رصيد إجازات افتراضي (إذا لم يكن لديك حقل مخصص له في الـ Schema)
-    employee.leaveBalance = 21;
+    // --- حساب رصيد الإجازات الديناميكي ---
+    // 1. جلب الإجازات السنوية المعتمدة في السنة الحالية
+    const currentYear = new Date().getFullYear();
+    const startOfYear = new Date(`${currentYear}-01-01T00:00:00.000Z`);
+    const endOfYear = new Date(`${currentYear}-12-31T23:59:59.999Z`);
+
+    const approvedLeaves = await prisma.employeeLeave.findMany({
+      where: {
+        employeeId: employee.id,
+        status: "APPROVED",
+        type: "إجازة سنوية", // نخصم من الرصيد الإجازات السنوية فقط
+        startDate: { gte: startOfYear },
+        endDate: { lte: endOfYear }
+      }
+    });
+
+    // 2. حساب عدد الأيام المستهلكة فعلياً
+    let usedLeaveDays = 0;
+    approvedLeaves.forEach(leave => {
+      const diffTime = Math.abs(new Date(leave.endDate) - new Date(leave.startDate));
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1; 
+      usedLeaveDays += diffDays;
+    });
+
+    // 3. الرصيد السنوي (21 يوم كافتراضي إذا لم يتم تحديده في العقد)
+    const annualAllowance = employee.annualLeaveAllowance || 21;
+    employee.leaveBalance = Math.max(0, annualAllowance - usedLeaveDays);
+
+    // توحيد مسمى الراتب الأساسي ليتوافق مع الواجهة
+    employee.basicSalary = employee.baseSalary || 0;
 
     res.status(200).json(employee);
   } catch (error) {
     console.error("Error fetching current employee:", error);
-    res.status(500).json({ message: "خطأ في الخادم أثناء جلب بياناتك" });
+    res.status(500).json({ message: "خطأ في الخادم أثناء جلب بيانات البوابة" });
   }
 };
 // ===============================================
