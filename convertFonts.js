@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 
 // ضع أسماء ملفات الخطوط التي قمت بتنزيلها هنا
-const fonts = ['Tajawal-Regular.ttf', 'Cairo-Regular.ttf', 'Almarai-Regular.ttf', 'Kufam-Regular.ttf'];
+const fonts = ['Tajawal-Regular.ttf', 'Cairo-Regular.ttf', 'Almarai-Regular.ttf', 'Arial-Regular.ttf'];
 
 let outputFileContent = `// src/utils/fontsBase64.js\n// هذا الملف يحتوي على الخطوط المشفرة لاستخدامها في توليد الـ PDF\n\nmodule.exports = {\n`;
 
