@@ -1,13 +1,13 @@
+// src/controllers/propertyController.js
 const prisma = require("../utils/prisma");
-// const aiService = require("../services/aiExtractionService");
-const { OpenAI } = require("openai");
-const { fromBuffer } = require("pdf2pic");
-const { PDFDocument } = require("pdf-lib");
+const { GoogleGenAI } = require("@google/genai");
+const { decrypt } = require("../utils/cryptoUtils");
+const fs = require("fs");
+const path = require("path");
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-
+// ==========================================
+// 1. الدالة المساعدة لإنشاء كود عميل تسلسلي
+// ==========================================
 const generateNextClientCode = async () => {
   const year = new Date().getFullYear();
   const prefix = `CLT-${year}-`;
@@ -34,7 +34,14 @@ const generateNextClientCode = async () => {
   return `${prefix}${paddedNumber}`; // النتيجة: CLT-2026-001
 };
 
+// ==========================================
+// 2. معالجة الصك العقاري باستخدام Gemini AI (يدعم PDF والصور مباشرة)
+// ==========================================
 exports.analyzeDeedAI = async (req, res) => {
+  let uploadedGeminiFiles = [];
+  let ai;
+  let tempFilePath = null;
+
   try {
     const { imageBase64 } = req.body;
 
@@ -44,149 +51,175 @@ exports.analyzeDeedAI = async (req, res) => {
         .json({ success: false, message: "لم يتم إرسال أي ملف" });
     }
 
-    const mimeType = imageBase64.substring(
-      imageBase64.indexOf(":") + 1,
-      imageBase64.indexOf(";"),
-    );
-    const base64Data = imageBase64.split(",")[1];
+    // --- تهيئة إعدادات Gemini ---
+    const systemSettings = await prisma.systemSettings.findUnique({
+      where: { id: 1 },
+    });
+    const apiKey = systemSettings?.geminiApiKey
+      ? decrypt(systemSettings.geminiApiKey)
+      : process.env.GEMINI_API_KEY;
+
+    if (!apiKey || apiKey.trim() === "" || apiKey.includes("***")) {
+      throw new Error(
+        "⚠️ مفتاح الذكاء الاصطناعي (Gemini) غير متوفر في إعدادات النظام.",
+      );
+    }
+
+    ai = new GoogleGenAI({
+      apiKey,
+      httpOptions: { timeout: 600000 },
+    });
+
+    // --- استخراج البيانات النقية والنوع ---
+    let mimeType = "application/pdf"; // النوع الافتراضي
+    let base64Data = imageBase64;
+
+    if (imageBase64.includes(";base64,")) {
+      const parts = imageBase64.split(";base64,");
+      mimeType = parts[0].split(":")[1];
+      base64Data = parts[1];
+    }
+
+    // 🚀 تحويل الـ Base64 إلى Buffer
     const fileBuffer = Buffer.from(base64Data, "base64");
 
-    let imagesToSend = [];
+    // تحديد امتداد الملف لحفظه مؤقتاً
+    let ext = ".pdf";
+    if (mimeType.includes("png")) ext = ".png";
+    else if (mimeType.includes("jpeg") || mimeType.includes("jpg"))
+      ext = ".jpg";
+    else if (mimeType.includes("webp")) ext = ".webp";
 
-    // ==========================================
-    // 1. معالجة الـ PDF (الأسلوب المؤسسي المحسّن)
-    // ==========================================
-    if (mimeType === "application/pdf") {
-      const pdfDoc = await PDFDocument.load(fileBuffer);
-      const totalPages = pdfDoc.getPageCount();
-
-      // حماية السيرفر: تقييد الحد الأقصى للصفحات (مثلاً 5 صفحات للصكوك)
-      const pagesToProcess = Math.min(totalPages, 5);
-
-      console.log(
-        `🚀 رصد ${totalPages} صفحات PDF. جاري معالجة ${pagesToProcess} صفحة بوضع التحسين (Enterprise Mode)...`,
-      );
-
-      // إعدادات احترافية لتقليل حجم الـ Payload بنسبة 90% مع الحفاظ على الدقة للـ OCR
-      const options = {
-        density: 150,
-        format: "jpeg",
-        width: 1240,
-        height: 1754,
-      };
-
-      const convert = fromBuffer(fileBuffer, options);
-
-      for (let i = 1; i <= pagesToProcess; i++) {
-        console.log(`📸 معالجة الصفحة ${i}...`);
-        const image = await convert(i, { responseType: "base64" });
-        imagesToSend.push(`data:image/jpeg;base64,${image.base64}`);
-      }
+    // التأكد من وجود مجلد الرفع المؤقت
+    const tempDir = path.join(__dirname, "../../uploads/temp_ai");
+    if (!fs.existsSync(tempDir)) {
+      fs.mkdirSync(tempDir, { recursive: true });
     }
-    // ==========================================
-    // 2. معالجة الصور المباشرة (JPG/PNG/JPEG)
-    // ==========================================
-    else if (mimeType.startsWith("image/")) {
-      imagesToSend.push(imageBase64);
-    } else {
-      return res
-        .status(400)
-        .json({ success: false, message: "نوع الملف غير مدعوم." });
-    }
+
+    // حفظ الملف محلياً بشكل مؤقت (سواء كان PDF أو صورة)
+    tempFilePath = path.join(tempDir, `deed_doc_${Date.now()}${ext}`);
+    fs.writeFileSync(tempFilePath, fileBuffer);
 
     console.log(
-      `🧠 جاري إرسال ${imagesToSend.length} صور إلى OpenAI للتحليل الشامل...`,
+      `🚀 جاري رفع الملف (${ext}) إلى خوادم Gemini للتحليل المباشر...`,
     );
+
+    // --- رفع الملف إلى واجهة Gemini File API ---
+    const uploadResult = await ai.files.upload({
+      file: tempFilePath,
+      mimeType: mimeType,
+      displayName: `Deed_Document_${Date.now()}`,
+    });
+
+    uploadedGeminiFiles.push(uploadResult);
+
+    // 🧹 حذف الملف المؤقت المحلي فوراً بعد الرفع لضمان نظافة السيرفر
+    if (fs.existsSync(tempFilePath)) {
+      fs.unlinkSync(tempFilePath);
+      tempFilePath = null;
+    }
 
     // ==========================================
     // 3. البرومبت الشامل (Master Extraction Prompt)
     // ==========================================
-    const prompt = `
-    أنت خبير معتمد ومراجع قانوني في وزارة العدل والهيئة العامة للعقار في السعودية.
-    مهمتك قراءة الصورة/الصور المرفقة والتي تمثل "صكاً عقارياً" (قد يكون صك كتابة عدل قديم، أو وثيقة بورصة عقارية، أو صك سجل عقاري RER).
-    استخرج البيانات التالية بدقة متناهية وأعدها كـ JSON صالح 100%.
+    const DYNAMIC_SYSTEM_PROMPT = `
+أنت خبير معتمد ومراجع قانوني في وزارة العدل والهيئة العامة للعقار في السعودية.
+مهمتك قراءة المستند المرفق والذي يمثل "صكاً عقارياً" (قد يكون صك كتابة عدل قديم، أو وثيقة بورصة عقارية، أو صك سجل عقاري RER).
+استخرج البيانات التالية بدقة متناهية وأعدها كـ JSON صالح 100%.
 
-    🔍 **دليل البحث الاستراتيجي حسب نوع الصك:**
-    1. **السجل العقاري (RER):** "رقم العقار" هو رقم الوثيقة (مثل 4251638128200000). المساحة واستعمال العقار تكون في جدول "بيانات قطعة الأرض".
-    2. **البورصة العقارية:** رقم الوثيقة عادة 12 رقم (مثل 918501007702). قد يحتوي الصك على عدة عقارات (العقار 1 من 2). اجمع المساحات معاً، وادمج أرقام القطع بفاصلة (مثال: 1/80, 3/80). استخرج قيمة الصفقة.
-    3. **صكوك كتابة العدل القديمة (النصية):** اقرأ النص السردي. استخرج رقم الصك من الأعلى، المساحة من جملة "ومساحتها (...) متر"، الأطوال من "شمالا ... بطول (...)". واستخرج الثمن من "بثمن وقدره (...)".
-    
-    ⚠️ **قواعد البيانات الصارمة (Data Types):**
-    - الأرقام (المساحة totalArea، الأطوال length، نسبة التملك sharePercentage، قيمة الصفقة transactionValue) يجب أن تكون من نوع Number.
-    - إزالة الفواصل من الأرقام الكبيرة: مثلاً "4,500,000" تصبح 4500000. و "1,250" تصبح 1250. أزل أي نصوص مثل "م2" أو "%" أو "ريال".
-    - إذا لم تجد المعلومة، أرجع null (للنصوص) أو 0 (للأرقام). لا تخمن أبداً.
+🔍 **دليل البحث الاستراتيجي حسب نوع الصك:**
+1. **السجل العقاري (RER):** "رقم العقار" هو رقم الوثيقة. المساحة واستعمال العقار تكون في جدول "بيانات قطعة الأرض".
+2. **البورصة العقارية:** رقم الوثيقة عادة 12 رقم. قد يحتوي الصك على عدة عقارات. اجمع المساحات معاً، وادمج أرقام القطع بفاصلة.
+3. **صكوك كتابة العدل القديمة (النصية):** اقرأ النص السردي. استخرج رقم الصك من الأعلى، المساحة من جملة "ومساحتها (...) متر"، الأطوال من "شمالا ... بطول (...)".
 
-    التركيبة المطلوبة للـ JSON:
+⚠️ **قواعد البيانات الصارمة (Data Types):**
+- الأرقام يجب أن تكون من نوع Number (أزل الفواصل النصية وأي نصوص مثل "م2" أو "%").
+- إذا لم تجد المعلومة، أرجع null (للنصوص) أو 0 (للأرقام).
+
+التركيبة المطلوبة للـ JSON حصرياً:
+{
+  "documentInfo": {
+    "documentNumber": "رقم الوثيقة/الصك/العقار (String)",
+    "hijriDate": "تاريخ الوثيقة الهجري DD/MM/YYYY (String)",
+    "gregorianDate": "تاريخ الوثيقة الميلادي DD/MM/YYYY (String)",
+    "documentType": "صك ملكية أو وثيقة تملك أو صك تسجيل ملكية (String)",
+    "issuingAuthority": "الجهة المصدرة (String)",
+    "propertyId": "رقم الهوية العقارية إن وجد (String)"
+  },
+  "previousDocumentInfo": {
+    "previousDocumentNumber": "رقم الوثيقة/الصك السابق (String)",
+    "previousDocumentDate": "تاريخ الوثيقة السابقة (String)",
+    "transactionValue": قيمة انتقال الملكية/الثمن (Number)
+  },
+  "locationInfo": {
+    "city": "اسم المدينة (String)",
+    "district": "اسم الحي (String)",
+    "planNumber": "رقم المخطط (String)"
+  },
+  "plots": [
     {
-      "documentInfo": {
-        "documentNumber": "رقم الوثيقة/الصك/العقار (String)",
-        "hijriDate": "تاريخ الوثيقة الهجري DD/MM/YYYY (String)",
-        "gregorianDate": "تاريخ الوثيقة الميلادي DD/MM/YYYY (String)",
-        "documentType": "صك ملكية أو وثيقة تملك أو صك تسجيل ملكية (String)",
-        "issuingAuthority": "الجهة المصدرة: وزارة العدل أو الهيئة العامة للعقار أو كتابة العدل (String)",
-        "propertyId": "رقم الهوية العقارية إن وجد (String)"
-      },
-      "previousDocumentInfo": {
-        "previousDocumentNumber": "رقم الوثيقة/الصك السابق (String)",
-        "previousDocumentDate": "تاريخ الوثيقة السابقة (String)",
-        "transactionValue": قيمة انتقال الملكية/قيمة الصفقة/الثمن (Number)
-      },
-      "locationInfo": {
-        "city": "اسم المدينة (String)",
-        "district": "اسم الحي (String)"
-      },
-      "plots": [
-        {
-          "plotNumber": "رقم القطعة (String)",
-          "planNumber": "رقم المخطط (String)",
-          "blockNumber": "رقم البلك (String)",
-          "area": مساحة هذه القطعة فقط (Number),
-          "propertyType": "قطعة أرض، أرض فضاء، فيلا، الخ (String)",
-          "usageType": "سكني، تجاري، زراعي، الخ (String)"
-        }
-      ],
-      "propertySpecs": {
-        "totalArea": إجمالي مساحة كل القطع معاً (Number)
-      },
-      "owners": [
-        {
-          "name": "اسم المالك أو الشركة (String)",
-          "identityNumber": "رقم الهوية الوطنية أو الرقم الموحد (String)",
-          "nationality": "الجنسية (String)",
-          "sharePercentage": نسبة التملك من 0 إلى 100 (Number)
-        }
-      ],
-      "boundaries": [
-        { "direction": "شمال", "length": الطول (Number), "description": "وصف المجاور أو الشارع (String)" },
-        { "direction": "جنوب", "length": الطول (Number), "description": "وصف المجاور أو الشارع (String)" },
-        { "direction": "شرق", "length": الطول (Number), "description": "وصف المجاور أو الشارع (String)" },
-        { "direction": "غرب", "length": الطول (Number), "description": "وصف المجاور أو الشارع (String)" }
-      ],
-      "metadata": {
-        "confidenceScore": تقييمك لدقة استخراج البيانات من 0 إلى 100 (Number),
-        "aiNotes": "ملاحظاتك (String)"
-      }
+      "plotNumber": "رقم القطعة (String)",
+      "planNumber": "رقم المخطط (String)",
+      "blockNumber": "رقم البلك (String)",
+      "area": مساحة القطعة (Number),
+      "propertyType": "نوع العقار (String)",
+      "usageType": "الاستخدام (String)"
     }
-    `;
+  ],
+  "propertySpecs": {
+    "totalArea": إجمالي المساحة (Number)
+  },
+  "owners": [
+    {
+      "name": "اسم المالك أو الشركة (String)",
+      "identityNumber": "رقم الهوية الوطنية أو الرقم الموحد (String)",
+      "nationality": "الجنسية (String)",
+      "sharePercentage": نسبة التملك (Number)
+    }
+  ],
+  "boundaries": [
+    { "direction": "شمال", "length": الطول (Number), "description": "وصف المجاور (String)" },
+    { "direction": "جنوب", "length": الطول (Number), "description": "وصف المجاور (String)" },
+    { "direction": "شرق", "length": الطول (Number), "description": "وصف المجاور (String)" },
+    { "direction": "غرب", "length": الطول (Number), "description": "وصف المجاور (String)" }
+  ],
+  "metadata": {
+    "confidenceScore": تقييم الدقة من 0 إلى 100 (Number),
+    "aiNotes": "ملاحظات (String)"
+  }
+}
+`;
 
-    const contentArray = [{ type: "text", text: prompt }];
-    imagesToSend.forEach((imgUrl) => {
-      contentArray.push({
-        type: "image_url",
-        image_url: { url: imgUrl, detail: "high" },
-      });
+    // 🚀 تمرير الـ URI الخاص بالملف إلى الموديل
+    const fileParts = uploadedGeminiFiles.map((f) => ({
+      fileData: { fileUri: f.uri, mimeType: f.mimeType },
+    }));
+
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-pro",
+      contents: [
+        "يرجى تحليل هذا المستند العقاري (سواء كان PDF أو صورة) واستخراج البيانات بصيغة JSON فقط.",
+        ...fileParts,
+      ],
+      config: {
+        systemInstruction: DYNAMIC_SYSTEM_PROMPT,
+        temperature: 0.1, // دقة عالية
+        responseMimeType: "application/json",
+      },
     });
 
-    // إرسال الطلب لـ OpenAI
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o",
-      messages: [{ role: "user", content: contentArray }],
-      response_format: { type: "json_object" },
-      temperature: 0.0, // دقة مطلقة 100%
-    });
+    let responseText = response.text || "";
+    responseText = responseText
+      .replace(/```json/gi, "")
+      .replace(/```/g, "")
+      .trim();
 
-    const parsedData = JSON.parse(response.choices[0].message.content);
-    console.log("✅ تم تحليل الصك بجميع تفاصيله بنجاح!");
+    // تحويل الأرقام الهندية إن وجدت
+    const parsedData = JSON.parse(
+      responseText.replace(/[٠-٩]/g, (d) => "٠١٢٣٤٥٦٧٨٩".indexOf(d)),
+    );
+
+    console.log("✅ تم تحليل المستند واستخراج البيانات بنجاح باستخدام Gemini!");
 
     res.json({ success: true, data: parsedData });
   } catch (error) {
@@ -196,6 +229,23 @@ exports.analyzeDeedAI = async (req, res) => {
       message: "فشل تحليل الوثيقة بالذكاء الاصطناعي",
       details: error.message,
     });
+  } finally {
+    // تنظيف الملف المؤقت إذا فشلت العملية قبل حذفه
+    if (tempFilePath && fs.existsSync(tempFilePath)) {
+      try {
+        fs.unlinkSync(tempFilePath);
+      } catch (e) {}
+    }
+    // تنظيف الملفات من خوادم Gemini
+    if (ai && uploadedGeminiFiles.length > 0) {
+      for (const file of uploadedGeminiFiles) {
+        try {
+          await ai.files.delete({ name: file.name });
+        } catch (e) {
+          console.warn(`⚠️ فشل حذف الملف من Gemini:`, e.message);
+        }
+      }
+    }
   }
 };
 
@@ -477,5 +527,82 @@ exports.getPropertyById = async (req, res) => {
   } catch (error) {
     console.error("Error fetching property details:", error);
     res.status(500).json({ success: false, message: "فشل جلب التفاصيل" });
+  }
+};
+
+// ===============================================
+// 🚀 جلب الإحصائيات الشاملة للملكيات والصكوك
+// GET /api/properties/stats
+// ===============================================
+exports.getPropertyStats = async (req, res) => {
+  try {
+    const properties = await prisma.ownershipFile.findMany({
+      select: {
+        id: true,
+        area: true,
+        status: true,
+        district: true,
+        plots: true,
+        createdAt: true
+      }
+    });
+
+    let totalArea = 0;
+    let statusCount = { active: 0, pending: 0, disputed: 0 };
+    let typesCount = { residential: 0, commercial: 0, agricultural: 0, land: 0, other: 0 };
+    let districtMap = {};
+
+    properties.forEach((p) => {
+      // 1. حساب المساحة
+      totalArea += Number(p.area) || 0;
+
+      // 2. حساب الحالات
+      const st = (p.status || "").toLowerCase();
+      if (st === "active" || st === "مؤكد" || st === "معتمد") statusCount.active++;
+      else if (st === "pending" || st === "قيد المراجعة") statusCount.pending++;
+      else statusCount.disputed++;
+
+      // 3. حساب الأحياء
+      if (p.district && p.district.trim() !== "") {
+        const dist = p.district.trim();
+        districtMap[dist] = (districtMap[dist] || 0) + 1;
+      }
+
+      // 4. حساب أنواع العقارات (من أول قطعة)
+      let pType = "أرض";
+      try {
+        const parsedPlots = typeof p.plots === 'string' ? JSON.parse(p.plots) : p.plots;
+        if (parsedPlots && parsedPlots.length > 0) {
+          pType = parsedPlots[0].propertyType || "أرض";
+        }
+      } catch (e) {}
+
+      if (pType.includes("سكن")) typesCount.residential++;
+      else if (pType.includes("تجار")) typesCount.commercial++;
+      else if (pType.includes("زراع")) typesCount.agricultural++;
+      else if (pType.includes("أرض") || pType.includes("ارض")) typesCount.land++;
+      else typesCount.other++;
+    });
+
+    // ترتيب الأحياء لأعلى 5
+    const topDistricts = Object.entries(districtMap)
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5);
+
+    res.json({
+      success: true,
+      data: {
+        totalProperties: properties.length,
+        totalArea,
+        statusCount,
+        typesCount,
+        topDistricts
+      }
+    });
+
+  } catch (error) {
+    console.error("Stats Error:", error);
+    res.status(500).json({ success: false, message: "فشل في حساب الإحصائيات" });
   }
 };
