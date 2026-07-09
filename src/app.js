@@ -286,6 +286,12 @@ app.use("/api/hr/job-offers", jobOfferRoutes);
 const docArchiveRoutes = require("./routes/docArchiveRoutes");
 app.use("/api/doc-archive", docArchiveRoutes);
 
+const autocadArchiveRoutes = require("./routes/permitsAutocadRoutes");
+app.use("/api/autocad-archive", autocadArchiveRoutes);
+
+const projectFormsRoutes = require("./routes/projectFormsRoutes");
+app.use("/api/project-forms", projectFormsRoutes);
+
 const { generateQRBuffer } = require('./utils/qrGenerator');
 
 // أضف هذا المسار في منطقة المسارات العامة (قبل الـ Auth Middleware)

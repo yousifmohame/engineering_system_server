@@ -327,6 +327,128 @@ const deletePermit = async (req, res) => {
   }
 };
 
+const { v4: uuidv4 } = require('uuid'); // ستحتاج هذه المكتبة لتوليد ID فريد للمرفقات
+
+// ==========================================
+// 💡 رفع مرفقات إضافية (مع تتبع المستخدم)
+// ==========================================
+const uploadPermitAttachments = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { uploadedBy } = req.body;
+
+    const permit = await prisma.permit.findUnique({ where: { id } });
+    if (!permit) return res.status(404).json({ success: false, message: "الرخصة غير موجودة" });
+
+    // التأكد من استلام ملفات
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ success: false, message: "لم يتم استلام أي ملفات" });
+    }
+
+    // تجهيز قائمة المرفقات القديمة (إذا كان الحقل JSON)
+    let currentAttachments = [];
+    if (permit.extraAttachments) {
+      currentAttachments = typeof permit.extraAttachments === 'string' 
+        ? JSON.parse(permit.extraAttachments) 
+        : permit.extraAttachments;
+    }
+
+    // إنشاء كائنات المرفقات الجديدة
+    const newAttachments = req.files.map(file => ({
+      id: uuidv4(), // معرف فريد للمرفق
+      name: file.originalname,
+      url: `/uploads/permits/${file.filename}`,
+      uploadedBy: uploadedBy || "النظام",
+      uploadedAt: new Date().toISOString()
+    }));
+
+    // دمج وتحديث قاعدة البيانات
+    const updatedAttachments = [...currentAttachments, ...newAttachments];
+
+    const updatedPermit = await prisma.permit.update({
+      where: { id },
+      data: { extraAttachments: updatedAttachments } // إذا كان اسم الحقل عندك مختلف، قم بتعديله هنا
+    });
+
+    res.status(201).json({ success: true, message: "تم الرفع بنجاح", data: updatedPermit });
+  } catch (error) {
+    console.error("Upload Attachments Error:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ==========================================
+// 💡 تعديل اسم مرفق (مع تحديث اسم المعدل)
+// ==========================================
+const renamePermitAttachment = async (req, res) => {
+  try {
+    const { id, attachmentId } = req.params;
+    const { name, updatedBy } = req.body;
+
+    const permit = await prisma.permit.findUnique({ where: { id } });
+    if (!permit) return res.status(404).json({ success: false, message: "الرخصة غير موجودة" });
+
+    let currentAttachments = typeof permit.extraAttachments === 'string' 
+      ? JSON.parse(permit.extraAttachments) 
+      : permit.extraAttachments || [];
+
+    let fileFound = false;
+    const updatedAttachments = currentAttachments.map(att => {
+      if (att.id === attachmentId) {
+        fileFound = true;
+        return { 
+          ...att, 
+          name: name, 
+          uploadedBy: updatedBy ? `${updatedBy} (تعديل)` : att.uploadedBy // للإشارة إلى من قام بالتعديل
+        };
+      }
+      return att;
+    });
+
+    if (!fileFound) return res.status(404).json({ success: false, message: "المرفق غير موجود" });
+
+    await prisma.permit.update({
+      where: { id },
+      data: { extraAttachments: updatedAttachments }
+    });
+
+    res.json({ success: true, message: "تم تعديل الاسم بنجاح" });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ==========================================
+// 💡 حذف مرفق
+// ==========================================
+const deletePermitAttachment = async (req, res) => {
+  try {
+    const { id, attachmentId } = req.params;
+
+    const permit = await prisma.permit.findUnique({ where: { id } });
+    if (!permit) return res.status(404).json({ success: false, message: "الرخصة غير موجودة" });
+
+    let currentAttachments = typeof permit.extraAttachments === 'string' 
+      ? JSON.parse(permit.extraAttachments) 
+      : permit.extraAttachments || [];
+
+    // فلترة المرفقات لحذف المرفق المطلوب
+    const updatedAttachments = currentAttachments.filter(att => att.id !== attachmentId);
+
+    // اختيارياً: يمكنك هنا قراءة الـ url للملف وحذفه من السيرفر باستخدام fs.unlinkSync
+
+    await prisma.permit.update({
+      where: { id },
+      data: { extraAttachments: updatedAttachments }
+    });
+
+    res.json({ success: true, message: "تم الحذف بنجاح" });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// 💡 لا تنس إضافة الدوال الجديدة في كائن التصدير:
 module.exports = {
   getPermits,
   createPermit,
@@ -334,5 +456,8 @@ module.exports = {
   deletePermit,
   analyzePermitAI,
   autoMergePermit,
-  getDuplicates
+  getDuplicates,
+  uploadPermitAttachments,
+  renamePermitAttachment,
+  deletePermitAttachment
 };

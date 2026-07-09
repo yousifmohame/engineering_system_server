@@ -634,6 +634,7 @@ model Client {
   technicalReports      TechnicalReport[]
   quotations            Quotation[]               @relation("ClientQuotations")
   archivedDocuments     PropertyDocumentArchive[]
+  EngineeringBundle     EngineeringBundle[]
 }
 
 model ClientClassification {
@@ -1794,6 +1795,7 @@ model RiyadhDistrict {
   attachments         Attachment[] // ربط المرفقات
   privateTransactions PrivateTransaction[] @relation("DistrictPrivateTransactions")
   archivedProjects    ArchivedProject[]
+  EngineeringBundle   EngineeringBundle[]
 }
 
 model RiyadhStreet {
@@ -2022,11 +2024,12 @@ model PrivateTransaction {
   linkedParent   PrivateTransaction?  @relation("LinkedTransactions", fields: [linkedParentId], references: [id])
   linkedChildren PrivateTransaction[] @relation("LinkedTransactions")
 
-  ownersList       TransactionOwner[]
-  OfficeTask       OfficeTask[]
-  MeetingMinute    MeetingMinute[]
-  technicalReports TechnicalReport[]
-  quotations       Quotation[]        @relation("TransactionQuotations")
+  ownersList        TransactionOwner[]
+  OfficeTask        OfficeTask[]
+  MeetingMinute     MeetingMinute[]
+  technicalReports  TechnicalReport[]
+  quotations        Quotation[]         @relation("TransactionQuotations")
+  EngineeringBundle EngineeringBundle[]
 
   @@index([clientId])
   @@index([districtId])
@@ -2938,10 +2941,10 @@ model IntermediaryLink {
 model Permit {
   id           String  @id @default(cuid())
   permitNumber String
-  year         Int? // 👈 جعلناه اختيارياً
-  hijriYear    String? // 👈 تمت الإضافة (مهم جداً لمنع التكرار)
-  type         String? // 👈 جعلناه اختيارياً
-  form         String? // 👈 جعلناه اختيارياً
+  year         Int?
+  hijriYear    String?
+  type         String?
+  form         String?
   ownerName    String
   idNumber     String?
 
@@ -2955,7 +2958,7 @@ model Permit {
   usage             String?
   landArea          Float?
   engineeringOffice String?
-  source            String? // 👈 جعلناه اختيارياً
+  source            String?
   qrStatus          String  @default("غير متوفر")
   aiStatus          String  @default("غير مطبق")
   copies            Int     @default(1)
@@ -2969,7 +2972,9 @@ model Permit {
   linkedOwnershipId   String?
   linkedClientId      String?
   linkedOfficeId      String?
-  extraAttachments    String? @db.Text
+
+  // 💡 التعديل هنا: استخدام Json بدلاً من Text لتخزين مصفوفة المرفقات بشكل سليم
+  extraAttachments Json? @default("[]")
 
   componentsData String? @db.Text
   boundariesData String? @db.Text
@@ -2977,11 +2982,216 @@ model Permit {
   archiveDate DateTime @default(now()) @db.Date
   updatedAt   DateTime @updatedAt
 
-  aiJobId       String? // لمعرفة أي مهمة AI قامت باستخراج هذه الرخصة
-  isMerged      Boolean  @default(false) // هل هذه رخصة تم دمجها مع أخرى؟
-  mergedIntoId  String? // ID الرخصة الأساسية التي تم دمج هذه الرخصة معها
+  aiJobId       String?
+  isMerged      Boolean  @default(false)
+  mergedIntoId  String?
   mergedInto    Permit?  @relation("MergedPermits", fields: [mergedIntoId], references: [id])
   duplicateFrom Permit[] @relation("MergedPermits")
+}
+
+// ===============================================
+// 📁 أرشيف الملفات الهندسية (Engineering Files Archive)
+// ===============================================
+
+// 1. الجدول الرئيسي: حزمة الملفات الهندسية (يمثل صفاً واحداً في الأرشيف)
+model EngineeringBundle {
+  id          String  @id @default(cuid())
+  bundleCode  String  @unique // مثال: ENG-REF-2026-001
+  projectName String? // اسم المشروع المرجعي
+  source      String  @default("EXTERNAL") // خارجي، معاملة، أرشيف مشاريع
+  status      String  @default("NEW") // NEW, NEEDS_DATA, COMPLETED, ARCHIVED
+
+  // التصنيف
+  mainCategory    String? // سكني، تجاري، إداري...
+  subCategory     String? // فيلا، برج، مستودع...
+  transactionType String? // نوع المعاملة المرتبطة به إن وجدت
+  usageType       String? // استخدام المشروع
+  similarityLevel String? // ملف مرجعي عام، مشابه قوي...
+
+  // بيانات الموقع
+  city            String          @default("الرياض")
+  districtName    String? // اسم الحي (نص حر من الـ AI)
+  districtId      String? // معرف الحي للربط مع شاشة (RiyadhDistrict)
+  district        RiyadhDistrict? @relation(fields: [districtId], references: [id])
+  sectorName      String? // القطاع البلدي
+  subMunicipality String? // البلدية الفرعية
+  planNumber      String?
+  plotNumbers     String[] // أرقام القطع كمصفوفة
+  plotsCount      Int?            @default(0)
+  totalLandArea   Float?
+
+  // بيانات المبنى
+  floorsAbove      Int?
+  basements        Int?
+  annexes          Int?
+  buildingsCount   Int?     @default(1)
+  structuralSystem String? // النظام الإنشائي
+  isExisting       Boolean? // قائم؟
+  isCorrection     Boolean? // تصحيح وضع؟
+  isMultiUse       Boolean? // متعدد الاستخدام؟
+  designNotes      String?  @db.Text
+
+  // الشوارع الأربعة (يمكن تخزينها كـ JSON لتقليل الجداول أو بجدول فرعي، الـ JSON أسرع هنا)
+  // الهيكل المتوقع: [{ direction: "شمال", width: 20, name: "", isMain: true, hasRegulation: false }]
+  streetsData Json? @default("[]")
+
+  // بيانات الاستخراج والذكاء الاصطناعي
+  aiConfidence  Float?
+  extractedFrom String? // مصدر الاستخراج (صورة، PDF، يدوي)
+
+  // الارتباطات مع النظام الحالي
+  transactionId   String?
+  transaction     PrivateTransaction? @relation(fields: [transactionId], references: [id])
+  archivedProjId  String?
+  archivedProject ArchivedProject?    @relation(fields: [archivedProjId], references: [id])
+  clientId        String?
+  client          Client?             @relation(fields: [clientId], references: [id])
+
+  // التتبع
+  createdBy    String // معرف الموظف
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  generalNotes String?  @db.Text
+
+  // العلاقات الداخلية
+  files EngineeringFile[]
+}
+
+// 2. الجدول الفرعي: الملفات داخل الحزمة
+model EngineeringFile {
+  id       String            @id @default(cuid())
+  fileCode String            @unique // مثال: ENG-REF-2026-001-DWG-01
+  bundleId String
+  bundle   EngineeringBundle @relation(fields: [bundleId], references: [id], onDelete: Cascade)
+
+  originalName String
+  internalName String? // الاسم المنظم داخل النظام
+  fileUrl      String  @db.Text
+  extension    String // DWG, RVT, PDF...
+  mimeType     String?
+  fileSize     Int // الحجم بالبايت
+
+  fileCategory    String? // معماري، إنشائي، نموذج BIM، مساعد (Screenshot)...
+  softwareVersion String? // AutoCAD 2018, Revit 2023...
+
+  source        String  @default("UPLOADED") // مرفوع، منسوخ من أرشيف، الخ
+  status        String  @default("ACTIVE") // ACTIVE, ARCHIVED, CORRUPTED
+  isVirtualLink Boolean @default(false) // 💡 TRUE = الملف موجود فعلياً في أرشيف المشاريع وهذا مجرد رابط له
+
+  uploadedBy String // معرف الموظف
+  createdAt  DateTime @default(now())
+  notes      String?  @db.Text
+}
+
+// ===============================================
+// 📁 منظومة أرشيف النماذج (Project Forms Archive System)
+// ===============================================
+
+// 1. الجدول الرئيسي: النموذج (Project Form Template)
+model ProjectFormTemplate {
+  id          String  @id @default(cuid())
+  formCode    String  @unique // مثال: FRM-2026-0001
+  name        String // اسم النموذج
+  description String? @db.Text // وصف مختصر
+  formType    String? // طلب، إقرار، تعهد، تفويض، إلخ
+
+  // الاعتماد والمصدر
+  officialStatus    String  @default("UNSPECIFIED") // OFFICIAL, UNOFFICIAL, INTERNAL
+  issuerName        String? // الجهة المصدرة (أمانة الرياض، بلدي، إلخ)
+  sourceDescription String? @db.Text // مصدر الحصول عليه (نص حر)
+  sourceUrl         String? @db.Text // رابط المصدر إن وجد
+
+  // الصلاحية
+  hasExpiry  Boolean   @default(false)
+  expiryDate DateTime?
+  status     String    @default("NEW") // NEW, ACTIVE, EXPIRED, NEEDS_REVIEW, ARCHIVED
+
+  // محددات الربط والملاءمة (Matching Criteria لكي يقترحه النظام في المعاملات)
+  targetMainCategories String[] // مصفوفة أنواع المعاملات (إصدار، تعديل...)
+  targetSubCategories  String[]
+  targetUsages         String[] // سكني، تجاري...
+  targetDistricts      String[] // مصفوفة بأسماء أو معرفات الأحياء المستهدفة
+  targetSectors        String[] // القطاعات البلدية
+  minFloors            Int? // الحد الأدنى للأدوار
+  maxFloors            Int? // الحد الأقصى للأدوار
+  minStreetWidth       Float? // الحد الأدنى لعرض الشارع
+
+  // العدادات الإحصائية
+  downloadCount Int @default(0)
+  usageCount    Int @default(0)
+
+  // التتبع والذكاء الاصطناعي
+  aiAnalysisData Json? // حفظ بيانات AI المبدئية قبل اعتمادها
+  addedBy        String // معرف الموظف الذي أضافه
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  // العلاقات (Relations)
+  versions    ProjectFormVersion[]
+  usageLogs   ProjectFormUsageLog[]
+  attachments ProjectFormAttachment[]
+}
+
+// 2. جدول الإصدارات والملفات (Project Form Versions)
+model ProjectFormVersion {
+  id     String              @id @default(cuid())
+  formId String
+  form   ProjectFormTemplate @relation(fields: [formId], references: [id], onDelete: Cascade)
+
+  versionNumber String? // V1.0, 2025, 2026...
+  issueDate     DateTime? // تاريخ إصدار هذه النسخة من الجهة
+  isCurrent     Boolean   @default(true) // هل هذه هي النسخة السارية حالياً؟
+
+  // بيانات الملف الفعلي
+  originalName String
+  fileUrl      String  @db.Text
+  extension    String // PDF, DOCX, XLSX, ZIP...
+  fileSize     Int // الحجم بالبايت
+  pagesCount   Int?
+  isFillable   Boolean @default(false) // هل الـ PDF/Word قابل للتعبئة إلكترونياً؟
+
+  // التتبع
+  replacedVersionId String? // إذا كان بديلاً لنسخة أقدم (Self-relation ID)
+  changeReason      String?  @db.Text
+  uploadedBy        String
+  createdAt         DateTime @default(now())
+
+  // العلاقات
+  usageLogs ProjectFormUsageLog[]
+}
+
+// 3. جدول سجل الاستخدام (Audit & Usage Log)
+model ProjectFormUsageLog {
+  id        String              @id @default(cuid())
+  formId    String
+  form      ProjectFormTemplate @relation(fields: [formId], references: [id], onDelete: Cascade)
+  versionId String?
+  version   ProjectFormVersion? @relation(fields: [versionId], references: [id])
+
+  actionType String // DOWNLOAD, ATTACH_TO_TRANSACTION, VIEW, SEND
+  userId     String // الموظف الذي قام بالعملية
+
+  // الارتباطات الخارجية إن وجدت
+  transactionId String? // رقم أو ID المعاملة المرتبطة
+  clientId      String? // معرف العميل إذا تم إرساله له
+
+  details   String?  @db.Text // تفاصيل إضافية (مثال: تم إرساله عبر الواتساب)
+  createdAt DateTime @default(now())
+}
+
+// 4. جدول المرفقات الداعمة للنموذج (Project Form Attachments)
+model ProjectFormAttachment {
+  id     String              @id @default(cuid())
+  formId String
+  form   ProjectFormTemplate @relation(fields: [formId], references: [id], onDelete: Cascade)
+
+  attachmentType String // SOURCE_SCREENSHOT, FILLED_EXAMPLE, INSTRUCTIONS...
+  originalName   String
+  fileUrl        String  @db.Text
+  notes          String? @db.Text
+
+  addedBy   String
+  createdAt DateTime @default(now())
 }
 
 // ============================================================================
@@ -4261,8 +4471,9 @@ model ArchivedProject {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  files        ArchivedProjectFile[]
-  projectPlots ProjectPlot[]
+  files             ArchivedProjectFile[]
+  projectPlots      ProjectPlot[]
+  EngineeringBundle EngineeringBundle[]
 
   @@index([clientId])
   @@index([districtId])
