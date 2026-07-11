@@ -176,6 +176,12 @@ model Employee {
   uploadedArchives     PropertyDocumentArchive[] @relation("DocUploader")
   archiveLogs          ArchiveAuditLog[]
   cashVaultLogs        CashVaultAuditLog[]
+
+  buildingCodesUploaded  BuildingCodeArchiveRecord[]      @relation("BuildingCodeUploader")
+  buildingCodesUpdated   BuildingCodeArchiveRecord[]      @relation("BuildingCodeUpdater")
+  buildingCodeLinks      BuildingCodeArchiveLink[]        @relation("BuildingCodeLinkConfirmer")
+  buildingCodeDuplicates BuildingCodeDuplicateCandidate[] @relation("BuildingCodeDuplicateResolver")
+  buildingCodeAudits     BuildingCodeAuditLog[]           @relation("BuildingCodeAuditor")
 }
 
 // ==================================================
@@ -3194,6 +3200,411 @@ model ProjectFormAttachment {
   createdAt DateTime @default(now())
 }
 
+// ===============================================
+// 📁 منظومة أرشيف الهويات (Identities Archive System)
+// ===============================================
+
+// 1. الجدول الرئيسي: سجل الهوية الأساسي
+model IdentityArchiveRecord {
+  id           String @id @default(cuid())
+  identityType String // NATIONAL_ID, IQAMA, PASSPORT, CR, AUTHORIZATION, UNKNOWN
+  entityType   String // INDIVIDUAL, COMPANY, INSTITUTION, REPRESENTATIVE
+
+  primaryNumber   String? @unique // رقم الهوية / السجل الرئيسي
+  secondaryNumber String? // رقم النسخة أو الرقم الوطني الموحد
+
+  arabicName   String?
+  englishName  String?
+  nationality  String?
+  gender       String?
+  placeOfBirth String?
+
+  // التواريخ
+  dateOfBirthGregorian DateTime?
+  dateOfBirthHijri     String?
+  issueDateGregorian   DateTime?
+  issueDateHijri       String?
+  expiryDateGregorian  DateTime?
+  expiryDateHijri      String?
+
+  // الإصدار
+  issuingAuthority String?
+  issuingCountry   String?
+  documentVersion  String?
+
+  // الحالات والعدادات
+  status          String @default("NEW") // NEW, ANALYZING, COMPLETED, NEEDS_REVIEW, CONFIRMED, DUPLICATE
+  validityStatus  String @default("UNKNOWN") // VALID, EXPIRING_SOON, EXPIRED
+  daysUntilExpiry Int?
+
+  // التواصل
+  contactPhone String?
+  contactEmail String?
+  address      String? @db.Text
+
+  // الملف والمصدر
+  sourceFileId   String? // إذا كان مرتبطاً بجدول ملفات مركزي
+  sourceFileUrl  String? @db.Text
+  sourceFileName String?
+  sourcePageNo   Int?
+
+  // الذكاء الاصطناعي والمراجعة
+  aiConfidenceOverall Float?
+  aiExtractedJson     Json? // البيانات الخام المستخرجة من AI
+  manualFieldsJson    Json? // التعديلات اليدوية
+
+  reviewStatus String    @default("PENDING") // PENDING, REVIEWED
+  reviewedBy   String?
+  reviewedAt   DateTime?
+
+  // التتبع
+  uploadedBy     String
+  isConfidential Boolean @default(false)
+  isArchived     Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // العلاقات
+  representatives IdentityRepresentative[]
+  links           IdentityArchiveLink[]
+  auditLogs       IdentityAuditLog[]
+
+  // علاقات اكتشاف التكرار (Self-Relation)
+  duplicatesAsRecordA IdentityDuplicateCandidate[] @relation("RecordA")
+  duplicatesAsRecordB IdentityDuplicateCandidate[] @relation("RecordB")
+}
+
+// 2. جدول الممثلين والتفويضات (لربط السجلات التجارية والشركات بمفوضيها)
+model IdentityRepresentative {
+  id                      String                @id @default(cuid())
+  identityArchiveRecordId String
+  record                  IdentityArchiveRecord @relation(fields: [identityArchiveRecordId], references: [id], onDelete: Cascade)
+
+  representativeName     String
+  representativeIdNumber String?
+  representativeIdType   String?
+
+  representativePhone  String?
+  representativeEmail  String?
+  representativeRole   String? // مدير، ممثل نظامي، وكيل
+  relationshipToEntity String? // شريك، موظف
+
+  authorityScope    String? @db.Text // نطاق الصلاحيات
+  canSign           Boolean @default(false)
+  canApprove        Boolean @default(false)
+  canSubmitRequests Boolean @default(false)
+
+  authorizationDocumentFileUrl String?   @db.Text
+  authorizationIssueDate       DateTime?
+  authorizationExpiryDate      DateTime?
+  authorizationStatus          String    @default("VALID")
+
+  notes     String?  @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// 3. جدول الارتباطات (System-wide Links)
+// يربط الهوية بأي وحدة أخرى في النظام (مشروع، فاتورة، رخصة...)
+model IdentityArchiveLink {
+  id                      String                @id @default(cuid())
+  identityArchiveRecordId String
+  record                  IdentityArchiveRecord @relation(fields: [identityArchiveRecordId], references: [id], onDelete: Cascade)
+
+  linkedModule      String // PROJECTS, INVOICES, CONTRACTS, PERMITS...
+  linkedRecordId    String // الـ ID في الجدول الهدف
+  linkedRecordNo    String? // رقم العرض أو الفاتورة لسهولة العرض
+  linkedRecordTitle String?
+
+  linkType        String // DIRECT, TEXT_MATCH, AI_SUGGESTED, MANUAL
+  matchConfidence Float?
+
+  isConfirmed Boolean   @default(false)
+  confirmedBy String?
+  confirmedAt DateTime?
+  rejectedBy  String?
+  rejectedAt  DateTime?
+
+  notes     String?  @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // لضمان عدم تكرار نفس الارتباط لنفس الهوية
+  @@unique([identityArchiveRecordId, linkedModule, linkedRecordId])
+}
+
+// 4. جدول التكرارات المحتملة (Duplicate Candidates)
+model IdentityDuplicateCandidate {
+  id String @id @default(cuid())
+
+  recordAId String
+  recordA   IdentityArchiveRecord @relation("RecordA", fields: [recordAId], references: [id], onDelete: Cascade)
+
+  recordBId String
+  recordB   IdentityArchiveRecord @relation("RecordB", fields: [recordBId], references: [id], onDelete: Cascade)
+
+  duplicateType      String // EXACT_MATCH, STRONG_MATCH, POSSIBLE_MATCH
+  matchScore         Float
+  matchingFieldsJson Json? // الحقول التي تسببت في التطابق
+
+  status           String    @default("PENDING") // PENDING, MERGED, REJECTED
+  resolvedBy       String?
+  resolvedAt       DateTime?
+  resolutionAction String? // وصف لما تم (مثال: تم دمج B داخل A)
+
+  notes     String?  @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([recordAId, recordBId])
+}
+
+// 5. سجل التدقيق الأمني (Audit Log)
+model IdentityAuditLog {
+  id                      String                @id @default(cuid())
+  identityArchiveRecordId String
+  record                  IdentityArchiveRecord @relation(fields: [identityArchiveRecordId], references: [id], onDelete: Cascade)
+
+  action String // UPLOAD, AI_ANALYZE, EDIT, MERGE, PRINT, SEND...
+  userId String
+
+  oldValueJson Json?
+  newValueJson Json?
+
+  notes      String? @db.Text
+  ipAddress  String?
+  deviceInfo String?
+
+  createdAt DateTime @default(now())
+}
+
+// ===============================================
+// 📁 منظومة أرشيف أنظمة البناء (Building Codes Archive System)
+// ===============================================
+
+// 1. الجدول الرئيسي: سجل نظام البناء
+model BuildingCodeArchiveRecord {
+  id           String @id @default(cuid())
+  documentType String // APPROVED, PRELIMINARY, OLD_PAPER, REQUEST, SCREENSHOT, UNCLASSIFIED
+
+  // أرقام مرجعية
+  systemNo      String?
+  requestNo     String?
+  transactionNo String?
+  unifiedNo     String?
+  versionNo     String?
+
+  // جهات الإصدار
+  issuingAuthority  String?
+  issuingDepartment String?
+
+  // بيانات الموقع
+  municipality               String?
+  district                   String?
+  planNo                     String?
+  plotNo                     String?
+  blockNo                    String?
+  deedNo                     String?
+  surveyDecisionNo           String?
+  ownerName                  String?
+  officeName                 String?
+  streetName                 String?
+  streetWidth                Float?
+  totalArea                  Float?
+  projectLocationDescription String? @db.Text
+
+  // الاشتراطات التخطيطية العامة (في حال لم يكن هناك قطاعات مقسمة)
+  zoningArea               String?
+  planningRequirementsText String? @db.Text
+  usageText                String?
+
+  // الارتدادات
+  setbacksText      String? @db.Text
+  frontSetback      Float?
+  sideSetback       Float?
+  rearSetback       Float?
+  mainStreetSetback Float?
+  sideStreetSetback Float?
+  neighborSetback   Float?
+
+  // الارتفاعات والأدوار
+  heightText String?
+  maxFloors  Int?
+  openHeight Boolean @default(false)
+
+  // الملحق العلوي (مهم جداً)
+  hasRoofAnnex         String  @default("UNKNOWN") // YES, NO, UNKNOWN
+  roofAnnexPercentage  Float?  @default(50)
+  roofAnnexBase        String? // LAST_FLOOR, FIRST_FLOOR, ROOF
+  roofAnnexSetback     Float?
+  roofAnnexCountsInFar String  @default("UNKNOWN") // YES, NO, UNKNOWN
+
+  // نسب ومعامل البناء
+  farValue                   Float?
+  buildingCoveragePercentage Float?
+  parkingRequirementsText    String? @db.Text
+
+  // القيود والملاحظات
+  specialNotesText        String? @db.Text
+  specialRestrictionsJson Json? // [منع فتحات, موافقة طيران, خصوصية...]
+
+  // المرفقات والصور
+  sourceFileUrl   String? @db.Text
+  sourceFileName  String?
+  mapImageFileUrl String? @db.Text
+  qrValue         String? @db.Text
+  barcodeValue    String?
+
+  // التواريخ والصلاحية
+  approvalDateGregorian    DateTime? @db.Date
+  approvalDateHijri        String?
+  approvalDateOriginalText String?
+  approvalDateSource       String? // DOCUMENT_TEXT, GREEN_STICKER, MANUAL, UPLOAD_DATE
+
+  validityDays        Int       @default(365)
+  expiryDateGregorian DateTime? @db.Date
+  expiryDateHijri     String?
+
+  // العدادات تُحسب برمجياً في الواجهة أو عند الجلب لتكون دقيقة دائماً
+  validityStatus String @default("UNKNOWN") // VALID, EXPIRING_SOON, EXPIRED, PRELIMINARY
+
+  // التحليل والمراجعة
+  aiConfidenceOverall Float?
+  aiExtractedJson     Json?
+  manualFieldsJson    Json?
+  reviewStatus        String @default("PENDING") // PENDING, REVIEWED, CONFIRMED
+  status              String @default("ANALYZING") // ANALYZING, COMPLETED, FAILED, DUPLICATE
+
+  // تعدد القطاعات والنسخ
+  hasMultipleZones     Boolean @default(false)
+  activeVersionGroupId String? // لتجميع النسخ المجددة لنفس القطعة
+  isActiveVersion      Boolean @default(true)
+
+  // التتبع
+  uploadedById    String
+  uploadedBy      Employee  @relation("BuildingCodeUploader", fields: [uploadedById], references: [id])
+  lastUpdatedById String?
+  lastUpdatedBy   Employee? @relation("BuildingCodeUpdater", fields: [lastUpdatedById], references: [id])
+  isArchived      Boolean   @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // العلاقات
+  zones     BuildingCodeZone[]
+  links     BuildingCodeArchiveLink[]
+  auditLogs BuildingCodeAuditLog[]
+
+  // علاقات التكرار
+  duplicatesAsRecordA BuildingCodeDuplicateCandidate[] @relation("BuildingCodeRecordA")
+  duplicatesAsRecordB BuildingCodeDuplicateCandidate[] @relation("BuildingCodeRecordB")
+
+  @@index([planNo, plotNo])
+  @@index([district])
+  @@index([requestNo])
+}
+
+// 2. القطاعات الداخلية لنظام البناء (للأنظمة التي تحتوي تقسيمات مثل واجهة تجارية / خلفي سكني)
+model BuildingCodeZone {
+  id             String                    @id @default(cuid())
+  buildingCodeId String
+  buildingCode   BuildingCodeArchiveRecord @relation(fields: [buildingCodeId], references: [id], onDelete: Cascade)
+
+  zoneName        String // القطعة الأمامية، باقي العمق...
+  zoneDescription String? @db.Text
+  zoneDepth       Float?
+  zoneFacing      String? // شارع رئيسي، شارع فرعي...
+
+  usageText                  String?
+  heightText                 String?
+  maxFloors                  Int?
+  buildingCoveragePercentage Float?
+  farValue                   Float?
+  setbacksText               String? @db.Text
+
+  hasRoofAnnex        String  @default("UNKNOWN")
+  roofAnnexPercentage Float?
+  roofAnnexNotes      String? @db.Text
+
+  parkingNotes String? @db.Text
+  specialNotes String? @db.Text
+  aiConfidence Float?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// 3. الارتباطات بوحدات النظام الأخرى
+model BuildingCodeArchiveLink {
+  id             String                    @id @default(cuid())
+  buildingCodeId String
+  buildingCode   BuildingCodeArchiveRecord @relation(fields: [buildingCodeId], references: [id], onDelete: Cascade)
+
+  linkedModule      String // TRANSACTIONS, OWNERSHIPS, PERMITS...
+  linkedRecordId    String
+  linkedRecordNo    String?
+  linkedRecordTitle String?
+
+  linkReason String // PLOT_MATCH, AI_SUGGESTED, MANUAL
+  matchScore Float?
+
+  isConfirmed   Boolean   @default(false)
+  confirmedById String?
+  confirmedBy   Employee? @relation("BuildingCodeLinkConfirmer", fields: [confirmedById], references: [id])
+  confirmedAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([buildingCodeId, linkedModule, linkedRecordId])
+}
+
+// 4. مرشحات التكرار والنسخ المجددة
+model BuildingCodeDuplicateCandidate {
+  id String @id @default(cuid())
+
+  recordAId String
+  recordA   BuildingCodeArchiveRecord @relation("BuildingCodeRecordA", fields: [recordAId], references: [id], onDelete: Cascade)
+
+  recordBId String
+  recordB   BuildingCodeArchiveRecord @relation("BuildingCodeRecordB", fields: [recordBId], references: [id], onDelete: Cascade)
+
+  duplicateType      String // EXACT_MATCH, RENEWED_VERSION, MULTI_PLOT, SIMILAR
+  matchScore         Float
+  matchingFieldsJson Json?
+
+  status           String    @default("PENDING") // PENDING, MERGED, KEPT_BOTH, REJECTED
+  resolutionAction String?   @db.Text
+  resolvedById     String?
+  resolvedBy       Employee? @relation("BuildingCodeDuplicateResolver", fields: [resolvedById], references: [id])
+  resolvedAt       DateTime?
+
+  notes     String?  @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([recordAId, recordBId])
+}
+
+// 5. سجل التدقيق الشامل
+model BuildingCodeAuditLog {
+  id             String                    @id @default(cuid())
+  buildingCodeId String
+  buildingCode   BuildingCodeArchiveRecord @relation(fields: [buildingCodeId], references: [id], onDelete: Cascade)
+
+  action String // UPLOAD, AI_ANALYZE, EDIT, LINK, MERGE, PRINT...
+
+  userId String
+  user   Employee @relation("BuildingCodeAuditor", fields: [userId], references: [id])
+
+  oldValueJson Json?
+  newValueJson Json?
+  notes        String? @db.Text
+
+  createdAt DateTime @default(now())
+}
+
 // ============================================================================
 // 💡 11. نظام إدارة الوثائق والأرشفة المؤسسي (Enterprise DMS)
 // ============================================================================
@@ -4859,7 +5270,6 @@ model ArchiveAuditLog {
   document   PropertyDocumentArchive @relation(fields: [documentId], references: [id], onDelete: Cascade)
 
   userId    String
-  // ✅ التعديل هنا: استخدام Employee بدلاً من User
   user      Employee @relation(fields: [userId], references: [id])
   action    String // UPLOAD, AI_ANALYZE, MANUAL_EDIT, CONFIRM, LINK_OWNERSHIP
   details   String?  @db.Text

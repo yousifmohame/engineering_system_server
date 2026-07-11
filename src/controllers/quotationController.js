@@ -783,6 +783,7 @@ const getAllQuotations = async (req, res) => {
       include: {
         client: { select: { name: true, clientCode: true } },
         ownership: { select: { code: true, district: true } },
+        payments: { orderBy: { installmentNumber: "asc" } }, // 👈 التعديل هنا: تم إضافة جلب الدفعات!
       },
     });
     res.status(200).json({ success: true, data: quotations });
@@ -1068,34 +1069,6 @@ const rejectQuotationWorkflow = async (req, res) => {
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });
   }
-};
-
-// ==========================================
-// دوال مساعدة لترجمة الثوابت من قاعدة البيانات
-// ==========================================
-const mapTitleToArabic = (title) => {
-  const titles = {
-    MR: "المكرم",
-    MRS: "المكرمة",
-    SIR_COMPANY: "السادة شركة",
-    SIR_ENTITY: "السادة جهة",
-    SIR_WAQF: "المكرم ناظر وقف",
-    PRINCE: "صاحب السمو الأمير",
-    PRINCESS: "صاحبة السمو الأميرة",
-    ROYAL_PRINCE: "صاحب السمو الملكي الأمير",
-    ROYAL_PRINCESS: "صاحبة السمو الملكي الأميرة",
-    CUSTOM: "المكرم",
-  };
-  return titles[title] || "المكرم";
-};
-
-const mapHandlingMethod = (method) => {
-  const methods = {
-    DIRECT: "المالك مباشرة",
-    AUTHORIZED: "مفوض نظامي",
-    AGENT: "وكيل شرعي",
-  };
-  return methods[method] || "المالك مباشرة";
 };
 
 // ============================================================================

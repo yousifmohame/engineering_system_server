@@ -21,7 +21,7 @@ const { protect } = require("../middleware/authMiddleware");
 // =============================
 // إنشاء مجلد الرفع إذا لم يكن موجودًا
 // =============================
-const uploadDir = path.join(__dirname, "../uploads/permits-autocad");
+const uploadDir = path.join(__dirname, "../../uploads/permits-autocad");
 
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });

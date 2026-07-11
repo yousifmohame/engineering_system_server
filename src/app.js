@@ -292,6 +292,12 @@ app.use("/api/autocad-archive", autocadArchiveRoutes);
 const projectFormsRoutes = require("./routes/projectFormsRoutes");
 app.use("/api/project-forms", projectFormsRoutes);
 
+const identityArchiveRoutes = require("./routes/identityArchiveRoutes");
+app.use("/api/identities", identityArchiveRoutes);
+
+const buildingCodeArchiveRoutes = require("./routes/buildingCodeArchiveRoutes");
+app.use("/api/archive/building-codes", buildingCodeArchiveRoutes);
+
 const { generateQRBuffer } = require('./utils/qrGenerator');
 
 // أضف هذا المسار في منطقة المسارات العامة (قبل الـ Auth Middleware)

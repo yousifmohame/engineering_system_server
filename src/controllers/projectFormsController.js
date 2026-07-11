@@ -12,11 +12,18 @@ const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 // ==========================================
 const analyzeFormWithAI = async (req, res) => {
   try {
-    if (!req.file) return res.status(400).json({ success: false, message: "الرجاء إرفاق نموذج (صورة أو PDF) للتحليل" });
+    if (!req.file)
+      return res.status(400).json({
+        success: false,
+        message: "الرجاء إرفاق نموذج (صورة أو PDF) للتحليل",
+      });
 
     const fileBuffer = fs.readFileSync(req.file.path);
     const documentPart = {
-      inlineData: { data: fileBuffer.toString("base64"), mimeType: req.file.mimetype },
+      inlineData: {
+        data: fileBuffer.toString("base64"),
+        mimeType: req.file.mimetype,
+      },
     };
 
     // Prompt مخصص لاستخراج بيانات النماذج بناءً على الملف الوصفي
@@ -54,16 +61,21 @@ const analyzeFormWithAI = async (req, res) => {
         });
         break; // الخروج من الحلقة عند نجاح الاتصال
       } catch (error) {
-        console.warn(`فشل الاتصال بالموديل ${modelName}، جاري تجربة الموديل التالي...`);
+        console.warn(
+          `فشل الاتصال بالموديل ${modelName}، جاري تجربة الموديل التالي...`,
+        );
         // الانتظار ثانية واحدة قبل تجربة النموذج التالي لتجنب حظر الـ API
         await new Promise((resolve) => setTimeout(resolve, 1000));
       }
     }
 
-    if (!response) throw new Error("فشل الاتصال بجميع نماذج الذكاء الاصطناعي المتاحة.");
+    if (!response)
+      throw new Error("فشل الاتصال بجميع نماذج الذكاء الاصطناعي المتاحة.");
 
     // تنظيف الأرقام إن كانت عربية/هندية لضمان سلامة الـ JSON
-    let cleanedContent = response.text.replace(/[٠-٩]/g, (d) => "٠١٢٣٤٥٦٧٨٩".indexOf(d));
+    let cleanedContent = response.text.replace(/[٠-٩]/g, (d) =>
+      "٠١٢٣٤٥٦٧٨٩".indexOf(d),
+    );
     const parsedData = JSON.parse(cleanedContent);
 
     // تنظيف الملف المؤقت
@@ -74,7 +86,11 @@ const analyzeFormWithAI = async (req, res) => {
     console.error("AI Form Analysis Error:", error);
     // تأكد من تنظيف الملف المؤقت حتى في حالة الفشل
     if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-    res.status(500).json({ success: false, message: "فشل تحليل النموذج", details: error.message });
+    res.status(500).json({
+      success: false,
+      message: "فشل تحليل النموذج",
+      details: error.message,
+    });
   }
 };
 
@@ -92,7 +108,13 @@ const createFormTemplate = async (req, res) => {
     const formCode = `FRM-${year}-${String(count + 1).padStart(4, "0")}`;
 
     // 2. معالجة المصفوفات المرسلة من الـ Frontend
-    const parseArray = (str) => { try { return JSON.parse(str || "[]"); } catch { return []; } };
+    const parseArray = (str) => {
+      try {
+        return JSON.parse(str || "[]");
+      } catch {
+        return [];
+      }
+    };
 
     // 3. إنشاء النموذج مع نسخته الأولى (Nested Create)
     const newForm = await prisma.projectFormTemplate.create({
@@ -105,16 +127,18 @@ const createFormTemplate = async (req, res) => {
         issuerName: data.issuerName,
         sourceDescription: data.sourceDescription,
         sourceUrl: data.sourceUrl,
-        hasExpiry: data.hasExpiry === 'true' || data.hasExpiry === true,
+        hasExpiry: data.hasExpiry === "true" || data.hasExpiry === true,
         expiryDate: data.expiryDate ? new Date(data.expiryDate) : null,
         status: data.status || "NEW",
-        
+
         targetMainCategories: parseArray(data.targetMainCategories),
         targetSubCategories: parseArray(data.targetSubCategories),
         targetUsages: parseArray(data.targetUsages),
         targetDistricts: parseArray(data.targetDistricts),
-        
-        aiAnalysisData: data.aiAnalysisData ? JSON.parse(data.aiAnalysisData) : null,
+
+        aiAnalysisData: data.aiAnalysisData
+          ? JSON.parse(data.aiAnalysisData)
+          : null,
         addedBy: userId,
 
         // إنشاء النسخة الأولى من الملف المرتبط بهذا النموذج
@@ -125,16 +149,21 @@ const createFormTemplate = async (req, res) => {
             isCurrent: true,
             originalName: file.originalname,
             fileUrl: `/uploads/project-forms/${file.filename}`,
-            extension: path.extname(file.originalname).substring(1).toUpperCase(),
+            extension: path
+              .extname(file.originalname)
+              .substring(1)
+              .toUpperCase(),
             fileSize: file.size,
             uploadedBy: userId,
-          }))
-        }
+          })),
+        },
       },
-      include: { versions: true }
+      include: { versions: true },
     });
 
-    res.status(201).json({ success: true, message: "تم حفظ النموذج بنجاح", data: newForm });
+    res
+      .status(201)
+      .json({ success: true, message: "تم حفظ النموذج بنجاح", data: newForm });
   } catch (error) {
     console.error("Create Form Error:", error);
     res.status(500).json({ success: false, message: error.message });
@@ -153,7 +182,7 @@ const getForms = async (req, res) => {
       where.OR = [
         { name: { contains: search } },
         { formCode: { contains: search } },
-        { issuerName: { contains: search } }
+        { issuerName: { contains: search } },
       ];
     }
     if (officialStatus) where.officialStatus = officialStatus;
@@ -164,7 +193,7 @@ const getForms = async (req, res) => {
       include: {
         versions: { where: { isCurrent: true } }, // جلب بيانات الملف الحالي فقط للجدول
       },
-      orderBy: { createdAt: "desc" }
+      orderBy: { createdAt: "desc" },
     });
 
     res.json({ success: true, data: forms });
@@ -182,12 +211,15 @@ const addNewFormVersion = async (req, res) => {
     const data = req.body;
     const userId = req.user?.id || "النظام";
 
-    if (!req.file) return res.status(400).json({ success: false, message: "الرجاء إرفاق ملف النسخة الجديدة" });
+    if (!req.file)
+      return res
+        .status(400)
+        .json({ success: false, message: "الرجاء إرفاق ملف النسخة الجديدة" });
 
     // 1. جعل جميع النسخ السابقة غير حالية
     await prisma.projectFormVersion.updateMany({
       where: { formId: id },
-      data: { isCurrent: false }
+      data: { isCurrent: false },
     });
 
     // 2. إنشاء النسخة الجديدة
@@ -200,13 +232,20 @@ const addNewFormVersion = async (req, res) => {
         changeReason: data.changeReason,
         originalName: req.file.originalname,
         fileUrl: `/uploads/project-forms/${req.file.filename}`,
-        extension: path.extname(req.file.originalname).substring(1).toUpperCase(),
+        extension: path
+          .extname(req.file.originalname)
+          .substring(1)
+          .toUpperCase(),
         fileSize: req.file.size,
         uploadedBy: userId,
-      }
+      },
     });
 
-    res.json({ success: true, message: "تم إصدار نسخة جديدة بنجاح", data: newVersion });
+    res.json({
+      success: true,
+      message: "تم إصدار نسخة جديدة بنجاح",
+      data: newVersion,
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -228,16 +267,19 @@ const logFormUsage = async (req, res) => {
         versionId: versionId,
         actionType, // DOWNLOAD, ATTACH_TO_TRANSACTION, etc.
         userId,
-        transactionId
-      }
+        transactionId,
+      },
     });
 
     // 2. زيادة العداد في الجدول الرئيسي
-    const updateField = actionType === "DOWNLOAD" ? { downloadCount: { increment: 1 } } : { usageCount: { increment: 1 } };
-    
+    const updateField =
+      actionType === "DOWNLOAD"
+        ? { downloadCount: { increment: 1 } }
+        : { usageCount: { increment: 1 } };
+
     await prisma.projectFormTemplate.update({
       where: { id },
-      data: updateField
+      data: updateField,
     });
 
     res.json({ success: true });
@@ -252,16 +294,20 @@ const logFormUsage = async (req, res) => {
 const getFormById = async (req, res) => {
   try {
     const { id } = req.params;
-    
+
     const form = await prisma.projectFormTemplate.findUnique({
       where: { id },
       include: {
-        versions: { orderBy: { createdAt: 'desc' } }, // جلب جميع النسخ، الأحدث أولاً
-        usageLogs: { orderBy: { createdAt: 'desc' }, take: 10 } // جلب آخر 10 حركات استخدام
-      }
+        versions: { orderBy: { createdAt: "desc" } }, // جلب جميع النسخ، الأحدث أولاً
+        usageLogs: { orderBy: { createdAt: "desc" }, take: 10 }, // جلب آخر 10 حركات استخدام
+        attachments: { orderBy: { createdAt: "desc" } },
+      },
     });
 
-    if (!form) return res.status(404).json({ success: false, message: "النموذج غير موجود" });
+    if (!form)
+      return res
+        .status(404)
+        .json({ success: false, message: "النموذج غير موجود" });
 
     res.json({ success: true, data: form });
   } catch (error) {
@@ -278,8 +324,12 @@ const updateFormTemplate = async (req, res) => {
     const data = req.body;
 
     // بما أن الفرونت إند يرسل البيانات كـ JSON، نتأكد من معالجة المصفوفات
-    const targetMainCategories = Array.isArray(data.targetMainCategories) ? data.targetMainCategories : [];
-    const targetUsages = Array.isArray(data.targetUsages) ? data.targetUsages : [];
+    const targetMainCategories = Array.isArray(data.targetMainCategories)
+      ? data.targetMainCategories
+      : [];
+    const targetUsages = Array.isArray(data.targetUsages)
+      ? data.targetUsages
+      : [];
 
     const updatedForm = await prisma.projectFormTemplate.update({
       where: { id },
@@ -289,14 +339,18 @@ const updateFormTemplate = async (req, res) => {
         formType: data.formType,
         officialStatus: data.officialStatus,
         issuerName: data.issuerName,
-        hasExpiry: data.hasExpiry === 'true' || data.hasExpiry === true,
+        hasExpiry: data.hasExpiry === "true" || data.hasExpiry === true,
         expiryDate: data.expiryDate ? new Date(data.expiryDate) : null,
         targetMainCategories,
-        targetUsages
-      }
+        targetUsages,
+      },
     });
 
-    res.json({ success: true, message: "تم تحديث البيانات بنجاح", data: updatedForm });
+    res.json({
+      success: true,
+      message: "تم تحديث البيانات بنجاح",
+      data: updatedForm,
+    });
   } catch (error) {
     console.error("Update Form Error:", error);
     res.status(500).json({ success: false, message: error.message });
@@ -313,16 +367,19 @@ const deleteFormTemplate = async (req, res) => {
     // 1. جلب النموذج أولاً لمعرفة مسارات الملفات المخزنة في السيرفر لحذفها
     const form = await prisma.projectFormTemplate.findUnique({
       where: { id },
-      include: { versions: true }
+      include: { versions: true },
     });
 
-    if (!form) return res.status(404).json({ success: false, message: "النموذج غير موجود" });
+    if (!form)
+      return res
+        .status(404)
+        .json({ success: false, message: "النموذج غير موجود" });
 
     // 2. حذف الملفات الفعلية من مجلد uploads
     if (form.versions && form.versions.length > 0) {
-      form.versions.forEach(version => {
+      form.versions.forEach((version) => {
         // fileUrl يكون بالشكل: /uploads/project-forms/filename.pdf
-        const filePath = path.join(__dirname, "..", version.fileUrl); 
+        const filePath = path.join(__dirname, "..", version.fileUrl);
         if (fs.existsSync(filePath)) {
           fs.unlinkSync(filePath);
         }
@@ -335,7 +392,67 @@ const deleteFormTemplate = async (req, res) => {
     res.json({ success: true, message: "تم حذف النموذج وملفاته بنجاح" });
   } catch (error) {
     console.error("Delete Form Error:", error);
-    res.status(500).json({ success: false, message: "لا يمكن حذف هذا النموذج، قد يكون مرتبطاً ببيانات أخرى" });
+    res.status(500).json({
+      success: false,
+      message: "لا يمكن حذف هذا النموذج، قد يكون مرتبطاً ببيانات أخرى",
+    });
+  }
+};
+
+// ==========================================
+// 9. إضافة مرفق داعم للنموذج
+// ==========================================
+const uploadAttachment = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user?.id || "النظام";
+
+    if (!req.file)
+      return res
+        .status(400)
+        .json({ success: false, message: "الرجاء رفع ملف" });
+
+    const newAttachment = await prisma.projectFormAttachment.create({
+      data: {
+        formId: id,
+        attachmentType: req.body.attachmentType || "SUPPORTING_DOC",
+        originalName: req.file.originalname,
+        fileUrl: `/uploads/project-forms/${req.file.filename}`,
+        addedBy: userId,
+      },
+    });
+
+    res.json({ success: true, data: newAttachment });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ==========================================
+// 10. حذف مرفق داعم
+// ==========================================
+const deleteAttachment = async (req, res) => {
+  try {
+    const { attachmentId } = req.params;
+
+    const attachment = await prisma.projectFormAttachment.findUnique({
+      where: { id: attachmentId },
+    });
+    if (!attachment)
+      return res
+        .status(404)
+        .json({ success: false, message: "المرفق غير موجود" });
+
+    // حذف الملف الفعلي
+    const filePath = path.join(__dirname, "..", attachment.fileUrl);
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+
+    // حذف من الداتا بيز
+    await prisma.projectFormAttachment.delete({ where: { id: attachmentId } });
+
+    res.json({ success: true, message: "تم حذف المرفق" });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -346,7 +463,9 @@ module.exports = {
   getForms,
   addNewFormVersion,
   logFormUsage,
-  getFormById,        // 👈 جديد
+  getFormById, // 👈 جديد
   updateFormTemplate, // 👈 جديد
-  deleteFormTemplate  // 👈 جديد
+  deleteFormTemplate, // 👈 جديد
+  uploadAttachment,
+  deleteAttachment,
 };
