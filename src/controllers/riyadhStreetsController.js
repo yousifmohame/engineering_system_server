@@ -416,23 +416,49 @@ const createDistrict = async (req, res) => {
   try {
     const { name, sectorId, officialLink, mapImage, satelliteImage } = req.body;
 
-    // توليد الكود التلقائي (مثال: NBH-001)
-    const count = await prisma.riyadhDistrict.count();
-    const autoCode = `NBH-${String(count + 1).padStart(3, "0")}`;
+    if (!name || !sectorId) {
+      return res.status(400).json({ message: "اسم الحي والقطاع التابع له مطلوبان" });
+    }
 
+    // 1. توليد كود آمن من التكرار (يعتمد على آخر رقم وليس على العدد الإجمالي)
+    const lastDistrict = await prisma.riyadhDistrict.findFirst({
+      orderBy: { createdAt: 'desc' } // نجلب أحدث حي تم إضافته
+    });
+
+    let nextNumber = 1;
+    if (lastDistrict && lastDistrict.code) {
+      // استخراج الرقم من الكود (مثلاً NBH-005 يستخرج 5)
+      const lastNum = parseInt(lastDistrict.code.replace(/\D/g, ''));
+      if (!isNaN(lastNum)) {
+        nextNumber = lastNum + 1;
+      } else {
+        nextNumber = (await prisma.riyadhDistrict.count()) + 1;
+      }
+    }
+
+    const autoCode = `NBH-${String(nextNumber).padStart(3, "0")}`;
+
+    // 2. معالجة نوع الـ ID (إذا كان رقم يحوله لرقم، وإذا كان UUID يتركه نص)
+    const parsedSectorId = isNaN(sectorId) ? sectorId : parseInt(sectorId);
+
+    // 3. الإنشاء
     const newDistrict = await prisma.riyadhDistrict.create({
       data: {
         name,
         code: autoCode,
-        sectorId,
-        officialLink,
-        mapImage,
-        satelliteImage,
+        sectorId: parsedSectorId,
+        // تأمين الحقول الفارغة بتحويلها إلى null لتجنب أخطاء Prisma
+        officialLink: officialLink || null,
+        mapImage: mapImage || null,
+        satelliteImage: satelliteImage || null,
       },
     });
+
     res.status(201).json(newDistrict);
   } catch (error) {
-    res.status(500).json({ message: "خطأ", error: error.message });
+    console.error("🔥 Error creating District:", error);
+    // إرجاع الخطأ الفعلي للفرونت إند سيسهل عليك اكتشاف أي خطأ مستقبلاً
+    res.status(500).json({ message: "فشل في تسجيل الحي", error: error.message });
   }
 };
 
