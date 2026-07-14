@@ -7,9 +7,13 @@ const fs = require("fs");
 const {
   uploadBuildingCode,
   getBuildingCodes,
+  getRecordDuplicates,
+  scanForDuplicates,
+  deleteDuplicateRecord,
   getBuildingCodeById,
   updateBuildingCode,
-  mergeBuildingCodes
+  mergeBuildingCodes,
+  deleteBuildingCode
 } = require("../controllers/buildingCodeArchiveController");
 
 const { protect } = require("../middleware/authMiddleware");
@@ -25,7 +29,9 @@ const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadDir),
   filename: (req, file, cb) => {
     // حل مشكلة الأسماء العربية في الملفات المرفوعة
-    file.originalname = Buffer.from(file.originalname, "latin1").toString("utf8");
+    file.originalname = Buffer.from(file.originalname, "latin1").toString(
+      "utf8",
+    );
     const ext = path.extname(file.originalname);
     cb(null, `BC-${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`);
   },
@@ -41,6 +47,10 @@ router.post("/upload", upload.array("files", 20), uploadBuildingCode); // يقب
 router.get("/", getBuildingCodes);
 router.get("/:id", getBuildingCodeById);
 router.put("/:id", updateBuildingCode);
+router.delete("/:id", deleteBuildingCode);
+router.get("/:id/duplicates", getRecordDuplicates);
+router.post("/scan-duplicates", scanForDuplicates);
+router.post("/resolve-duplicate", deleteDuplicateRecord);
 
 // مسارات إدارة التكرارات (Merge)
 router.post("/duplicates/:duplicateId/merge", mergeBuildingCodes);

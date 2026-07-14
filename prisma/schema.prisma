@@ -3386,6 +3386,7 @@ model IdentityAuditLog {
 // 1. الجدول الرئيسي: سجل نظام البناء
 model BuildingCodeArchiveRecord {
   id           String @id @default(cuid())
+  serialNumber Int    @unique @default(autoincrement())
   documentType String // APPROVED, PRELIMINARY, OLD_PAPER, REQUEST, SCREENSHOT, UNCLASSIFIED
 
   // أرقام مرجعية

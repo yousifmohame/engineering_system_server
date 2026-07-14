@@ -21,11 +21,11 @@ const uploadBuildingCode = async (req, res) => {
     const userId = req.user?.id || "النظام";
     const createdRecords = [];
 
-    // دعم الرفع المتعدد (Bulk Upload)
     for (const file of req.files) {
       const fileUrl = `/uploads/building-codes/${file.filename}`;
 
-      // إنشاء السجل المبدئي ليكون متاحاً في الواجهة فوراً
+      // 💡 هنا يتم إنشاء السجل.. لاحظ أننا لم نرسل serialNumber
+      // قاعدة البيانات ستقوم بتوليده تلقائياً وحجزه لهذا السجل للأبد
       const newRecord = await prisma.buildingCodeArchiveRecord.create({
         data: {
           documentType: "UNCLASSIFIED",
@@ -37,7 +37,6 @@ const uploadBuildingCode = async (req, res) => {
       });
       createdRecords.push(newRecord);
 
-      // تسجيل حركة الرفع في التدقيق
       await prisma.buildingCodeAuditLog.create({
         data: {
           buildingCodeId: newRecord.id,
@@ -47,7 +46,6 @@ const uploadBuildingCode = async (req, res) => {
         },
       });
 
-      // 💡 إطلاق المعالجة الذكية في الخلفية (Fire & Forget)
       processBuildingCodeAI(newRecord.id, file.path, userId).catch(
         console.error,
       );
@@ -65,7 +63,7 @@ const uploadBuildingCode = async (req, res) => {
 };
 
 // ==========================================
-// 💡 2. دالة معالجة الذكاء الاصطناعي (تعمل بالخلفية)
+// 💡 2. دالة معالجة الذكاء الاصطناعي (مضادة للانهيار)
 // ==========================================
 const processBuildingCodeAI = async (recordId, filePath, userId) => {
   try {
@@ -80,30 +78,29 @@ const processBuildingCodeAI = async (recordId, filePath, userId) => {
       inlineData: { data: fileBuffer.toString("base64"), mimeType },
     };
 
-    // الـ Prompt الضخم والشامل لجميع الحالات (الاستيكر، مفتوح، أرضي+أول، القطاعات)
     const prompt = `
       أنت مهندس تخطيط عمراني وأنظمة بناء خبير في السعودية وأمانة الرياض.
-      استخرج كافة تفاصيل نظام البناء من المستند المرفق. قد يكون المستند حديثاً (إلكتروني)، أو قديماً (فيه استيكر أخضر)، أو أولياً.
+      استخرج كافة تفاصيل نظام البناء من المستند المرفق. قد يكون المستند حديثاً، أو قديماً، أو أولياً.
       
       قواعد الاستخراج:
-      1. عدد الأدوار (maxFloors): حول النصوص إلى أرقام. "أرضي + أول" = 2. "أرضي + دورين" = 3. 
-      2. الارتفاع المفتوح: إذا ذكر "مفتوح" أو "لا يوجد حد"، اجعل openHeight = true و maxFloors = null.
-      3. الملحق العلوي: إذا ذكر "ملاحق علوية" ولم يحدد نسبة، ضع roofAnnexPercentage = 50.
-      4. القطاعات المتعددة: إذا كان النظام مقسماً (مثال: "القطعة الأمامية"، "باقي العمق")، اجعل hasMultipleZones = true وقم بتعبئة مصفوفة zones.
-      5. التواريخ: استخرجها بدقة. إذا كان قديماً، ابحث في ختم الوارد أو الاستيكر الأخضر.
+      1. الأرقام فقط: أي حقل يحتوي على مساحة أو ارتداد أرجع الرقم فقط بدون حروف (مثال: ارجع 3.5 ولا ترجع 3.5م).
+      2. عدد الأدوار (maxFloors): حول النصوص إلى أرقام (مثال: أرضي + أول = 2).
+      3. الارتفاع المفتوح: إذا ذكر "مفتوح"، اجعل openHeight = true و maxFloors = null.
+      4. الملحق العلوي: إذا لم يحدد نسبة، ضع roofAnnexPercentage = 50.
+      5. القطاعات المتعددة: إذا كان النظام مقسماً لقطاعات، اجعل hasMultipleZones = true وعبئ مصفوفة zones.
 
       استخرج البيانات بصيغة JSON فقط بهذا الهيكل تماماً:
       {
-        "documentType": "APPROVED | PRELIMINARY | OLD_PAPER | REQUEST | SCREENSHOT | UNCLASSIFIED",
+        "documentType": "APPROVED",
         "systemNo": "",
         "requestNo": "",
         "transactionNo": "",
-        "unifiedNo": "الرقم الموحد من الاستيكر إن وجد",
+        "unifiedNo": "",
         "versionNo": "",
         "issuingAuthority": "",
         "issuingDepartment": "",
-        "municipality": "البلدية الفرعية",
-        "district": "الحي",
+        "municipality": "",
+        "district": "",
         "planNo": "",
         "plotNo": "",
         "blockNo": "",
@@ -115,7 +112,7 @@ const processBuildingCodeAI = async (recordId, filePath, userId) => {
         "streetWidth": 0.0,
         "totalArea": 0.0,
         "projectLocationDescription": "",
-        "zoningArea": "منطقة التقسيم مثل س111",
+        "zoningArea": "",
         "planningRequirementsText": "",
         "usageText": "",
         "setbacksText": "",
@@ -128,50 +125,32 @@ const processBuildingCodeAI = async (recordId, filePath, userId) => {
         "heightText": "",
         "maxFloors": 0,
         "openHeight": false,
-        "hasRoofAnnex": "YES | NO | UNKNOWN",
+        "hasRoofAnnex": "UNKNOWN",
         "roofAnnexPercentage": 0.0,
-        "roofAnnexBase": "LAST_FLOOR | FIRST_FLOOR | ROOF | UNKNOWN",
+        "roofAnnexBase": "UNKNOWN",
         "roofAnnexSetback": 0.0,
-        "roofAnnexCountsInFar": "YES | NO | UNKNOWN",
+        "roofAnnexCountsInFar": "UNKNOWN",
         "farValue": 0.0,
         "buildingCoveragePercentage": 0.0,
         "parkingRequirementsText": "",
         "specialNotesText": "",
-        "specialRestrictionsJson": ["أمثلة: منع فتحات", "موافقة هيئة"],
-        "approvalDateGregorian": "YYYY-MM-DD",
-        "approvalDateHijri": "YYYY-MM-DD",
+        "specialRestrictionsJson": [],
+        "approvalDateGregorian": "",
+        "approvalDateHijri": "",
         "approvalDateOriginalText": "",
-        "approvalDateSource": "DOCUMENT_TEXT | GREEN_STICKER | MANUAL",
+        "approvalDateSource": "DOCUMENT_TEXT",
         "aiConfidenceOverall": 0.95,
         "hasMultipleZones": false,
-        "zones": [
-          {
-            "zoneName": "القطعة الأمامية",
-            "zoneDescription": "",
-            "zoneDepth": 0.0,
-            "zoneFacing": "",
-            "usageText": "",
-            "heightText": "",
-            "maxFloors": 0,
-            "buildingCoveragePercentage": 0.0,
-            "farValue": 0.0,
-            "setbacksText": "",
-            "hasRoofAnnex": "YES",
-            "roofAnnexPercentage": 50,
-            "roofAnnexNotes": "",
-            "parkingNotes": "",
-            "specialNotes": ""
-          }
-        ]
+        "zones": []
       }
     `;
 
+    let response = null;
     const fallbackModels = [
       "gemini-3-flash-preview",
       "gemini-1.5-flash",
       "gemini-1.5-pro",
     ];
-    let response = null;
 
     for (const model of fallbackModels) {
       try {
@@ -182,10 +161,7 @@ const processBuildingCodeAI = async (recordId, filePath, userId) => {
         });
         break;
       } catch (e) {
-        console.warn(
-          `فشل الموديل ${model} في تحليل نظام البناء، جاري المحاولة بآخر...`,
-        );
-        await new Promise((r) => setTimeout(r, 1000));
+        console.warn(`فشل الموديل ${model}، جاري المحاولة بالبديل...`);
       }
     }
 
@@ -200,75 +176,99 @@ const processBuildingCodeAI = async (recordId, filePath, userId) => {
     );
     const aiData = JSON.parse(cleanedText);
 
-    // حساب التواريخ والصلاحية (سنة واحدة افتراضياً إذا وجدنا تاريخ اعتماد)
+    // ✅ دوال تنظيف الأرقام لمنع انهيار Prisma
+    const safeFloat = (val) => {
+      if (val === null || val === undefined || val === "") return null;
+      const parsed = parseFloat(String(val).replace(/[^\d.-]/g, ""));
+      return isNaN(parsed) ? null : parsed;
+    };
+
+    const safeInt = (val) => {
+      if (val === null || val === undefined || val === "") return null;
+      const parsed = parseInt(String(val).replace(/[^\d-]/g, ""), 10);
+      return isNaN(parsed) ? null : parsed;
+    };
+
+    // حساب التواريخ والصلاحية
     let validityStatus = "UNKNOWN";
     let expiryDateGregorian = null;
-    let daysUntilExpiry = null;
-    let validityDays = 365; // الصلاحية الافتراضية
+    let validityDays = 365;
 
     if (aiData.documentType === "PRELIMINARY") {
       validityStatus = "PRELIMINARY";
     } else if (aiData.approvalDateGregorian) {
       const approvalDate = new Date(aiData.approvalDateGregorian);
-      expiryDateGregorian = new Date(
-        approvalDate.getTime() + validityDays * 24 * 60 * 60 * 1000,
-      );
-
-      const today = new Date();
-      const diffTime = expiryDateGregorian - today;
-      daysUntilExpiry = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-      if (daysUntilExpiry < 0) validityStatus = "EXPIRED";
-      else if (daysUntilExpiry <= 60) validityStatus = "EXPIRING_SOON";
-      else validityStatus = "VALID";
-    }
-
-    // التحقق من التكرار الدقيق (نفس المخطط والقطعة والحي)
-    let finalStatus = "COMPLETED";
-    if (aiData.planNo && aiData.plotNo && aiData.district) {
-      const existing = await prisma.buildingCodeArchiveRecord.findFirst({
-        where: {
-          planNo: aiData.planNo,
-          plotNo: aiData.plotNo,
-          district: aiData.district,
-          id: { not: recordId },
-        },
-      });
-
-      if (existing) {
-        finalStatus = "DUPLICATE";
-        await prisma.buildingCodeDuplicateCandidate.create({
-          data: {
-            recordAId: existing.id,
-            recordBId: recordId,
-            duplicateType: "SIMILAR",
-            matchScore: 90,
-            status: "PENDING",
-            notes: "تم اكتشاف تطابق في رقم المخطط والقطعة والحي",
-          },
-        });
+      if (!isNaN(approvalDate)) {
+        expiryDateGregorian = new Date(
+          approvalDate.getTime() + validityDays * 24 * 60 * 60 * 1000,
+        );
+        const daysUntilExpiry = Math.ceil(
+          (expiryDateGregorian - new Date()) / (1000 * 60 * 60 * 24),
+        );
+        if (daysUntilExpiry < 0) validityStatus = "EXPIRED";
+        else if (daysUntilExpiry <= 60) validityStatus = "EXPIRING_SOON";
+        else validityStatus = "VALID";
       }
     }
 
-    const confidence = aiData.aiConfidenceOverall || 0.9;
+    // ✅ عزل عملية فحص التكرار لمنعها من تدمير عملية الحفظ الأساسية
+    let finalStatus = "COMPLETED";
+    try {
+      if (aiData.planNo && aiData.plotNo && aiData.district) {
+        const existing = await prisma.buildingCodeArchiveRecord.findFirst({
+          where: {
+            planNo: String(aiData.planNo),
+            plotNo: String(aiData.plotNo),
+            district: String(aiData.district),
+            id: { not: recordId },
+            isArchived: false,
+          },
+        });
 
-    // تجهيز بيانات القطاعات إذا وجدت
+        if (existing) {
+          finalStatus = "DUPLICATE";
+          await prisma.buildingCodeDuplicateCandidate.create({
+            data: {
+              recordAId: existing.id,
+              recordBId: recordId,
+              duplicateType: "SIMILAR",
+              matchScore: 90,
+              status: "PENDING",
+              notes: "تم اكتشاف تطابق في رقم المخطط والقطعة والحي",
+            },
+          });
+        }
+      }
+    } catch (dupError) {
+      console.error("⚠️ خطأ غير مؤثر أثناء فحص التكرار:", dupError);
+      // نستمر في الحفظ حتى لو فشل فحص التكرار
+    }
+
+    const confidence = safeFloat(aiData.aiConfidenceOverall) || 0.9;
+
+    // تجهيز القطاعات إن وجدت
     let zonesCreateInput = undefined;
-    if (aiData.hasMultipleZones && aiData.zones && aiData.zones.length > 0) {
+    if (
+      aiData.hasMultipleZones &&
+      Array.isArray(aiData.zones) &&
+      aiData.zones.length > 0
+    ) {
       zonesCreateInput = {
         create: aiData.zones.map((zone) => ({
-          zoneName: zone.zoneName || "قطاع غير مسمى",
+          zoneName: String(zone.zoneName || "قطاع غير مسمى"),
           zoneDescription: zone.zoneDescription,
-          zoneDepth: zone.zoneDepth,
+          zoneDepth: safeFloat(zone.zoneDepth),
           zoneFacing: zone.zoneFacing,
           usageText: zone.usageText,
           heightText: zone.heightText,
-          maxFloors: zone.maxFloors,
-          buildingCoveragePercentage: zone.buildingCoveragePercentage,
-          farValue: zone.farValue,
+          maxFloors: safeInt(zone.maxFloors),
+          buildingCoveragePercentage: safeFloat(
+            zone.buildingCoveragePercentage,
+          ),
+          farValue: safeFloat(zone.farValue),
           setbacksText: zone.setbacksText,
           hasRoofAnnex: zone.hasRoofAnnex || "UNKNOWN",
-          roofAnnexPercentage: zone.roofAnnexPercentage,
+          roofAnnexPercentage: safeFloat(zone.roofAnnexPercentage),
           roofAnnexNotes: zone.roofAnnexNotes,
           parkingNotes: zone.parkingNotes,
           specialNotes: zone.specialNotes,
@@ -277,61 +277,80 @@ const processBuildingCodeAI = async (recordId, filePath, userId) => {
       };
     }
 
-    // التحديث الضخم بكافة الحقول دون اختصار
+    // ✅ التحديث الآمن للسجل الأساسي
     await prisma.buildingCodeArchiveRecord.update({
       where: { id: recordId },
       data: {
         documentType: aiData.documentType || "UNCLASSIFIED",
-        systemNo: aiData.systemNo,
-        requestNo: aiData.requestNo,
-        transactionNo: aiData.transactionNo,
-        unifiedNo: aiData.unifiedNo,
-        versionNo: aiData.versionNo,
+        systemNo: aiData.systemNo ? String(aiData.systemNo) : null,
+        requestNo: aiData.requestNo ? String(aiData.requestNo) : null,
+        transactionNo: aiData.transactionNo
+          ? String(aiData.transactionNo)
+          : null,
+        unifiedNo: aiData.unifiedNo ? String(aiData.unifiedNo) : null,
+        versionNo: aiData.versionNo ? String(aiData.versionNo) : null,
         issuingAuthority: aiData.issuingAuthority,
         issuingDepartment: aiData.issuingDepartment,
         municipality: aiData.municipality,
-        district: aiData.district,
-        planNo: aiData.planNo,
-        plotNo: aiData.plotNo,
-        blockNo: aiData.blockNo,
-        deedNo: aiData.deedNo,
-        surveyDecisionNo: aiData.surveyDecisionNo,
+        district: aiData.district ? String(aiData.district) : null,
+        planNo: aiData.planNo ? String(aiData.planNo) : null,
+        plotNo: aiData.plotNo ? String(aiData.plotNo) : null,
+        blockNo: aiData.blockNo ? String(aiData.blockNo) : null,
+        deedNo: aiData.deedNo ? String(aiData.deedNo) : null,
+        surveyDecisionNo: aiData.surveyDecisionNo
+          ? String(aiData.surveyDecisionNo)
+          : null,
         ownerName: aiData.ownerName,
         officeName: aiData.officeName,
         streetName: aiData.streetName,
-        streetWidth: aiData.streetWidth,
-        totalArea: aiData.totalArea,
+
+        // استخدام دوال التنظيف لحماية Prisma
+        streetWidth: safeFloat(aiData.streetWidth),
+        totalArea: safeFloat(aiData.totalArea),
+
         projectLocationDescription: aiData.projectLocationDescription,
         zoningArea: aiData.zoningArea,
         planningRequirementsText: aiData.planningRequirementsText,
         usageText: aiData.usageText,
         setbacksText: aiData.setbacksText,
-        frontSetback: aiData.frontSetback,
-        sideSetback: aiData.sideSetback,
-        rearSetback: aiData.rearSetback,
-        mainStreetSetback: aiData.mainStreetSetback,
-        sideStreetSetback: aiData.sideStreetSetback,
-        neighborSetback: aiData.neighborSetback,
+
+        frontSetback: safeFloat(aiData.frontSetback),
+        sideSetback: safeFloat(aiData.sideSetback),
+        rearSetback: safeFloat(aiData.rearSetback),
+        mainStreetSetback: safeFloat(aiData.mainStreetSetback),
+        sideStreetSetback: safeFloat(aiData.sideStreetSetback),
+        neighborSetback: safeFloat(aiData.neighborSetback),
+
         heightText: aiData.heightText,
-        maxFloors: aiData.maxFloors,
-        openHeight: aiData.openHeight || false,
+        maxFloors: safeInt(aiData.maxFloors),
+        openHeight:
+          aiData.openHeight === true ||
+          String(aiData.openHeight).toLowerCase() === "true",
+
         hasRoofAnnex: aiData.hasRoofAnnex || "UNKNOWN",
-        roofAnnexPercentage: aiData.roofAnnexPercentage,
+        roofAnnexPercentage: safeFloat(aiData.roofAnnexPercentage),
         roofAnnexBase: aiData.roofAnnexBase,
-        roofAnnexSetback: aiData.roofAnnexSetback,
+        roofAnnexSetback: safeFloat(aiData.roofAnnexSetback),
         roofAnnexCountsInFar: aiData.roofAnnexCountsInFar || "UNKNOWN",
-        farValue: aiData.farValue,
-        buildingCoveragePercentage: aiData.buildingCoveragePercentage,
+
+        farValue: safeFloat(aiData.farValue),
+        buildingCoveragePercentage: safeFloat(
+          aiData.buildingCoveragePercentage,
+        ),
         parkingRequirementsText: aiData.parkingRequirementsText,
         specialNotesText: aiData.specialNotesText,
-        specialRestrictionsJson: aiData.specialRestrictionsJson || [],
+        specialRestrictionsJson: Array.isArray(aiData.specialRestrictionsJson)
+          ? aiData.specialRestrictionsJson
+          : [],
 
-        approvalDateGregorian: aiData.approvalDateGregorian
-          ? new Date(aiData.approvalDateGregorian)
-          : null,
+        approvalDateGregorian:
+          aiData.approvalDateGregorian &&
+          !isNaN(new Date(aiData.approvalDateGregorian))
+            ? new Date(aiData.approvalDateGregorian)
+            : null,
         approvalDateHijri: aiData.approvalDateHijri,
         approvalDateOriginalText: aiData.approvalDateOriginalText,
-        approvalDateSource: aiData.approvalDateSource,
+        approvalDateSource: aiData.approvalDateSource || "DOCUMENT_TEXT",
 
         validityDays: validityDays,
         expiryDateGregorian: expiryDateGregorian,
@@ -340,9 +359,8 @@ const processBuildingCodeAI = async (recordId, filePath, userId) => {
         validityStatus: validityStatus,
         aiConfidenceOverall: confidence,
         aiExtractedJson: aiData,
-        hasMultipleZones: aiData.hasMultipleZones || false,
+        hasMultipleZones: aiData.hasMultipleZones === true,
 
-        // إدراج القطاعات إن وجدت
         zones: zonesCreateInput,
       },
     });
@@ -352,27 +370,32 @@ const processBuildingCodeAI = async (recordId, filePath, userId) => {
         buildingCodeId: recordId,
         action: "AI_ANALYZE",
         userId,
-        notes: "اكتمل تحليل الذكاء الاصطناعي بنجاح",
+        notes: `اكتمل تحليل الذكاء الاصطناعي بنجاح. الحالة: ${finalStatus}`,
       },
     });
   } catch (error) {
-    console.error(`AI Error for Building Code Record ${recordId}:`, error);
-    await prisma.buildingCodeArchiveRecord.update({
-      where: { id: recordId },
-      data: { status: "NEEDS_REVIEW" },
-    });
+    console.error(`🔥 AI Error for Building Code Record ${recordId}:`, error);
+
+    // حتى في أسوأ السيناريوهات، نحفظ حالة المراجعة لعدم ضياع الملف
+    try {
+      await prisma.buildingCodeArchiveRecord.update({
+        where: { id: recordId },
+        data: {
+          status: "NEEDS_REVIEW",
+          specialNotesText: "فشل التحليل الآلي، يرجى تعبئة البيانات يدوياً.",
+        },
+      });
+    } catch (e) {
+      console.error("فشل التحديث الطارئ:", e);
+    }
   }
 };
 
-// ==========================================
-// 3. جلب جميع أنظمة البناء (لشاشة الجدول)
-// ==========================================
 const getBuildingCodes = async (req, res) => {
   try {
-    const { search, documentType, status, validityStatus, district } =
-      req.query;
-
+    const { search, documentType, status, validityStatus, district } = req.query;
     const where = { isArchived: false };
+    
     if (documentType) where.documentType = documentType;
     if (status) where.status = status;
     if (validityStatus) where.validityStatus = validityStatus;
@@ -390,10 +413,149 @@ const getBuildingCodes = async (req, res) => {
 
     const records = await prisma.buildingCodeArchiveRecord.findMany({
       where,
+      // 💡 لا تقم بإضافة select هنا إذا كنت تريد جلب كل الحقول (بما فيها serialNumber)
+      // وإذا كنت تستخدم select، فتأكد من إضافة serialNumber للقائمة
+      include: {
+        duplicatesAsRecordA: { 
+          where: { status: "PENDING" },
+          select: { id: true } 
+        },
+        duplicatesAsRecordB: { 
+          where: { status: "PENDING" },
+          select: { id: true } 
+        }
+      },
       orderBy: { createdAt: "desc" },
     });
 
-    res.json({ success: true, data: records });
+    // 💡 هنا سيتم إرجاع كل شيء + الحقل المحسوب الجديد
+    const formattedRecords = records.map(record => {
+      const dupCount = (record.duplicatesAsRecordA?.length || 0) + (record.duplicatesAsRecordB?.length || 0);
+      
+      // إزالة المصفوفات المساعدة
+      delete record.duplicatesAsRecordA;
+      delete record.duplicatesAsRecordB;
+
+      return {
+        ...record, 
+        duplicatesCount: dupCount
+      };
+    });
+
+    res.json({ success: true, data: formattedRecords });
+  } catch (error) {
+    console.error("🔥 Get Building Codes Error:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// 2. دالة لجلب تفاصيل السجلات المكررة لمقارنتها
+const getRecordDuplicates = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const duplicates = await prisma.buildingCodeDuplicateCandidate.findMany({
+      where: {
+        status: "PENDING",
+        OR: [{ recordAId: id }, { recordBId: id }],
+      },
+      include: {
+        recordA: true,
+        recordB: true,
+      },
+    });
+
+    res.json({ success: true, data: duplicates });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// 3. دالة للفحص وإعادة الاكتشاف اليدوي للتكرارات (Re-scan)
+const scanForDuplicates = async (req, res) => {
+  try {
+    const records = await prisma.buildingCodeArchiveRecord.findMany({
+      where: { isArchived: false },
+    });
+
+    let newDuplicatesCount = 0;
+
+    for (let i = 0; i < records.length; i++) {
+      for (let j = i + 1; j < records.length; j++) {
+        const a = records[i];
+        const b = records[j];
+
+        // شروط التطابق (نفس المخطط، نفس القطعة، ونفس الحي)
+        if (
+          a.planNo &&
+          b.planNo &&
+          a.planNo === b.planNo &&
+          a.plotNo &&
+          b.plotNo &&
+          a.plotNo === b.plotNo &&
+          a.district &&
+          b.district &&
+          a.district === b.district
+        ) {
+          // التأكد من عدم وجود سجل مسبق لهذا التطابق
+          const existingDup =
+            await prisma.buildingCodeDuplicateCandidate.findFirst({
+              where: {
+                OR: [
+                  { recordAId: a.id, recordBId: b.id },
+                  { recordAId: b.id, recordBId: a.id },
+                ],
+              },
+            });
+
+          if (!existingDup) {
+            await prisma.buildingCodeDuplicateCandidate.create({
+              data: {
+                recordAId: a.id,
+                recordBId: b.id,
+                duplicateType: "SIMILAR",
+                matchScore: 100,
+                status: "PENDING",
+                notes:
+                  "تم اكتشاف تطابق أثناء الفحص اليدوي (نفس المخطط والقطعة)",
+              },
+            });
+            newDuplicatesCount++;
+          }
+        }
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `اكتمل الفحص! تم اكتشاف ${newDuplicatesCount} تكرار جديد.`,
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// 4. حذف السجل القديم أثناء معالجة التكرار
+const deleteDuplicateRecord = async (req, res) => {
+  try {
+    const { duplicateId, recordToDeleteId } = req.body; // نرسل ID التكرار و ID السجل المراد حذفه
+
+    // أرشفة أو حذف السجل بالكامل
+    await prisma.buildingCodeArchiveRecord.update({
+      where: { id: recordToDeleteId },
+      data: { isArchived: true, status: "DUPLICATE" },
+    });
+
+    // إغلاق حالة التكرار
+    await prisma.buildingCodeDuplicateCandidate.update({
+      where: { id: duplicateId },
+      data: { status: "RESOLVED", resolutionAction: "تم حذف السجل القديم" },
+    });
+
+    res.json({
+      success: true,
+      message: "تمت معالجة التكرار وحذف السجل القديم.",
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -586,10 +748,47 @@ const mergeBuildingCodes = async (req, res) => {
   }
 };
 
+// ==========================================
+// 7. حذف نظام بناء بشكل نهائي
+// ==========================================
+const deleteBuildingCode = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user?.id || "النظام";
+
+    // التحقق من وجود السجل
+    const record = await prisma.buildingCodeArchiveRecord.findUnique({
+      where: { id },
+    });
+    if (!record) {
+      return res
+        .status(404)
+        .json({ success: false, message: "السجل غير موجود." });
+    }
+
+    // حذف السجل نهائياً (قاعدة البيانات ستضمن عدم إعادة استخدام الـ serialNumber الخاص به)
+    await prisma.buildingCodeArchiveRecord.delete({
+      where: { id },
+    });
+
+    res.json({
+      success: true,
+      message: "تم حذف نظام البناء من الأرشيف نهائياً.",
+    });
+  } catch (error) {
+    console.error("Delete Error:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 module.exports = {
   uploadBuildingCode,
   getBuildingCodes,
+  getRecordDuplicates,
+  scanForDuplicates,
+  deleteDuplicateRecord,
   getBuildingCodeById,
   updateBuildingCode,
   mergeBuildingCodes,
+  deleteBuildingCode,
 };
