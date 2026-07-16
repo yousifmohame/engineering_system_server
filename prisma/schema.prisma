@@ -1886,6 +1886,22 @@ model PrivateTransaction {
   transactionCode String @unique // مثال: PTX-2026-001
   title           String
 
+  // 💡 1. الحالات المستقلة الـ 5 (تعديل جوهري)
+  systemStatus           String @default("نشطة") // نشطة، مسودة، متوقفة، مجمدة، منتهية، مؤرشفة
+  proceduralStatus       String @default("لم يتم الرفع")
+  financialStatus        String @default("لم يتم الاتفاق ماليًا")
+  settlementStatus       String @default("غير جاهزة للتصفية")
+  dataCompletenessStatus String @default("بيانات أولية")
+  completionPercentage   Float  @default(0) // نسبة اكتمال البيانات
+
+  // 💡 2. التجميد والحذف المنطقي (Soft Delete & Freeze)
+  isFrozen             Boolean   @default(false)
+  freezeReason         String?   @db.Text
+  freezeScope          String? // مالي فقط، منع التعديل، كامل
+  frozenBy             String?
+  unfreezeExpectedDate DateTime? @db.Date
+  deletedAt            DateTime? // للحذف المنطقي
+
   // --- البيانات الأساسية ---
   status      String  @default("جديدة")
   description String?
@@ -2037,8 +2053,103 @@ model PrivateTransaction {
   quotations        Quotation[]         @relation("TransactionQuotations")
   EngineeringBundle EngineeringBundle[]
 
+  expenses     TransactionExpense[]
+  profitShares TransactionProfitShare[]
+  comments     TransactionComment[]
+  eventLogs    TransactionEventLog[]
+
   @@index([clientId])
   @@index([districtId])
+}
+
+// ==========================================
+// 🚀 جداول جديدة للوفاء بمتطلبات الملف الوصفي
+// ==========================================
+
+// 💡 1. مصروفات المعاملة (مستقلة عن مصروفات المكتب وعن التعقيب)
+model TransactionExpense {
+  id            String             @id @default(cuid())
+  transactionId String
+  transaction   PrivateTransaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+
+  description String
+  category    String // مخططات، تعقيب، عمل عن بعد، رسوم...
+
+  payeeId String? // الشخص المستحق
+  payee   Person? @relation("PayeeTransactionExpense", fields: [payeeId], references: [id])
+
+  expectedAmount  Float @default(0)
+  requestedAmount Float @default(0)
+  approvedAmount  Float @default(0)
+  paidAmount      Float @default(0)
+
+  approvalStatus String @default("بانتظار الاعتماد") // معتمد، مرفوض، جزئي
+  paymentStatus  String @default("غير مدفوع") // مستحق، مدفوع جزئياً، مدفوع
+
+  dueDate       DateTime? @db.Date
+  paymentMethod String?
+  attachmentUrl String?
+  isSettled     Boolean   @default(false) // هل دخلت في تصفية
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// 💡 2. توزيع الأرباح (نسب 100%)
+model TransactionProfitShare {
+  id            String             @id @default(cuid())
+  transactionId String
+  transaction   PrivateTransaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+
+  personId String
+  person   Person @relation("PersonProfitShare", fields: [personId], references: [id])
+
+  percentage Float @default(0)
+  amount     Float @default(0)
+
+  isSettled Boolean @default(false)
+  notes     String? @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// 💡 3. نظام التعليقات المستقل للمعاملة
+model TransactionComment {
+  id            String             @id @default(cuid())
+  transactionId String
+  transaction   PrivateTransaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+
+  text          String  @db.Text
+  type          String  @default("عام") // إجرائي، مالي، تنبيه
+  isImportant   Boolean @default(false)
+  isInternal    Boolean @default(false) // داخلي حساس
+  attachmentUrl String?
+
+  authorId   String
+  authorName String? // كاش احتياطي للسرعة
+
+  createdAt DateTime @default(now())
+}
+
+// 💡 4. سجل أحداث المعاملة (للتدقيق الدقيق لكل حقل)
+model TransactionEventLog {
+  id            String             @id @default(cuid())
+  transactionId String
+  transaction   PrivateTransaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+
+  action      String // إنشاء، تعديل، حذف، تجميد
+  field       String? // الحقل الذي تم تعديله
+  oldValue    String? @db.Text
+  newValue    String? @db.Text
+  reason      String? @db.Text
+  source      String  @default("يدوي") // يدوي، ذكاء اصطناعي، تلقائي
+  isSensitive Boolean @default(false)
+
+  userId   String
+  userName String?
+
+  createdAt DateTime @default(now())
 }
 
 // 💡 👈 الجدول الوسيط الجديد لربط المعاملة بأكثر من عميل (مالك)
@@ -2640,8 +2751,10 @@ model Person {
   receivedTransactions    PrivateTransaction[] @relation("TxReceiver")
   engBrokeredTransactions PrivateTransaction[] @relation("TxEngBroker")
   assignedTasks           TransactionTask[]    @relation("WorkerTasks")
-  // 💡 إضافة العلاقة العكسية لمصدر المعاملة
-  sourcedTransactions     PrivateTransaction[] @relation("TxSourcePerson")
+
+  sourcedTransactions PrivateTransaction[]     @relation("TxSourcePerson")
+  transactionExpenses TransactionExpense[]     @relation("PayeeTransactionExpense")
+  profitShares        TransactionProfitShare[] @relation("PersonProfitShare")
 }
 
 model TransactionTask {

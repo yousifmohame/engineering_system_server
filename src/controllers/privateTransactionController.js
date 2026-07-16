@@ -11,36 +11,25 @@ const logTransactionEvent = async (
   action,
   details,
   user,
+  isSensitive = false,
 ) => {
   try {
-    const tx = await prismaClient.privateTransaction.findUnique({
-      where: { id: transactionId },
-    });
-    if (!tx) return;
-
-    let currentNotes = typeof tx.notes === "object" && tx.notes ? tx.notes : {};
-    let logs = currentNotes.logs || [];
-
-    // إضافة الحدث الجديد (يتم وضعه في بداية المصفوفة ليكون الأحدث أولاً)
-    logs.unshift({
-      type,
-      action,
-      details,
-      date: new Date().toISOString(),
-      user: user || "موظف النظام",
-    });
-
-    currentNotes.logs = logs;
-
-    await prismaClient.privateTransaction.update({
-      where: { id: transactionId },
-      data: { notes: currentNotes },
+    await prismaClient.transactionEventLog.create({
+      data: {
+        transactionId: transactionId,
+        field: type,
+        action: action,
+        newValue: details,
+        userId: user || "system", // يجب تمرير ID المستخدم الحقيقي من الـ req.user في بيئة الإنتاج
+        userName: user || "موظف النظام",
+        source: "تلقائي",
+        isSensitive: isSensitive,
+      },
     });
   } catch (error) {
     console.error("Logging Error:", error.message);
   }
 };
-
 // ==================================================
 // دالة توليد رقم المعاملة (سنة-شهر-خمس أرقام)
 // ==================================================
@@ -48,7 +37,7 @@ const generatePrivateTxCode = async () => {
   const date = new Date();
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
-  const prefix = `${year}-${month}-`;
+  const prefix = `${year}${month}`; // تم تعديل التنسيق ليتطابق مع الملف الوصفي (بدون شرطات 2026070042)
 
   const lastTx = await prisma.privateTransaction.findFirst({
     where: { transactionCode: { startsWith: prefix } },
@@ -58,15 +47,14 @@ const generatePrivateTxCode = async () => {
   let nextNumber = 1;
   if (lastTx) {
     try {
-      const parts = lastTx.transactionCode.split("-");
-      const lastNumberStr = parts[2];
+      const lastNumberStr = lastTx.transactionCode.substring(6);
       nextNumber = parseInt(lastNumberStr, 10) + 1;
     } catch (e) {
       nextNumber = 1;
     }
   }
 
-  return `${prefix}${String(nextNumber).padStart(5, "0")}`;
+  return `${prefix}${String(nextNumber).padStart(4, "0")}`;
 };
 
 // ==================================================
@@ -94,6 +82,24 @@ const generateClientCode = async () => {
   return `${prefix}${String(nextNumber).padStart(3, "0")}`;
 };
 
+const generateSmartSerial = async (modelName, prefix) => {
+  const today = new Date();
+  const dateStr = today.toISOString().slice(0, 10).replace(/-/g, "");
+  const startOfDay = new Date(today.setHours(0, 0, 0, 0));
+  const endOfDay = new Date(today.setHours(23, 59, 59, 999));
+
+  const countToday = await prisma[modelName].count({
+    where: { createdAt: { gte: startOfDay, lte: endOfDay } },
+  });
+
+  const sequence = String(countToday + 1).padStart(3, "0");
+  return `${prefix}-${dateStr}-${sequence}`;
+};
+
+// ==================================================
+// 1. إنشاء معاملة جديدة (Enterprise Grade Edition)
+// POST /api/private-transactions
+// ==================================================
 // ==================================================
 // 1. إنشاء معاملة جديدة (Enterprise Grade Edition)
 // POST /api/private-transactions
@@ -241,8 +247,20 @@ const createPrivateTransaction = async (req, res) => {
         category: transactionType || "غير محدد",
         complexity: surveyType || "بدون رفع",
         source: source || "مكتب ديتيلز",
-        status: "in_progress",
+        status: "in_progress", // الحقل القديم (تم الإبقاء عليه كما طلبت)
         createdBy: addedBy || "مدير النظام",
+
+        // 🚀 الحالات الخمسة المعمارية الجديدة 🚀
+        systemStatus: "نشطة",
+        proceduralStatus: "لم يتم الرفع",
+        financialStatus:
+          parsedTotalFees > 0
+            ? "تم تسجيل قيمة الاتفاق"
+            : "لم يتم الاتفاق ماليًا",
+        settlementStatus: "غير جاهزة للتصفية",
+        dataCompletenessStatus: "بيانات أولية",
+        completionPercentage: 10,
+        isFrozen: false,
 
         // 👑 1. الربط الاحترافي للعميل الرئيسي (المالك)
         client: {
@@ -255,7 +273,6 @@ const createPrivateTransaction = async (req, res) => {
         // 👑 2. الربط الاحترافي لجدول الملاك المتعددين (TransactionOwner)
         ownersList: {
           create: detailedOwnersList.map((owner) => ({
-            // بدلاً من كتابة clientId مباشرة، نستخدم العميل ككائن متصل
             client: {
               connect: { id: owner.clientId || finalClientId },
             },
@@ -273,7 +290,7 @@ const createPrivateTransaction = async (req, res) => {
         }),
 
         // ----------------------------------------------------
-        // باقي الحقول النصية والرقمية تبقى كما هي
+        // باقي الحقول النصية والرقمية
         // ----------------------------------------------------
         designerOfficeId: designerOffice || undefined,
         supervisorOfficeId: supervisorOffice || undefined,
@@ -327,7 +344,7 @@ const createPrivateTransaction = async (req, res) => {
           brokersList: {
             create: [
               {
-                broker: { connect: { id: brokerId } }, // ربط احترافي
+                broker: { connect: { id: brokerId } },
                 fees: mediatorFees ? parseFloat(mediatorFees) : 0,
               },
             ],
@@ -347,7 +364,7 @@ const createPrivateTransaction = async (req, res) => {
           ? { engOfficeBroker: { connect: { id: engOfficeBrokerId } } }
           : {}),
 
-        // معالجة الملاحظات (JSON)
+        // معالجة الملاحظات (JSON) - تم الإبقاء عليها بالكامل كما طلبت
         notes: {
           internalName: internalName || null,
           isInternalNameHidden: isInternalNameHidden || false,
@@ -412,11 +429,19 @@ const createPrivateTransaction = async (req, res) => {
 // 3. جلب قائمة المعاملات (مع دعم الربط التلقائي للرخص والبيانات الشاملة)
 // GET /api/private-transactions
 // ==================================================
+// ==================================================
+// 3. جلب قائمة المعاملات (مع دعم الربط التلقائي للرخص والبيانات الشاملة)
+// GET /api/private-transactions
+// ==================================================
 const getPrivateTransactions = async (req, res) => {
   try {
-    const { permitNumber, year } = req.query;
+    const { permitNumber, year, isArchived, isDeleted } = req.query; // 🚀 إضافة فلاتر الأرشيف والحذف المنطقي
 
-    const where = {};
+    // 🚀 تحديث جملة Where لتشمل الحذف المنطقي والأرشفة
+    const where = {
+      deletedAt: isDeleted === "true" ? { not: null } : null,
+      systemStatus: isArchived === "true" ? "مؤرشفة" : { not: "مؤرشفة" },
+    };
 
     if (permitNumber) {
       where.OR = [
@@ -441,7 +466,17 @@ const getPrivateTransactions = async (req, res) => {
         title: true,
         category: true,
         source: true,
-        status: true,
+        status: true, // الحقل القديم
+
+        // 🚀 الحقول المعمارية الجديدة
+        systemStatus: true,
+        proceduralStatus: true,
+        financialStatus: true,
+        settlementStatus: true,
+        dataCompletenessStatus: true,
+        completionPercentage: true,
+        isFrozen: true,
+
         totalFees: true,
         paidAmount: true,
         remainingAmount: true,
@@ -456,7 +491,7 @@ const getPrivateTransactions = async (req, res) => {
 
         designerOfficeId: true,
         supervisorOfficeId: true,
-        hasAgreement: true, // 💡 حقل الاتفاقية
+        hasAgreement: true,
 
         electronicLicenseNumber: true,
         electronicLicenseHijriYear: true,
@@ -465,7 +500,6 @@ const getPrivateTransactions = async (req, res) => {
         oldLicenseHijriYear: true,
         oldLicenseDate: true,
 
-        // 💡 التواريخ الجديدة للطلب والخدمة
         requestNumber: true,
         requestYear: true,
         requestDate: true,
@@ -499,7 +533,6 @@ const getPrivateTransactions = async (req, res) => {
         streetName: true,
         officialMapLink: true,
 
-        // 💡 مصدر المعاملة المرتبط بجدول الموظفين
         sourcePerson: {
           select: { id: true, name: true, role: true },
         },
@@ -542,6 +575,13 @@ const getPrivateTransactions = async (req, res) => {
             broker: { select: { name: true } },
           },
         },
+
+        // 🚀 الجداول العلاقية الجديدة
+        expenses: true,
+        profitShares: true,
+        comments: { orderBy: { createdAt: "desc" } },
+        eventLogs: { orderBy: { createdAt: "desc" }, take: 10 },
+
         tasks: true,
         payments: true,
         settlements: true,
@@ -633,11 +673,20 @@ const getPrivateTransactions = async (req, res) => {
         clientObj: tx.client,
         detailedOwnersList: finalDetailedOwners,
 
-        // 💡 تحديث object الـ requestData ليتضمن التواريخ الجديدة والاتفاقية
+        // 🚀 تمرير الحالات المعمارية الجديدة للواجهة (مع الحفاظ على القديمة)
+        systemStatus: tx.systemStatus,
+        proceduralStatus: tx.proceduralStatus,
+        financialStatus: tx.financialStatus,
+        settlementStatus: tx.settlementStatus,
+        dataCompletenessStatus: tx.dataCompletenessStatus,
+        completionPercentage: tx.completionPercentage,
+        isFrozen: tx.isFrozen,
+        status: tx.status || "جارية", // الحقل القديم
+
         requestData: {
           designerOffice: tx.designerOfficeId || "",
           supervisorOffice: tx.supervisorOfficeId || "",
-          hasAgreement: tx.hasAgreement || false, // 👈
+          hasAgreement: tx.hasAgreement || false,
 
           electronicLicenseNumber: tx.electronicLicenseNumber || "",
           electronicLicenseHijriYear: tx.electronicLicenseHijriYear || "",
@@ -649,11 +698,11 @@ const getPrivateTransactions = async (req, res) => {
 
           requestNumber: tx.requestNumber || "",
           requestYear: tx.requestYear || "",
-          requestDate: tx.requestDate || "", // 👈
+          requestDate: tx.requestDate || "",
 
           serviceNumber: tx.serviceNumber || "",
           serviceYear: tx.serviceYear || "",
-          serviceDate: tx.serviceDate || "", // 👈
+          serviceDate: tx.serviceDate || "",
 
           responsibleEmployee: tx.responsibleEmployee || "",
           surveyRequestNumber: tx.surveyRequestNumber || "",
@@ -690,9 +739,8 @@ const getPrivateTransactions = async (req, res) => {
 
         mapsLink: notes?.refs?.mapsLink || "",
 
-        // 💡 تحديث مصدر المعاملة ليأخذ الاسم من الجدول المرتبط إذا وجد
         office: tx.sourcePerson?.name || tx.source || "مكتب ديتيلز",
-        sourcePersonId: tx.sourcePerson?.id || null, // 👈
+        sourcePersonId: tx.sourcePerson?.id || null,
 
         sourceName: tx.sourceName || notes?.sourceName || "مباشر",
         mediator: brokerNames,
@@ -719,15 +767,19 @@ const getPrivateTransactions = async (req, res) => {
           tx.remainingAmount || (tx.totalFees || 0) - (tx.paidAmount || 0),
         collectionStatus,
         totalSize: totalSize,
-        status: tx.status || "جارية",
         date: formattedDate,
         created: tx.createdAt,
         notes: notes,
         remoteTasks: tx.tasks,
         paymentsList: tx.payments,
         settlements: tx.settlements,
-        expenses: notes?.expenses || [],
-        logs: notes?.logs || [],
+
+        // 🚀 دمج الجداول العلاقية الجديدة مع مصفوفات ה- JSON القديمة للتوافقية
+        expenses: tx.expenses.length > 0 ? tx.expenses : notes?.expenses || [],
+        profitShares: tx.profitShares || [],
+        logs: tx.eventLogs.length > 0 ? tx.eventLogs : notes?.logs || [],
+        commentsData: tx.comments || [],
+
         isOnAxis: tx.isOnAxis || notes?.refs?.isOnAxis || "لا",
         streetName: tx.streetName || notes?.refs?.streetName || "",
         officialMapLink:
@@ -1221,8 +1273,7 @@ const updatePrivateTransaction = async (req, res) => {
     const { id } = req.params;
     const data = req.body;
 
-    // 👇🔥 هذا هو الكود السحري الذي سيحل مشكلة عدم الحفظ 🔥👇
-    // فك تشفير البيانات التي تصل كنصوص (Strings) بسبب الـ FormData
+    // 👇🔥 فك تشفير البيانات التي تصل كنصوص (Strings) بسبب الـ FormData 🔥👇
     if (typeof data.notes === "string") {
       try {
         data.notes = JSON.parse(data.notes);
@@ -1289,12 +1340,10 @@ const updatePrivateTransaction = async (req, res) => {
       });
     }
 
-    // 4. معالجة الـ JSON Notes (الأهم في الكود)
-    // هنا يجب ألا نفقد الملاحظات القديمة!
+    // 4. معالجة الـ JSON Notes (الاحتفاظ بكل شيء قديم كما طلبت)
     let currentNotes =
       typeof tx.notes === "object" && tx.notes !== null ? { ...tx.notes } : {};
 
-    // تحديث خصائص Notes فقط إذا تم إرسالها من الواجهة
     if (data.notes) {
       if (data.notes.transactionComments !== undefined)
         currentNotes.transactionComments = data.notes.transactionComments;
@@ -1307,7 +1356,7 @@ const updatePrivateTransaction = async (req, res) => {
       if (data.notes.agentFees !== undefined)
         currentNotes.agentFees = data.notes.agentFees;
       if (data.notes.expenses !== undefined)
-        currentNotes.expenses = data.notes.expenses; // 👈 مهم جداً لتاب المصاريف
+        currentNotes.expenses = data.notes.expenses;
       if (data.notes.logs !== undefined) currentNotes.logs = data.notes.logs;
       if (data.notes.collectionDates !== undefined)
         currentNotes.collectionDates = data.notes.collectionDates;
@@ -1323,10 +1372,24 @@ const updatePrivateTransaction = async (req, res) => {
       transactionCode: newTransactionCode,
     };
 
-    // التحديث المشروط للحقول الأساسية (لا نُحدث الحقل إلا إذا كان موجوداً في الـ Request)
+    // 🚀 تحديث الحالات الـ 5 المستقلة المعمارية 🚀
+    if (data.systemStatus !== undefined)
+      dataToUpdate.systemStatus = data.systemStatus;
+    if (data.proceduralStatus !== undefined)
+      dataToUpdate.proceduralStatus = data.proceduralStatus;
+    if (data.financialStatus !== undefined)
+      dataToUpdate.financialStatus = data.financialStatus;
+    if (data.settlementStatus !== undefined)
+      dataToUpdate.settlementStatus = data.settlementStatus;
+    if (data.dataCompletenessStatus !== undefined)
+      dataToUpdate.dataCompletenessStatus = data.dataCompletenessStatus;
+    if (data.completionPercentage !== undefined)
+      dataToUpdate.completionPercentage = parseFloat(data.completionPercentage);
+
+    // التحديث المشروط للحقول الأساسية
     if (data.type !== undefined) dataToUpdate.category = data.type;
     if (data.office !== undefined) dataToUpdate.source = data.office;
-    if (data.status !== undefined) dataToUpdate.status = data.status; // 👈 التحديث السليم للحالة
+    if (data.status !== undefined) dataToUpdate.status = data.status; // الحقل القديم
     if (data.ownerNames !== undefined)
       dataToUpdate.ownerNames = data.ownerNames;
     if (data.area !== undefined)
@@ -1345,10 +1408,9 @@ const updatePrivateTransaction = async (req, res) => {
     if (data.designingOfficeId !== undefined)
       dataToUpdate.designerOfficeId = data.designingOfficeId;
 
-    // 6. الربط الذكي بالأحياء (التصحيح هنا)
+    // 6. الربط الذكي بالأحياء
     if (data.districtId) {
       dataToUpdate.districtNode = { connect: { id: data.districtId } };
-      // 👈 السطر التالي كان مفقوداً، وهو يضمن مسح الاسم القديم واستبداله بالجديد
       dataToUpdate.districtName = data.district || data.districtName;
     } else if (data.district !== undefined) {
       dataToUpdate.districtName = data.district;
@@ -1558,25 +1620,20 @@ const updatePrivateTransaction = async (req, res) => {
 const addPrivateExpense = async (req, res) => {
   try {
     const { id } = req.params;
-    const { amount, description, date, addedBy } = req.body;
+    const { amount, description, date, addedBy, category, payeeId } = req.body;
 
-    const tx = await prisma.privateTransaction.findUnique({ where: { id } });
-    let currentNotes = typeof tx.notes === "object" && tx.notes ? tx.notes : {};
-    let expenses = currentNotes.expenses || [];
-
-    expenses.push({
-      id: Date.now().toString(),
-      amount: parseFloat(amount),
-      description,
-      date: date ? new Date(date).toISOString() : new Date().toISOString(),
-      addedBy: addedBy || "موظف النظام",
+    const newExpense = await prisma.transactionExpense.create({
+      data: {
+        transactionId: id,
+        expectedAmount: parseFloat(amount),
+        requestedAmount: parseFloat(amount),
+        description: description || "مصروف تشغيلي",
+        category: category || "مصروفات أخرى",
+        dueDate: date ? new Date(date) : new Date(),
+        ...(payeeId && { payee: { connect: { id: payeeId } } }),
+      },
     });
-    currentNotes.expenses = expenses;
 
-    await prisma.privateTransaction.update({
-      where: { id },
-      data: { notes: currentNotes },
-    });
     await logTransactionEvent(
       prisma,
       id,
@@ -1586,7 +1643,11 @@ const addPrivateExpense = async (req, res) => {
       addedBy,
     );
 
-    res.json({ success: true, message: "تم إضافة المصروف بنجاح" });
+    res.json({
+      success: true,
+      message: "تم إضافة المصروف بنجاح",
+      data: newExpense,
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -1598,23 +1659,35 @@ const addPrivateExpense = async (req, res) => {
 const toggleFreezeTransaction = async (req, res) => {
   try {
     const { id } = req.params;
+    const { reason, unfreezeDate, updatedBy, scope } = req.body;
+
     const tx = await prisma.privateTransaction.findUnique({ where: { id } });
-    const newStatus = tx.status === "مجمّدة" ? "جارية" : "مجمّدة";
+    const isCurrentlyFrozen = tx.isFrozen;
+
     await prisma.privateTransaction.update({
       where: { id },
-      data: { status: newStatus },
+      data: {
+        isFrozen: !isCurrentlyFrozen,
+        systemStatus: !isCurrentlyFrozen ? "مجمّدة" : "نشطة",
+        freezeReason: !isCurrentlyFrozen ? reason || null : null,
+        freezeScope: !isCurrentlyFrozen ? scope || "كامل" : null,
+        frozenBy: !isCurrentlyFrozen ? updatedBy || "مدير النظام" : null,
+        unfreezeExpectedDate:
+          !isCurrentlyFrozen && unfreezeDate ? new Date(unfreezeDate) : null,
+      },
     });
+
     await logTransactionEvent(
       prisma,
       id,
-      "حالة المعاملة",
-      "تجميد/تنشيط",
-      `تم تغيير حالة المعاملة إلى: ${newStatus}`,
-      req.body.updatedBy,
+      "حالة النظام",
+      isCurrentlyFrozen ? "تنشيط" : "تجميد",
+      `تم ${isCurrentlyFrozen ? "تنشيط" : "تجميد"} المعاملة. السبب: ${reason || "غير محدد"}`,
+      updatedBy,
     );
-    res.json({ success: true, message: `تم التغيير إلى: ${newStatus}` });
+    res.json({ success: true, message: `تمت العملية بنجاح` });
   } catch (error) {
-    res.status(500).json({ success: false, message: "حدث خطأ" });
+    res.status(500).json({ success: false, message: "حدث خطأ أثناء التجميد" });
   }
 };
 
@@ -1624,13 +1697,31 @@ const toggleFreezeTransaction = async (req, res) => {
 const deletePrivateTransaction = async (req, res) => {
   try {
     const { id } = req.params;
-    await prisma.privateTransaction.delete({ where: { id } });
-    res.json({ success: true, message: "تم حذف المعاملة بنجاح" });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "لا يمكن حذف معاملة مرتبطة بمدفوعات مالية.",
+    const { deletedBy, reason } = req.body;
+
+    await prisma.privateTransaction.update({
+      where: { id },
+      data: {
+        deletedAt: new Date(),
+        systemStatus: "محذوفة منطقيًا",
+      },
     });
+
+    await logTransactionEvent(
+      prisma,
+      id,
+      "حالة النظام",
+      "حذف منطقي",
+      `تم نقل المعاملة للمحذوفات. السبب: ${reason || "غير محدد"}`,
+      deletedBy || "النظام",
+      true,
+    );
+
+    res.json({ success: true, message: "تم نقل المعاملة للمحذوفات بنجاح" });
+  } catch (error) {
+    res
+      .status(500)
+      .json({ success: false, message: "حدث خطأ أثناء الحذف المنطقي." });
   }
 };
 
@@ -1868,156 +1959,63 @@ const submitTask = async (req, res) => {
   }
 };
 
-// ... (في نفس الملف privateTransactionController.js، تأكد من وجود دالة توليد السريال أو قم بإضافتها في الأعلى)
-const generateSmartSerial = async (modelName, prefix) => {
-  const today = new Date();
-  const dateStr = today.toISOString().slice(0, 10).replace(/-/g, "");
-  const startOfDay = new Date(today.setHours(0, 0, 0, 0));
-  const endOfDay = new Date(today.setHours(23, 59, 59, 999));
-
-  const countToday = await prisma[modelName].count({
-    where: { createdAt: { gte: startOfDay, lte: endOfDay } },
-  });
-
-  const sequence = String(countToday + 1).padStart(3, "0");
-  return `${prefix}-${dateStr}-${sequence}`;
-};
-
-// --------------------------------------------------
-
 const addAuthorityNote = async (req, res) => {
   try {
     const { id } = req.params;
-    const { note, addedBy, assignedTo } = req.body;
+    const { note, addedBy, type, isImportant } = req.body;
 
     let attachmentUrl = null;
-    if (req.file) {
-      attachmentUrl = `../../uploads/transactions/${req.file.filename}`;
-    }
+    if (req.file) attachmentUrl = `/uploads/transactions/${req.file.filename}`;
 
-    const tx = await prisma.privateTransaction.findUnique({ where: { id } });
-    if (!tx)
-      return res
-        .status(404)
-        .json({ success: false, message: "المعاملة غير موجودة" });
-
-    const currentNotes =
-      typeof tx.notes === "object" && tx.notes !== null ? tx.notes : {};
-    const history = currentNotes.authorityNotesHistory || [];
-
-    history.push({
-      id: Date.now().toString(),
-      note,
-      addedBy: addedBy || "مستخدم النظام",
-      assignedTo: assignedTo || null,
-      date: new Date().toISOString(),
-      attachment: attachmentUrl,
+    const newComment = await prisma.transactionComment.create({
+      data: {
+        transactionId: id,
+        text: note,
+        type: type || "عام",
+        isImportant: isImportant === "true",
+        authorId: req.user?.id || "system", // يجب تعديلها بناءً على الـ Auth Middleware
+        authorName: addedBy || "مستخدم النظام",
+        attachmentUrl: attachmentUrl,
+      },
     });
 
-    const updatedTx = await prisma.privateTransaction.update({
-      where: { id },
-      data: { notes: { ...currentNotes, authorityNotesHistory: history } },
-    });
-
-    // 🚀 إصلاح إنشاء المهمة التلقائية
-    if (assignedTo) {
-      try {
-        // توليد سريال للمهمة
-        const serial = await generateSmartSerial("officeTask", "T");
-
-        await prisma.officeTask.create({
-          data: {
-            serialNumber: serial,
-            title: `إفادة بلدي - ${tx.transactionCode || "معاملة"}`, // حقل الـ Title الذي أضفناه سابقاً
-            description: `توجيه من (${addedBy || "النظام"}):\n\n${note}`,
-            priority: "high",
-            status: "active",
-            creatorName: addedBy || "نظام التوجيه الآلي",
-            transactionId: id,
-            // تخزين الموظف كـ JSON string كما يتطلب الموديل لديك
-            assignedEmployees: JSON.stringify([
-              { id: "auto", name: assignedTo },
-            ]),
-          },
-        });
-      } catch (taskError) {
-        console.error("خطأ غير حرج: فشل إنشاء مهمة من التوجيه", taskError);
-        // لا نوقف العملية إذا فشلت المهمة، فالملاحظة تم حفظها بالفعل
-      }
-    }
-
-    res.json({ success: true, message: "تم إضافة الملاحظة", data: updatedTx });
+    res.json({ success: true, message: "تم إضافة التعليق", data: newComment });
   } catch (error) {
-    console.error("Add Authority Note Error:", error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// 🚀 تحديث ملاحظة موجودة
 const updateAuthorityNote = async (req, res) => {
   try {
-    const { id, noteId } = req.params;
-    const { note, assignedTo } = req.body;
+    const { noteId } = req.params;
+    const { note } = req.body;
 
-    const tx = await prisma.privateTransaction.findUnique({ where: { id } });
-    if (!tx)
-      return res
-        .status(404)
-        .json({ success: false, message: "المعاملة غير موجودة" });
+    let attachmentUrl = undefined;
+    if (req.file) attachmentUrl = `/uploads/transactions/${req.file.filename}`;
 
-    const currentNotes = tx.notes || {};
-    const history = currentNotes.authorityNotesHistory || [];
-
-    const noteIndex = history.findIndex((n) => n.id === noteId);
-    if (noteIndex === -1)
-      return res
-        .status(404)
-        .json({ success: false, message: "الملاحظة غير موجودة" });
-
-    // تحديث النص والتوجيه
-    history[noteIndex].note = note;
-    if (assignedTo !== undefined) history[noteIndex].assignedTo = assignedTo;
-
-    // إذا كان هناك ملف جديد، استبدل القديم
-    if (req.file) {
-      history[noteIndex].attachment =
-        `/uploads/transactions/${req.file.filename}`;
-    }
-
-    const updatedTx = await prisma.privateTransaction.update({
-      where: { id },
-      data: { notes: { ...currentNotes, authorityNotesHistory: history } },
+    const updatedComment = await prisma.transactionComment.update({
+      where: { id: noteId },
+      data: {
+        text: note,
+        ...(attachmentUrl && { attachmentUrl }),
+      },
     });
 
-    res.json({ success: true, message: "تم التحديث بنجاح", data: updatedTx });
+    res.json({
+      success: true,
+      message: "تم التحديث بنجاح",
+      data: updatedComment,
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// 🚀 حذف ملاحظة
 const deleteAuthorityNote = async (req, res) => {
   try {
-    const { id, noteId } = req.params;
-
-    const tx = await prisma.privateTransaction.findUnique({ where: { id } });
-    if (!tx)
-      return res
-        .status(404)
-        .json({ success: false, message: "المعاملة غير موجودة" });
-
-    const currentNotes = tx.notes || {};
-    let history = currentNotes.authorityNotesHistory || [];
-
-    // فلترة الملاحظة لحذفها
-    history = history.filter((n) => n.id !== noteId);
-
-    const updatedTx = await prisma.privateTransaction.update({
-      where: { id },
-      data: { notes: { ...currentNotes, authorityNotesHistory: history } },
-    });
-
-    res.json({ success: true, message: "تم الحذف بنجاح", data: updatedTx });
+    const { noteId } = req.params;
+    await prisma.transactionComment.delete({ where: { id: noteId } });
+    res.json({ success: true, message: "تم الحذف بنجاح" });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -2036,7 +2034,7 @@ const getPrivateTransactionById = async (req, res) => {
       include: {
         // ✅ تضمين بيانات العميل
         client: true,
-        // ✅ تضمين الحي 
+        // ✅ تضمين الحي
         districtNode: true,
         // ❌ تم حذف transactionType لأنه غير موجود في هذا الجدول
       },
