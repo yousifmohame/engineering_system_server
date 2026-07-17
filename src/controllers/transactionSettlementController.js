@@ -79,16 +79,33 @@ exports.updateSettlementCycleStatus = async (req, res) => {
   }
 };
 
-// 4. جلب تفاصيل تصفية واحدة
+// 4. جلب تفاصيل تصفية واحدة (مُحدَّث لجلب كل العلاقات العميقة)
 exports.getSettlementCycleById = async (req, res) => {
   try {
     const { id } = req.params;
     const cycle = await prisma.transactionSettlementCycle.findUnique({
       where: { id },
       include: {
-        transactions: { include: { transaction: true } },
+        // جلب المعاملات مع مصروفاتها ونسب توزيع أرباحها والأشخاص المستفيدين
+        transactions: { 
+          include: { 
+            transaction: { 
+              include: { 
+                expenses: true, 
+                profitShares: { include: { person: true } } 
+              } 
+            } 
+          } 
+        },
+        // جلب الأشخاص مع بياناتهم وتفاصيل تسليماتهم
         persons: { include: { person: true } },
-        adjustments: { include: { person: { select: { name: true } }, addedBy: { select: { name: true } } } },
+        // جلب التسويات اليدوية
+        adjustments: { 
+          include: { 
+            person: { select: { name: true } }, 
+            addedBy: { select: { name: true } } 
+          } 
+        },
       }
     });
     if (!cycle) return res.status(404).json({ success: false, message: "التصفية غير موجودة" });
@@ -98,25 +115,7 @@ exports.getSettlementCycleById = async (req, res) => {
   }
 };
 
-// 5. الحذف المنطقي
-exports.deleteSettlementCycle = async (req, res) => {
-  try {
-    const { id } = req.params;
-    await prisma.transactionSettlementCycle.update({
-      where: { id },
-      data: { deletedAt: new Date(), status: "ملغاة" },
-    });
-    res.status(200).json({ success: true, message: "تم إلغاء التصفية بنجاح" });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
-
-// =======================================================
-// 🚀 الإجراءات الجديدة المطلوبة لعمل الواجهة
-// =======================================================
-
-// 6. ربط المعاملات بالتصفية وإجراء الحسابات الأولية
+// 6. ربط المعاملات بالتصفية وإجراء الحسابات الأولية (مُحدَّث لتوزيع الأرباح على الأشخاص)
 exports.linkTransactionsToCycle = async (req, res) => {
   try {
     const { id } = req.params;
@@ -126,35 +125,43 @@ exports.linkTransactionsToCycle = async (req, res) => {
       return res.status(400).json({ success: false, message: "يرجى تحديد معاملات للربط" });
     }
 
-    // التحقق من حالة التصفية
     const cycle = await prisma.transactionSettlementCycle.findUnique({ where: { id } });
     if (!cycle || cycle.status === "معتمدة" || cycle.deletedAt) {
       return res.status(400).json({ success: false, message: "لا يمكن التعديل على هذه التصفية" });
     }
 
-    // جلب المعاملات المطلوبة مع مصروفاتها لمعرفة التكاليف الدقيقة
+    // جلب المعاملات مع المصروفات ونسب الأرباح (Profit Shares)
     const transactions = await prisma.privateTransaction.findMany({
       where: { id: { in: transactionIds } },
-      include: { expenses: true } // جلب المصروفات لحساب الصافي
+      include: { expenses: true, profitShares: true } 
     });
 
     let totalAddedCollection = 0;
     let totalAddedExpenses = 0;
     let totalAddedProfit = 0;
+    
+    // خريطة لتجميع أرباح الأشخاص من جميع المعاملات
+    const personsProfitMap = {}; 
 
     const linksData = transactions.map((tx) => {
-      // 1. المحصل المتاح (paidAmount)
       const paid = parseFloat(tx.paidAmount) || parseFloat(tx.collectionAmount) || 0;
-      
-      // 2. المصروفات المخصومة من هذه المعاملة
       const expensesAmount = tx.expenses ? tx.expenses.reduce((sum, exp) => sum + (parseFloat(exp.amount) || 0), 0) : 0;
-      
-      // 3. الصافي المتاح للتوزيع (الربح)
       const netProfit = Math.max(0, paid - expensesAmount);
 
       totalAddedCollection += paid;
       totalAddedExpenses += expensesAmount;
       totalAddedProfit += netProfit;
+
+      // 💡 توزيع الأرباح على الأشخاص بناءً على النسب المسجلة في المعاملة
+      if (tx.profitShares && tx.profitShares.length > 0) {
+        tx.profitShares.forEach((share) => {
+           const shareAmount = netProfit * (parseFloat(share.percentage) / 100);
+           if (!personsProfitMap[share.personId]) {
+             personsProfitMap[share.personId] = 0;
+           }
+           personsProfitMap[share.personId] += shareAmount;
+        });
+      }
 
       return {
         settlementCycleId: id,
@@ -165,15 +172,14 @@ exports.linkTransactionsToCycle = async (req, res) => {
       };
     });
 
-    // استخدام Transaction لضمان تنفيذ كل شيء أو فشله معاً (Atomic)
     await prisma.$transaction(async (txPrisma) => {
-      // إدراج العلاقات في الجدول الوسيط (تجاهل المكرر)
+      // 1. إدراج العلاقات في الجدول الوسيط للمعاملات
       await txPrisma.settlementCycleTransaction.createMany({
         data: linksData,
         skipDuplicates: true
       });
 
-      // تحديث مجاميع دورة التصفية
+      // 2. تحديث مجاميع دورة التصفية
       await txPrisma.transactionSettlementCycle.update({
         where: { id },
         data: {
@@ -181,19 +187,49 @@ exports.linkTransactionsToCycle = async (req, res) => {
           totalInboundCollection: { increment: totalAddedCollection },
           totalExpenses: { increment: totalAddedExpenses },
           totalNetProfit: { increment: totalAddedProfit },
-          finalTotalAmount: { increment: totalAddedProfit }, // الرقم النهائي قبل الخصومات والتسويات
+          finalTotalAmount: { increment: totalAddedProfit }, // سيتأثر لاحقاً بالخصومات والتقريب
           status: "جارٍ اختيار المعاملات"
         }
       });
 
-      // تغيير حالة المعاملات المربوطة لكي لا يتم اختيارها في تصفية أخرى
+      // 3. إدراج أو تحديث أنصبة الأشخاص في (SettlementCyclePerson)
+      for (const [personId, amount] of Object.entries(personsProfitMap)) {
+         const existingPerson = await txPrisma.settlementCyclePerson.findUnique({
+           where: { settlementCycleId_personId: { settlementCycleId: id, personId } }
+         });
+
+         if (existingPerson) {
+           await txPrisma.settlementCyclePerson.update({
+             where: { id: existingPerson.id },
+             data: {
+               profitShareAmount: { increment: amount },
+               totalBeforeRounding: { increment: amount },
+               finalTotal: { increment: amount },
+               remainingAmount: { increment: amount } // المتبقي للتسليم يزداد
+             }
+           });
+         } else {
+           await txPrisma.settlementCyclePerson.create({
+             data: {
+               settlementCycleId: id,
+               personId: personId,
+               profitShareAmount: amount,
+               totalBeforeRounding: amount,
+               finalTotal: amount,
+               remainingAmount: amount
+             }
+           });
+         }
+      }
+
+      // 4. إقفال المعاملة إجرائياً لتجنب إدراجها في تصفية أخرى
       await txPrisma.privateTransaction.updateMany({
         where: { id: { in: transactionIds } },
         data: { settlementStatus: "في مسودة تصفية" }
       });
     });
 
-    res.status(200).json({ success: true, message: "تم إدراج المعاملات وتحديث المجاميع بنجاح" });
+    res.status(200).json({ success: true, message: "تم إدراج المعاملات وتوزيع الأنصبة بنجاح" });
   } catch (error) {
     console.error("Link Transactions Error:", error);
     res.status(500).json({ success: false, message: "خطأ في السيرفر أثناء ربط المعاملات" });
