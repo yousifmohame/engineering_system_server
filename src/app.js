@@ -298,6 +298,9 @@ app.use("/api/identities", identityArchiveRoutes);
 const buildingCodeArchiveRoutes = require("./routes/buildingCodeArchiveRoutes");
 app.use("/api/archive/building-codes", buildingCodeArchiveRoutes);
 
+const transactionSettlementRoutes = require("./routes/transactionSettlementRoutes");
+app.use("/api/transaction-settlements", transactionSettlementRoutes);
+
 const { generateQRBuffer } = require('./utils/qrGenerator');
 
 // أضف هذا المسار في منطقة المسارات العامة (قبل الـ Auth Middleware)

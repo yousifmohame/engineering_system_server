@@ -177,6 +177,11 @@ model Employee {
   archiveLogs          ArchiveAuditLog[]
   cashVaultLogs        CashVaultAuditLog[]
 
+  createdSettlements  TransactionSettlementCycle[] @relation("SettlementCreator")
+  reviewedSettlements TransactionSettlementCycle[] @relation("SettlementReviewer")
+  approvedSettlements TransactionSettlementCycle[] @relation("SettlementApprover")
+  addedAdjustments    SettlementAdjustment[]       @relation("AdjustmentAdder")
+
   buildingCodesUploaded  BuildingCodeArchiveRecord[]      @relation("BuildingCodeUploader")
   buildingCodesUpdated   BuildingCodeArchiveRecord[]      @relation("BuildingCodeUpdater")
   buildingCodeLinks      BuildingCodeArchiveLink[]        @relation("BuildingCodeLinkConfirmer")
@@ -2058,6 +2063,8 @@ model PrivateTransaction {
   comments     TransactionComment[]
   eventLogs    TransactionEventLog[]
 
+  settlementCycles SettlementCycleTransaction[]
+
   @@index([clientId])
   @@index([districtId])
 }
@@ -2170,6 +2177,128 @@ model TransactionOwner {
 
   @@unique([transactionId, clientId]) // منع تكرار نفس العميل في نفس المعاملة
   @@index([clientId])
+}
+
+// ==========================================
+// 🚀 منظومة دورات التصفية المالية (Settlement Cycles)
+// ==========================================
+
+model TransactionSettlementCycle {
+  id               String    @id @default(cuid())
+  settlementNumber String    @unique // رقم التصفية (مثال: SET-2026-001)
+  name             String // اسم التصفية (مثال: تصفية يوليو 2026)
+  periodFrom       DateTime? @db.Date // بداية الفترة
+  periodTo         DateTime? @db.Date // نهاية الفترة
+
+  // 💡 الحالات (حسب البند 2.2)
+  status String @default("مسودة")
+
+  // 💡 إعدادات التصفية
+  type                 String  @default("دورية") // دورية، استثنائية، استكمال، نهائية
+  defaultFundingSource String? @default("غير محدد")
+  defaultRoundingMode  String  @default("none") // none, 5, 10, 50, 100
+  notes                String? @db.Text
+
+  // 💡 المجاميع المالية (حسب البند 2.1)
+  totalInboundCollection Float @default(0) // إجمالي التحصيل الداخل
+  totalExpenses          Float @default(0) // إجمالي المصروفات
+  totalNetProfit         Float @default(0) // إجمالي صافي الربح
+  totalRoundingDiff      Float @default(0) // إجمالي فرق التقريب
+  finalTotalAmount       Float @default(0) // إجمالي المبلغ النهائي
+  deliveredAmount        Float @default(0) // المسلم
+  remainingAmount        Float @default(0) // المتبقي غير المسلم
+
+  // 💡 العدادات
+  transactionsCount Int @default(0)
+  personsCount      Int @default(0)
+
+  // 💡 التتبع والموافقات
+  creatorId String
+  creator   Employee @relation("SettlementCreator", fields: [creatorId], references: [id])
+
+  reviewerId String?
+  reviewer   Employee? @relation("SettlementReviewer", fields: [reviewerId], references: [id])
+
+  approverId String?
+  approver   Employee? @relation("SettlementApprover", fields: [approverId], references: [id])
+
+  isArchived Boolean   @default(false)
+  deletedAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // العلاقات (الجداول الوسيطة)
+  transactions SettlementCycleTransaction[]
+  persons      SettlementCyclePerson[]
+  adjustments  SettlementAdjustment[]
+}
+
+// 💡 جدول وسيط: المعاملات داخل هذه التصفية
+model SettlementCycleTransaction {
+  id                String                     @id @default(cuid())
+  settlementCycleId String
+  settlementCycle   TransactionSettlementCycle @relation(fields: [settlementCycleId], references: [id], onDelete: Cascade)
+
+  transactionId String
+  transaction   PrivateTransaction @relation(fields: [transactionId], references: [id])
+
+  allocatedCollection Float @default(0) // المبلغ المحصل المسحوب في هذه التصفية
+  allocatedExpenses   Float @default(0) // المصروفات المخصومة
+  calculatedNetProfit Float @default(0) // صافي الربح المحسوب لهذه المعاملة
+
+  createdAt DateTime @default(now())
+
+  @@unique([settlementCycleId, transactionId])
+}
+
+// 💡 جدول وسيط: ملخص الأشخاص داخل التصفية
+model SettlementCyclePerson {
+  id                String                     @id @default(cuid())
+  settlementCycleId String
+  settlementCycle   TransactionSettlementCycle @relation(fields: [settlementCycleId], references: [id], onDelete: Cascade)
+
+  personId String
+  person   Person @relation(fields: [personId], references: [id])
+
+  profitShareAmount Float @default(0) // نصيب الأرباح
+  agentFeesAmount   Float @default(0) // مستحقات التعقيب
+  expensesAmount    Float @default(0) // مستحقات المصروفات
+  additions         Float @default(0) // الإضافات
+  deductions        Float @default(0) // الخصومات
+  previousBalance   Float @default(0) // رصيد سابق
+
+  totalBeforeRounding Float @default(0)
+  roundingDifference  Float @default(0)
+  finalTotal          Float @default(0)
+
+  deliveredAmount Float  @default(0)
+  remainingAmount Float  @default(0)
+  deliveryStatus  String @default("غير مسلم") // غير مسلم، مسلم جزئياً، مسلم كلياً
+
+  createdAt DateTime @default(now())
+
+  @@unique([settlementCycleId, personId])
+}
+
+// 💡 التسويات والإضافات المستقلة داخل التصفية
+model SettlementAdjustment {
+  id                String                     @id @default(cuid())
+  settlementCycleId String
+  settlementCycle   TransactionSettlementCycle @relation(fields: [settlementCycleId], references: [id], onDelete: Cascade)
+
+  personId String
+  person   Person @relation(fields: [personId], references: [id])
+
+  type        String // مكافأة، خصم، تسوية تقريب، رصيد سابق
+  description String @db.Text
+  amount      Float // يمكن أن يكون موجب أو سالب
+  reason      String @db.Text
+
+  addedById String
+  addedBy   Employee @relation("AdjustmentAdder", fields: [addedById], references: [id])
+
+  createdAt DateTime @default(now())
 }
 
 // ===============================================
@@ -2755,6 +2884,9 @@ model Person {
   sourcedTransactions PrivateTransaction[]     @relation("TxSourcePerson")
   transactionExpenses TransactionExpense[]     @relation("PayeeTransactionExpense")
   profitShares        TransactionProfitShare[] @relation("PersonProfitShare")
+
+  settlementCycleSummaries SettlementCyclePerson[]
+  settlementAdjustments    SettlementAdjustment[]
 }
 
 model TransactionTask {
