@@ -115,7 +115,7 @@ router.post("/:id/payments", addPayment);
 router.delete("/:id/payments/:paymentId", deletePayment);
 
 router.post("/:id/tx-expenses", protect, addExpense);
-router.delete("/:id/expenses/:expenseId", protect, deleteExpense);
+router.delete("/:id/tx-expenses/:expenseId", protect, deleteExpense);
 
 router.post("/:id/collection-dates", addCollectionDate);
 router.delete("/:id/collection-dates/:dateId", deleteCollectionDate);
