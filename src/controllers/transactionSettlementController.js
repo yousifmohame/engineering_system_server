@@ -306,3 +306,48 @@ exports.deleteSettlementAdjustment = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+
+// 5. الحذف المنطقي لدورة التصفية
+exports.deleteSettlementCycle = async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    // التحقق من وجود التصفية أولاً
+    const cycle = await prisma.transactionSettlementCycle.findUnique({ where: { id } });
+    if (!cycle) {
+      return res.status(404).json({ success: false, message: "التصفية غير موجودة" });
+    }
+
+    // لا يمكن حذف تصفية معتمدة
+    if (cycle.status === "معتمدة") {
+       return res.status(400).json({ success: false, message: "لا يمكن حذف تصفية معتمدة ومقفلة" });
+    }
+
+    await prisma.$transaction(async (txPrisma) => {
+      // 1. إعادة حالة المعاملات المرتبطة إلى "غير مصفاة"
+      const linkedTransactions = await txPrisma.settlementCycleTransaction.findMany({
+        where: { settlementCycleId: id }
+      });
+      
+      const transactionIds = linkedTransactions.map(t => t.transactionId);
+      
+      if (transactionIds.length > 0) {
+        await txPrisma.privateTransaction.updateMany({
+          where: { id: { in: transactionIds } },
+          data: { settlementStatus: "غير مصفاة" }
+        });
+      }
+
+      // 2. تحديث التصفية إلى محذوفة/ملغاة
+      await txPrisma.transactionSettlementCycle.update({
+        where: { id },
+        data: { deletedAt: new Date(), status: "ملغاة" },
+      });
+    });
+
+    res.status(200).json({ success: true, message: "تم إلغاء التصفية وفك ارتباط المعاملات بنجاح" });
+  } catch (error) {
+    console.error("Delete Settlement Error:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
