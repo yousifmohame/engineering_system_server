@@ -22,7 +22,10 @@ exports.addPayment = async (req, res) => {
           date: date ? new Date(date) : new Date(),
           ref: ref || "",
           notes: notes || "",
-          addedById: req.user.id // اختياري إذا كنت تسجل من أدخل الدفعة
+          // التعديل هنا: استخدام receivedBy بدلاً من addedById ليتوافق مع الـ Schema
+          receivedBy: {
+             connect: { id: req.user.id }
+          }
         }
       });
 
