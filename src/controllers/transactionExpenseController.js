@@ -15,13 +15,16 @@ exports.addExpense = async (req, res) => {
       data: {
         transactionId: id,
         description,
-        category: category || "رسوم",
-        // نضع القيمة في paidAmount كما هو معرف في Schema
-        paidAmount: parsedAmount, 
-        expectedAmount: parsedAmount,
+        category: category || "رسوم منصات",
+        
+        // 🚀 السر هنا: يجب حفظ المبلغ في كل هذه الحقول ليتطابق مع الـ Schema الخاص بك
+        paidAmount: parsedAmount,       
+        expectedAmount: parsedAmount,   
+        approvedAmount: parsedAmount,   
+        
         paymentStatus: "مدفوع",
+        approvalStatus: "معتمد",
         dueDate: date ? new Date(date) : new Date(),
-        // payeeId: يمكن إضافته مستقبلاً إذا أردت ربط المصروف بشخص معين (معقب مثلاً)
       }
     });
 
@@ -36,19 +39,9 @@ exports.addExpense = async (req, res) => {
 exports.deleteExpense = async (req, res) => {
   try {
     const { id, expenseId } = req.params;
-
-    const expense = await prisma.transactionExpense.findUnique({ where: { id: expenseId } });
-    if (!expense) {
-      return res.status(404).json({ message: "المصروف غير موجود" });
-    }
-
-    await prisma.transactionExpense.delete({
-      where: { id: expenseId }
-    });
-
+    await prisma.transactionExpense.delete({ where: { id: expenseId } });
     res.status(200).json({ success: true, message: "تم حذف المصروف بنجاح" });
   } catch (error) {
-    console.error("Error deleting expense:", error);
     res.status(500).json({ message: "فشل في حذف المصروف", error: error.message });
   }
 };
