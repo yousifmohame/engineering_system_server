@@ -92,7 +92,6 @@ exports.getSettlementCycleById = async (req, res) => {
             transaction: {
               include: {
                 expenses: true,
-                transactionExpenses: true,
                 profitShares: { include: { person: true } },
                 payments: true, // 👈 (السر هنا) إضافة جلب الدفعات من قاعدة البيانات
               },
