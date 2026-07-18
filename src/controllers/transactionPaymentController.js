@@ -3,7 +3,7 @@ const prisma = require("../utils/prisma");
 // 1. إضافة دفعة جديدة وتحديث المعاملة
 exports.addPayment = async (req, res) => {
   try {
-    const { id } = req.params; // Transaction ID
+    const { id } = req.params; // PrivateTransaction ID
     const { amount, method, date, ref, notes } = req.body;
 
     const parsedAmount = parseFloat(amount);
@@ -13,19 +13,17 @@ exports.addPayment = async (req, res) => {
 
     // التنفيذ داخل Transaction لضمان السلامة المحاسبية
     await prisma.$transaction(async (tx) => {
-      // أ) إنشاء سجل الدفعة
-      await tx.payment.create({
+      // أ) إنشاء سجل الدفعة في جدول PrivatePayment (المخصص للنظام الداخلي)
+      await tx.privatePayment.create({
         data: {
-          transactionId: id,
+          transactionId: id, // ربط بالمعاملة
           amount: parsedAmount,
           method: method || "نقدي",
           date: date ? new Date(date) : new Date(),
-          ref: ref || "",
+          periodRef: ref || "", // حفظ رقم المرجع هنا حسب المخطط الخاص بك
           notes: notes || "",
-          // التعديل هنا: استخدام receivedBy بدلاً من addedById ليتوافق مع الـ Schema
-          receivedBy: {
-             connect: { id: req.user.id }
-          }
+          collectedFromType: "عميل", // حقل إجباري في الـ Schema
+          collectedBy: req.user?.name || "النظام", // الموظف الذي قام بالتحصيل
         }
       });
 
@@ -50,7 +48,8 @@ exports.deletePayment = async (req, res) => {
   try {
     const { id, paymentId } = req.params;
 
-    const payment = await prisma.payment.findUnique({ where: { id: paymentId } });
+    // البحث في جدول PrivatePayment
+    const payment = await prisma.privatePayment.findUnique({ where: { id: paymentId } });
     if (!payment) {
       return res.status(404).json({ message: "الدفعة غير موجودة" });
     }
@@ -58,7 +57,7 @@ exports.deletePayment = async (req, res) => {
     // التنفيذ داخل Transaction للخصم العكسي
     await prisma.$transaction(async (tx) => {
       // أ) حذف الدفعة
-      await tx.payment.delete({
+      await tx.privatePayment.delete({
         where: { id: paymentId }
       });
 
