@@ -80,6 +80,8 @@ const {
   getPrivateTransactionById
 } = require("../controllers/privateTransactionController");
 
+const { addPayment, deletePayment } = require("../controllers/transactionPaymentController");
+
 router.use(protect);
 
 router.get("/dashboard-stats", getDashboardStats);
@@ -107,6 +109,9 @@ router.post(
   upload.single("files"),
   addTransactionAttachment,
 );
+
+router.post("/:id/payments", addPayment);
+router.delete("/:id/payments/:paymentId", deletePayment);
 
 router.post("/:id/collection-dates", addCollectionDate);
 router.delete("/:id/collection-dates/:dateId", deleteCollectionDate);
