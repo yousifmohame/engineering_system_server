@@ -67,9 +67,9 @@ exports.updateSettlementCycleStatus = async (req, res) => {
 
     const cycle = await prisma.transactionSettlementCycle.update({
       where: { id },
-      data: { 
+      data: {
         status,
-        ...(status === "معتمدة" ? { approverId: req.user.id } : {})
+        ...(status === "معتمدة" ? { approverId: req.user.id } : {}),
       },
     });
 
@@ -80,35 +80,37 @@ exports.updateSettlementCycleStatus = async (req, res) => {
 };
 
 // 4. جلب تفاصيل تصفية واحدة (مُحدَّث لجلب كل العلاقات العميقة)
+// 4. جلب تفاصيل تصفية واحدة
 exports.getSettlementCycleById = async (req, res) => {
   try {
     const { id } = req.params;
     const cycle = await prisma.transactionSettlementCycle.findUnique({
       where: { id },
       include: {
-        // جلب المعاملات مع مصروفاتها ونسب توزيع أرباحها والأشخاص المستفيدين
-        transactions: { 
-          include: { 
-            transaction: { 
-              include: { 
-                expenses: true, 
-                profitShares: { include: { person: true } } 
-              } 
-            } 
-          } 
+        transactions: {
+          include: {
+            transaction: {
+              include: {
+                expenses: true,
+                profitShares: { include: { person: true } },
+                payments: true, // 👈 (السر هنا) إضافة جلب الدفعات من قاعدة البيانات
+              },
+            },
+          },
         },
-        // جلب الأشخاص مع بياناتهم وتفاصيل تسليماتهم
         persons: { include: { person: true } },
-        // جلب التسويات اليدوية
-        adjustments: { 
-          include: { 
-            person: { select: { name: true } }, 
-            addedBy: { select: { name: true } } 
-          } 
+        adjustments: {
+          include: {
+            person: { select: { name: true } },
+            addedBy: { select: { name: true } },
+          },
         },
-      }
+      },
     });
-    if (!cycle) return res.status(404).json({ success: false, message: "التصفية غير موجودة" });
+    if (!cycle)
+      return res
+        .status(404)
+        .json({ success: false, message: "التصفية غير موجودة" });
     res.status(200).json({ success: true, data: cycle });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -121,31 +123,47 @@ exports.linkTransactionsToCycle = async (req, res) => {
     const { id } = req.params;
     const { transactionIds } = req.body;
 
-    if (!transactionIds || !Array.isArray(transactionIds) || transactionIds.length === 0) {
-      return res.status(400).json({ success: false, message: "يرجى تحديد معاملات للربط" });
+    if (
+      !transactionIds ||
+      !Array.isArray(transactionIds) ||
+      transactionIds.length === 0
+    ) {
+      return res
+        .status(400)
+        .json({ success: false, message: "يرجى تحديد معاملات للربط" });
     }
 
-    const cycle = await prisma.transactionSettlementCycle.findUnique({ where: { id } });
+    const cycle = await prisma.transactionSettlementCycle.findUnique({
+      where: { id },
+    });
     if (!cycle || cycle.status === "معتمدة" || cycle.deletedAt) {
-      return res.status(400).json({ success: false, message: "لا يمكن التعديل على هذه التصفية" });
+      return res
+        .status(400)
+        .json({ success: false, message: "لا يمكن التعديل على هذه التصفية" });
     }
 
     // جلب المعاملات مع المصروفات ونسب الأرباح (Profit Shares)
     const transactions = await prisma.privateTransaction.findMany({
       where: { id: { in: transactionIds } },
-      include: { expenses: true, profitShares: true } 
+      include: { expenses: true, profitShares: true },
     });
 
     let totalAddedCollection = 0;
     let totalAddedExpenses = 0;
     let totalAddedProfit = 0;
-    
+
     // خريطة لتجميع أرباح الأشخاص من جميع المعاملات
-    const personsProfitMap = {}; 
+    const personsProfitMap = {};
 
     const linksData = transactions.map((tx) => {
-      const paid = parseFloat(tx.paidAmount) || parseFloat(tx.collectionAmount) || 0;
-      const expensesAmount = tx.expenses ? tx.expenses.reduce((sum, exp) => sum + (parseFloat(exp.amount) || 0), 0) : 0;
+      const paid =
+        parseFloat(tx.paidAmount) || parseFloat(tx.collectionAmount) || 0;
+      const expensesAmount = tx.expenses
+        ? tx.expenses.reduce(
+            (sum, exp) => sum + (parseFloat(exp.amount) || 0),
+            0,
+          )
+        : 0;
       const netProfit = Math.max(0, paid - expensesAmount);
 
       totalAddedCollection += paid;
@@ -155,11 +173,11 @@ exports.linkTransactionsToCycle = async (req, res) => {
       // 💡 توزيع الأرباح على الأشخاص بناءً على النسب المسجلة في المعاملة
       if (tx.profitShares && tx.profitShares.length > 0) {
         tx.profitShares.forEach((share) => {
-           const shareAmount = netProfit * (parseFloat(share.percentage) / 100);
-           if (!personsProfitMap[share.personId]) {
-             personsProfitMap[share.personId] = 0;
-           }
-           personsProfitMap[share.personId] += shareAmount;
+          const shareAmount = netProfit * (parseFloat(share.percentage) / 100);
+          if (!personsProfitMap[share.personId]) {
+            personsProfitMap[share.personId] = 0;
+          }
+          personsProfitMap[share.personId] += shareAmount;
         });
       }
 
@@ -168,7 +186,7 @@ exports.linkTransactionsToCycle = async (req, res) => {
         transactionId: tx.id,
         allocatedCollection: paid,
         allocatedExpenses: expensesAmount,
-        calculatedNetProfit: netProfit
+        calculatedNetProfit: netProfit,
       };
     });
 
@@ -176,7 +194,7 @@ exports.linkTransactionsToCycle = async (req, res) => {
       // 1. إدراج العلاقات في الجدول الوسيط للمعاملات
       await txPrisma.settlementCycleTransaction.createMany({
         data: linksData,
-        skipDuplicates: true
+        skipDuplicates: true,
       });
 
       // 2. تحديث مجاميع دورة التصفية
@@ -188,51 +206,60 @@ exports.linkTransactionsToCycle = async (req, res) => {
           totalExpenses: { increment: totalAddedExpenses },
           totalNetProfit: { increment: totalAddedProfit },
           finalTotalAmount: { increment: totalAddedProfit }, // سيتأثر لاحقاً بالخصومات والتقريب
-          status: "جارٍ اختيار المعاملات"
-        }
+          status: "جارٍ اختيار المعاملات",
+        },
       });
 
       // 3. إدراج أو تحديث أنصبة الأشخاص في (SettlementCyclePerson)
       for (const [personId, amount] of Object.entries(personsProfitMap)) {
-         const existingPerson = await txPrisma.settlementCyclePerson.findUnique({
-           where: { settlementCycleId_personId: { settlementCycleId: id, personId } }
-         });
+        const existingPerson = await txPrisma.settlementCyclePerson.findUnique({
+          where: {
+            settlementCycleId_personId: { settlementCycleId: id, personId },
+          },
+        });
 
-         if (existingPerson) {
-           await txPrisma.settlementCyclePerson.update({
-             where: { id: existingPerson.id },
-             data: {
-               profitShareAmount: { increment: amount },
-               totalBeforeRounding: { increment: amount },
-               finalTotal: { increment: amount },
-               remainingAmount: { increment: amount } // المتبقي للتسليم يزداد
-             }
-           });
-         } else {
-           await txPrisma.settlementCyclePerson.create({
-             data: {
-               settlementCycleId: id,
-               personId: personId,
-               profitShareAmount: amount,
-               totalBeforeRounding: amount,
-               finalTotal: amount,
-               remainingAmount: amount
-             }
-           });
-         }
+        if (existingPerson) {
+          await txPrisma.settlementCyclePerson.update({
+            where: { id: existingPerson.id },
+            data: {
+              profitShareAmount: { increment: amount },
+              totalBeforeRounding: { increment: amount },
+              finalTotal: { increment: amount },
+              remainingAmount: { increment: amount }, // المتبقي للتسليم يزداد
+            },
+          });
+        } else {
+          await txPrisma.settlementCyclePerson.create({
+            data: {
+              settlementCycleId: id,
+              personId: personId,
+              profitShareAmount: amount,
+              totalBeforeRounding: amount,
+              finalTotal: amount,
+              remainingAmount: amount,
+            },
+          });
+        }
       }
 
       // 4. إقفال المعاملة إجرائياً لتجنب إدراجها في تصفية أخرى
       await txPrisma.privateTransaction.updateMany({
         where: { id: { in: transactionIds } },
-        data: { settlementStatus: "في مسودة تصفية" }
+        data: { settlementStatus: "في مسودة تصفية" },
       });
     });
 
-    res.status(200).json({ success: true, message: "تم إدراج المعاملات وتوزيع الأنصبة بنجاح" });
+    res
+      .status(200)
+      .json({
+        success: true,
+        message: "تم إدراج المعاملات وتوزيع الأنصبة بنجاح",
+      });
   } catch (error) {
     console.error("Link Transactions Error:", error);
-    res.status(500).json({ success: false, message: "خطأ في السيرفر أثناء ربط المعاملات" });
+    res
+      .status(500)
+      .json({ success: false, message: "خطأ في السيرفر أثناء ربط المعاملات" });
   }
 };
 
@@ -243,13 +270,16 @@ exports.addSettlementAdjustment = async (req, res) => {
     const { personId, type, amount, reason, description } = req.body;
 
     if (!personId || !amount) {
-      return res.status(400).json({ success: false, message: "بيانات التسوية غير مكتملة" });
+      return res
+        .status(400)
+        .json({ success: false, message: "بيانات التسوية غير مكتملة" });
     }
 
     const parsedAmount = parseFloat(amount);
-    
+
     // إشارة المبلغ بناءً على النوع (الخصم دائماً سالب)
-    const finalAmount = type === "خصم" ? -Math.abs(parsedAmount) : Math.abs(parsedAmount);
+    const finalAmount =
+      type === "خصم" ? -Math.abs(parsedAmount) : Math.abs(parsedAmount);
 
     await prisma.$transaction(async (txPrisma) => {
       // 1. إنشاء سجل التسوية
@@ -261,8 +291,8 @@ exports.addSettlementAdjustment = async (req, res) => {
           amount: finalAmount,
           description: description || type,
           reason: reason || "",
-          addedById: req.user.id
-        }
+          addedById: req.user.id,
+        },
       });
 
       // 2. تحديث المجموع النهائي للتصفية إذا كان يؤثر على الإجمالي (اختياري حسب الـ Business Logic)
@@ -270,8 +300,8 @@ exports.addSettlementAdjustment = async (req, res) => {
       await txPrisma.transactionSettlementCycle.update({
         where: { id },
         data: {
-          finalTotalAmount: { increment: finalAmount }
-        }
+          finalTotalAmount: { increment: finalAmount },
+        },
       });
     });
 
@@ -286,18 +316,25 @@ exports.deleteSettlementAdjustment = async (req, res) => {
   try {
     const { id, adjustmentId } = req.params;
 
-    const adjustment = await prisma.settlementAdjustment.findUnique({ where: { id: adjustmentId } });
-    if (!adjustment) return res.status(404).json({ success: false, message: "التسوية غير موجودة" });
+    const adjustment = await prisma.settlementAdjustment.findUnique({
+      where: { id: adjustmentId },
+    });
+    if (!adjustment)
+      return res
+        .status(404)
+        .json({ success: false, message: "التسوية غير موجودة" });
 
     await prisma.$transaction(async (txPrisma) => {
-      await txPrisma.settlementAdjustment.delete({ where: { id: adjustmentId } });
-      
+      await txPrisma.settlementAdjustment.delete({
+        where: { id: adjustmentId },
+      });
+
       // عكس تأثير المبلغ المحذوف من دورة التصفية
       await txPrisma.transactionSettlementCycle.update({
         where: { id },
         data: {
-          finalTotalAmount: { decrement: adjustment.amount }
-        }
+          finalTotalAmount: { decrement: adjustment.amount },
+        },
       });
     });
 
@@ -311,30 +348,37 @@ exports.deleteSettlementAdjustment = async (req, res) => {
 exports.deleteSettlementCycle = async (req, res) => {
   try {
     const { id } = req.params;
-    
+
     // التحقق من وجود التصفية أولاً
-    const cycle = await prisma.transactionSettlementCycle.findUnique({ where: { id } });
+    const cycle = await prisma.transactionSettlementCycle.findUnique({
+      where: { id },
+    });
     if (!cycle) {
-      return res.status(404).json({ success: false, message: "التصفية غير موجودة" });
+      return res
+        .status(404)
+        .json({ success: false, message: "التصفية غير موجودة" });
     }
 
     // لا يمكن حذف تصفية معتمدة
     if (cycle.status === "معتمدة") {
-       return res.status(400).json({ success: false, message: "لا يمكن حذف تصفية معتمدة ومقفلة" });
+      return res
+        .status(400)
+        .json({ success: false, message: "لا يمكن حذف تصفية معتمدة ومقفلة" });
     }
 
     await prisma.$transaction(async (txPrisma) => {
       // 1. إعادة حالة المعاملات المرتبطة إلى "غير مصفاة"
-      const linkedTransactions = await txPrisma.settlementCycleTransaction.findMany({
-        where: { settlementCycleId: id }
-      });
-      
-      const transactionIds = linkedTransactions.map(t => t.transactionId);
-      
+      const linkedTransactions =
+        await txPrisma.settlementCycleTransaction.findMany({
+          where: { settlementCycleId: id },
+        });
+
+      const transactionIds = linkedTransactions.map((t) => t.transactionId);
+
       if (transactionIds.length > 0) {
         await txPrisma.privateTransaction.updateMany({
           where: { id: { in: transactionIds } },
-          data: { settlementStatus: "غير مصفاة" }
+          data: { settlementStatus: "غير مصفاة" },
         });
       }
 
@@ -345,7 +389,12 @@ exports.deleteSettlementCycle = async (req, res) => {
       });
     });
 
-    res.status(200).json({ success: true, message: "تم إلغاء التصفية وفك ارتباط المعاملات بنجاح" });
+    res
+      .status(200)
+      .json({
+        success: true,
+        message: "تم إلغاء التصفية وفك ارتباط المعاملات بنجاح",
+      });
   } catch (error) {
     console.error("Delete Settlement Error:", error);
     res.status(500).json({ success: false, message: error.message });
