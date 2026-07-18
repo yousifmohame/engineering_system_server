@@ -81,6 +81,7 @@ const {
 } = require("../controllers/privateTransactionController");
 
 const { addPayment, deletePayment } = require("../controllers/transactionPaymentController");
+const { addExpense, deleteExpense } = require("../controllers/transactionExpenseController");
 
 router.use(protect);
 
@@ -112,6 +113,9 @@ router.post(
 
 router.post("/:id/payments", addPayment);
 router.delete("/:id/payments/:paymentId", deletePayment);
+
+router.post("/:id/expenses", protect, addExpense);
+router.delete("/:id/expenses/:expenseId", protect, deleteExpense);
 
 router.post("/:id/collection-dates", addCollectionDate);
 router.delete("/:id/collection-dates/:dateId", deleteCollectionDate);
