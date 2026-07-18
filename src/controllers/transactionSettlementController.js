@@ -160,7 +160,7 @@ exports.linkTransactionsToCycle = async (req, res) => {
         parseFloat(tx.paidAmount) || parseFloat(tx.collectionAmount) || 0;
       const expensesAmount = tx.expenses
         ? tx.expenses.reduce(
-            (sum, exp) => sum + (parseFloat(exp.amount) || 0),
+            (sum, exp) => sum + (parseFloat(exp.paidAmount) || 0), 
             0,
           )
         : 0;
