@@ -187,6 +187,17 @@ model Employee {
   buildingCodeLinks      BuildingCodeArchiveLink[]        @relation("BuildingCodeLinkConfirmer")
   buildingCodeDuplicates BuildingCodeDuplicateCandidate[] @relation("BuildingCodeDuplicateResolver")
   buildingCodeAudits     BuildingCodeAuditLog[]           @relation("BuildingCodeAuditor")
+
+  studyRequestsCreated  StudyRequest[]       @relation("StudyCreator")
+  studyRequestsAssigned StudyRequest[]       @relation("StudyAssignee")
+  studyNotes            StudyNote[]
+  studyDecisions        StudyDecision[]
+  studyEvents           StudyTimelineEvent[]
+  studyReportsCreated   StudyReport[]        @relation("ReportCreator")
+  studyReportsApproved  StudyReport[]        @relation("ReportApprover")
+  studyAiLogs           StudyAiAnalysisLog[]
+  StudyAttachment       StudyAttachment[]
+  StudyAuditLog         StudyAuditLog[]
 }
 
 // ==================================================
@@ -646,6 +657,7 @@ model Client {
   quotations            Quotation[]               @relation("ClientQuotations")
   archivedDocuments     PropertyDocumentArchive[]
   EngineeringBundle     EngineeringBundle[]
+  studyRequests         StudyRequest[]
 }
 
 model ClientClassification {
@@ -710,6 +722,8 @@ model OwnershipFile {
   technicalReports  TechnicalReport[]
   quotations        Quotation[]               @relation("OwnershipQuotations")
   archivedDocuments PropertyDocumentArchive[]
+
+  studyRequests StudyRequest[]
 
   @@index([deedNumber])
   @@index([district])
@@ -2058,10 +2072,11 @@ model PrivateTransaction {
   quotations        Quotation[]         @relation("TransactionQuotations")
   EngineeringBundle EngineeringBundle[]
 
-  expenses     TransactionExpense[]
-  profitShares TransactionProfitShare[]
-  comments     TransactionComment[]
-  eventLogs    TransactionEventLog[]
+  expenses                TransactionExpense[]
+  profitShares            TransactionProfitShare[]
+  comments                TransactionComment[]
+  eventLogs               TransactionEventLog[]
+  originatingStudyRequest StudyRequest?            @relation("ConvertedFromStudy")
 
   settlementCycles SettlementCycleTransaction[]
 
@@ -5520,4 +5535,278 @@ model ArchiveAuditLog {
   action    String // UPLOAD, AI_ANALYZE, MANUAL_EDIT, CONFIRM, LINK_OWNERSHIP
   details   String?  @db.Text
   createdAt DateTime @default(now())
+}
+
+// ============================================================================
+// 📊 1. الكيان الأساسي: الطلب تحت الدراسة (Under Study Request)
+// ============================================================================
+model StudyRequest {
+  id          String @id @default(cuid())
+  requestCode String @unique // التسلسل الذكي (مثال: 2607-0041)
+
+  // 📝 البيانات الأولية وصاحب العلاقة
+  title               String? // الاسم المتداول للحالة
+  originalRequestText String? @db.Text // الطلب كما ورد من العميل
+  requestSource       String? // واتساب، زيارة، الخ
+  contactMobile       String?
+  contactName         String? // اسم المتواصل المبدئي إذا لم يكن عميلاً بعد
+
+  // 🏛️ تصنيف المكتب (مفصول عن طلب العميل)
+  suggestedMainCategory String?
+  suggestedSubCategory  String?
+  suggestedService      String?
+  classificationReason  String? @db.Text
+
+  // 🚦 المحاور متعددة الأبعاد (Multi-dimensional States - File 10)
+  operationalStatus  String  @default("NEW") // جديد، قيد الفرز، بانتظار العميل، الخ
+  completenessLevel  String  @default("أولية جداً")
+  readinessLevel     String  @default("غير قابلة للتحويل") // مؤشر الجاهزية للتحويل
+  feasibilityLevel   String  @default("غير مقيم") // القابلية / احتمالية النجاح
+  complexityLevel    String  @default("غير مقيم") // درجة التعقيد
+  dataQualityLevel   String  @default("غير مقيم") // جودة البيانات والمصادر
+  managementInterest String  @default("عادي") // اهتمام الإدارة (استراتيجي، الخ)
+  expectedValueTier  String? // القيمة التجارية (منخفضة، مرتفعة)
+
+  // ⏱️ الإجراء القادم والمتابعة
+  nextActionTitle  String?
+  nextActionDate   DateTime?
+  nextActionStatus String?   @default("PENDING")
+
+  // 💡 الذكاء الاصطناعي والمستلخصات
+  aiSummary   String? @db.Text
+  missingDocs Json?   @default("[]")
+  aiConflicts Json?   @default("[]") // التعارضات المكتشفة
+
+  // 🔗 الارتباطات
+  clientId String?
+  client   Client? @relation(fields: [clientId], references: [id])
+
+  ownershipId String?
+  ownership   OwnershipFile? @relation(fields: [ownershipId], references: [id])
+
+  // عندما يتحول لمعاملة رسمية يقفل السجل ويرتبط بها
+  convertedTxId String?             @unique
+  convertedTx   PrivateTransaction? @relation("ConvertedFromStudy", fields: [convertedTxId], references: [id])
+
+  // 👥 التتبع والمسؤوليات
+  createdById String
+  createdBy   Employee @relation("StudyCreator", fields: [createdById], references: [id])
+
+  assignedToId String?
+  assignedTo   Employee? @relation("StudyAssignee", fields: [assignedToId], references: [id])
+
+  isLocked      Boolean @default(false)
+  isDeleted     Boolean @default(false)
+  closureReason String? @db.Text
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  lastActivityAt DateTime @default(now())
+
+  // العلاقات الفرعية
+  batches        StudyUploadBatch[]
+  attachments    StudyAttachment[]
+  notes          StudyNote[]
+  decisions      StudyDecision[]
+  timelineEvents StudyTimelineEvent[]
+  reports        StudyReport[]
+  auditLogs      StudyAuditLog[]
+  aiAnalysisLogs StudyAiAnalysisLog[]
+
+  @@index([requestCode])
+  @@index([clientId])
+  @@index([operationalStatus])
+}
+
+// ============================================================================
+// 📁 2. دفعات الرفع والمرفقات (Upload Batches & Attachments - File 05)
+// ============================================================================
+model StudyUploadBatch {
+  id          String  @id @default(cuid())
+  batchNumber String
+  description String?
+  source      String?
+  senderName  String?
+
+  totalFiles      Int @default(0)
+  successfulFiles Int @default(0)
+  failedFiles     Int @default(0)
+
+  studyRequestId String
+  studyRequest   StudyRequest @relation(fields: [studyRequestId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  attachments StudyAttachment[]
+}
+
+model StudyAttachment {
+  id             String   @id @default(cuid())
+  originalName   String
+  displayName    String?
+  fileUrl        String   @db.Text
+  extension      String
+  mimeType       String?
+  fileSize       Int
+  documentType   String?
+  aiSuggestedType String?
+  aiConfidence   Float?
+  version        Int      @default(1)
+  reviewStatus   String   @default("NEW")
+  aiAnalysisStatus String @default("PENDING")
+
+  // 👈 أضف هذا السطر لحفظ البيانات المستخرجة
+  notes          String?  @db.Text 
+
+  parentId       String?
+  parent         StudyAttachment? @relation("AttachmentVersions", fields: [parentId], references: [id])
+  versions       StudyAttachment[] @relation("AttachmentVersions")
+
+  studyRequestId String
+  studyRequest   StudyRequest @relation(fields: [studyRequestId], references: [id], onDelete: Cascade)
+
+  batchId        String?
+  batch          StudyUploadBatch? @relation(fields: [batchId], references: [id])
+
+  uploadedById   String
+  uploadedBy     Employee @relation(fields: [uploadedById], references: [id])
+
+  isDeleted      Boolean @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+// ============================================================================
+// 💬 3. الملاحظات، الصوتيات، والقرارات (Notes, Audio & Decisions - File 04 & 10)
+// ============================================================================
+model StudyNote {
+  id        String  @id @default(cuid())
+  type      String  @default("GENERAL") // عامة، فنية، تواصل، صوتية
+  text      String? @db.Text
+  isPrivate Boolean @default(false)
+
+  // 🎤 دعم الملاحظات الصوتية (File 10)
+  audioUrl         String? @db.Text
+  transcription    String? @db.Text
+  aiExtractedTasks Json?   @default("[]")
+
+  studyRequestId String
+  studyRequest   StudyRequest @relation(fields: [studyRequestId], references: [id], onDelete: Cascade)
+
+  authorId String
+  author   Employee @relation(fields: [authorId], references: [id])
+
+  attachmentId String? // إذا كانت الملاحظة مرتبطة بملف محدد
+
+  isDeleted Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model StudyDecision {
+  id      String  @id @default(cuid())
+  title   String
+  type    String // نوع القرار (مالي، فني، تحويل...)
+  details String  @db.Text
+  reason  String? @db.Text
+
+  status         String  @default("DRAFT") // مسودة، معتمد، ملغي
+  isInternalOnly Boolean @default(true) // هل يظهر في التقارير الخارجية؟
+
+  studyRequestId String
+  studyRequest   StudyRequest @relation(fields: [studyRequestId], references: [id], onDelete: Cascade)
+
+  decidedById String
+  decidedBy   Employee @relation(fields: [decidedById], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ============================================================================
+// ⏱️ 4. الخط الزمني والتدقيق (Timeline & Audit Logs - File 04 & 07)
+// ============================================================================
+model StudyTimelineEvent {
+  id          String  @id @default(cuid())
+  eventType   String // DOCUMENT, NOTE, DECISION, STATUS_CHANGE, AI_RUN
+  title       String
+  description String? @db.Text
+  iconColor   String? // لتلوين الحدث برمجياً (تركوازي، بنفسجي...)
+
+  studyRequestId String
+  studyRequest   StudyRequest @relation(fields: [studyRequestId], references: [id], onDelete: Cascade)
+
+  userId String?
+  user   Employee? @relation(fields: [userId], references: [id])
+
+  createdAt DateTime @default(now())
+}
+
+model StudyAuditLog {
+  id       String  @id @default(cuid())
+  action   String // UPDATE_FIELD, DELETE_DOC, MERGE
+  field    String?
+  oldValue Json?
+  newValue Json?
+  reason   String?
+
+  studyRequestId String
+  studyRequest   StudyRequest @relation(fields: [studyRequestId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   Employee @relation(fields: [userId], references: [id])
+
+  createdAt DateTime @default(now())
+}
+
+// ============================================================================
+// 🤖 5. سجل تحليلات الذكاء الاصطناعي التراكمية (AI Snapshots - File 06)
+// ============================================================================
+model StudyAiAnalysisLog {
+  id      String @id @default(cuid())
+  version Int    @default(1)
+  scope   String // نطاق التحليل (ملف واحد، دفعة، كل المستندات)
+
+  extractedData  Json // النتيجة الكاملة
+  conflictsFound Json? @default("[]") // التعارضات التي اكتشفها هذا التحليل
+
+  isApproved Boolean @default(false)
+
+  studyRequestId String
+  studyRequest   StudyRequest @relation(fields: [studyRequestId], references: [id], onDelete: Cascade)
+
+  requestedById String
+  requestedBy   Employee @relation(fields: [requestedById], references: [id])
+
+  createdAt DateTime @default(now())
+}
+
+// ============================================================================
+// 📄 6. التقارير الصادرة المعتمدة (Reports - File 08)
+// ============================================================================
+model StudyReport {
+  id           String  @id @default(cuid())
+  reportNumber String  @unique
+  title        String
+  type         String // داخلي، للعميل، لجهة خارجية
+  targetEntity String? // اسم الجهة المخاطبة
+
+  status  String  @default("DRAFT") // مسودة، معتمد، ملغى
+  fileUrl String? @db.Text
+  qrToken String? @unique
+
+  // 🧊 التجميد المطلق للبيانات (Immutable Snapshot)
+  snapshotData Json? // يحفظ بيانات السجل والمرفقات كما كانت وقت الاعتماد
+
+  studyRequestId String
+  studyRequest   StudyRequest @relation(fields: [studyRequestId], references: [id], onDelete: Cascade)
+
+  createdById String
+  createdBy   Employee @relation("ReportCreator", fields: [createdById], references: [id])
+
+  approvedById String?
+  approvedBy   Employee? @relation("ReportApprover", fields: [approvedById], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }

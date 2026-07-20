@@ -301,6 +301,9 @@ app.use("/api/archive/building-codes", buildingCodeArchiveRoutes);
 const transactionSettlementRoutes = require("./routes/transactionSettlementRoutes");
 app.use("/api/transaction-settlements", transactionSettlementRoutes);
 
+const studyRequestRoutes = require("./routes/studyRequestRoutes");
+app.use("/api/study-requests", studyRequestRoutes);
+
 const { generateQRBuffer } = require('./utils/qrGenerator');
 
 // أضف هذا المسار في منطقة المسارات العامة (قبل الـ Auth Middleware)

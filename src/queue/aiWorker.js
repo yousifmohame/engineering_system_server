@@ -13,6 +13,7 @@ const referenceAiService = require("../services/referenceAiService");
 const aiDeviceService = require("../services/aiDeviceService");
 const contractAiService = require("../services/contractAiService");
 const docArchiveAiService = require("../services/docArchiveAiService");
+const processStudyService = require("../services/processStudyService");
 
 const prisma = new PrismaClient();
 
@@ -117,6 +118,12 @@ const aiWorker = new Worker(
         case "ANALYZE_DEED_ARCHIVE":
           result = await withTimeout(
             docArchiveAiService.processArchiveDoc(job.data, updateProgress),
+            JOB_TIMEOUT,
+          );
+          break;
+        case "PROCESS_STUDY_BATCH":
+          result = await withTimeout(
+            processStudyService.processStudyService(job.data, updateProgress),
             JOB_TIMEOUT,
           );
           break;
