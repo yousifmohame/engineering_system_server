@@ -6,7 +6,7 @@ const {
   logAudit,
 } = require("../utils/studyHelpers");
 const { GoogleGenAI } = require("@google/genai");
-const { aiQueue } = require('../queue/aiQueue'); // 👈 1. استيراد الطابور لإرسال المهام إليه مجدداً
+const { aiQueue } = require("../queue/aiQueue"); // 👈 1. استيراد الطابور لإرسال المهام إليه مجدداً
 const path = require("path");
 const fs = require("fs");
 // ==========================================
@@ -24,24 +24,20 @@ exports.createStudyRequest = async (req, res) => {
     if (!userId) {
       const defaultEmployee = await prisma.employee.findFirst();
       if (!defaultEmployee) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-            message: "لا يوجد أي موظف مسجل في النظام لربط الطلب به!",
-          });
+        return res.status(400).json({
+          success: false,
+          message: "لا يوجد أي موظف مسجل في النظام لربط الطلب به!",
+        });
       }
       userId = defaultEmployee.id;
     }
 
     // يكفي معلومة واحدة لإنشاء السجل
     if (!title && !originalRequestText && !contactMobile && !req.files) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "يجب إدخال معلومة واحدة على الأقل لإنشاء السجل.",
-        });
+      return res.status(400).json({
+        success: false,
+        message: "يجب إدخال معلومة واحدة على الأقل لإنشاء السجل.",
+      });
     }
 
     const requestCode = await generateRequestCode();
@@ -151,13 +147,30 @@ exports.getStudyRequestById = async (req, res) => {
         client: true,
         ownership: true,
         assignedTo: true,
+        
+        // 🚀 التعديل هنا: جلب المرفقات مع ربط بيانات الموظف (uploadedBy) بوضوح
+        attachments: {
+          include: {
+            uploadedBy: {
+              select: { name: true } // جلب الاسم فقط للسرعة
+            }
+          },
+          orderBy: { createdAt: "desc" }
+        },
+        
         batches: { include: { attachments: true } },
         notes: {
           include: { author: { select: { name: true } } },
           orderBy: { createdAt: "desc" },
         },
-        decisions: { orderBy: { createdAt: "desc" } },
-        timelineEvents: { orderBy: { createdAt: "desc" } },
+        decisions: { 
+          include: { decidedBy: { select: { name: true } } }, // أضفنا هذه أيضاً للاحتياط في القرارات
+          orderBy: { createdAt: "desc" } 
+        },
+        timelineEvents: { 
+          include: { user: { select: { name: true } } }, // أضفنا هذه أيضاً لتتبع الخط الزمني
+          orderBy: { createdAt: "desc" } 
+        },
         aiAnalysisLogs: { orderBy: { createdAt: "desc" } },
       },
     });
@@ -193,12 +206,10 @@ exports.updateStudyRequest = async (req, res) => {
     // جلب القديم للمقارنة
     const oldRecord = await prisma.studyRequest.findUnique({ where: { id } });
     if (oldRecord.isLocked) {
-      return res
-        .status(403)
-        .json({
-          success: false,
-          message: "السجل مقفل (تم تحويله إلى معاملة).",
-        });
+      return res.status(403).json({
+        success: false,
+        message: "السجل مقفل (تم تحويله إلى معاملة).",
+      });
     }
 
     // تقييم الجاهزية الذكي (Smart Indicators)
@@ -281,13 +292,11 @@ exports.addDecision = async (req, res) => {
       data: { lastActivityAt: new Date() },
     });
 
-    res
-      .status(201)
-      .json({
-        success: true,
-        data: decision,
-        message: "تم توثيق القرار بنجاح.",
-      });
+    res.status(201).json({
+      success: true,
+      data: decision,
+      message: "تم توثيق القرار بنجاح.",
+    });
   } catch (error) {
     console.error("Decision Error:", error);
     res.status(500).json({ success: false, message: "فشل حفظ القرار." });
@@ -362,11 +371,13 @@ exports.uploadBatch = async (req, res) => {
     const files = req.files;
 
     if (!files || files.length === 0) {
-      return res.status(400).json({ success: false, message: "لم يتم استلام أي ملفات." });
+      return res
+        .status(400)
+        .json({ success: false, message: "لم يتم استلام أي ملفات." });
     }
 
     // 2. إذا لم يكن هناك recordId، ننشئ حالة جديدة
-    if (!studyRequestId || studyRequestId === 'undefined') {
+    if (!studyRequestId || studyRequestId === "undefined") {
       const requestCode = await generateRequestCode();
       const newRequest = await prisma.studyRequest.create({
         data: {
@@ -374,29 +385,38 @@ exports.uploadBatch = async (req, res) => {
           title: "طلب من مرفقات",
           operationalStatus: "NEW",
           createdById: uploadedById,
-        }
+        },
       });
       studyRequestId = newRequest.id;
-      await logTimelineEvent(studyRequestId, uploadedById, "STATUS_CHANGE", "تم إنشاء الحالة تلقائياً من عملية رفع", null, "green");
+      await logTimelineEvent(
+        studyRequestId,
+        uploadedById,
+        "STATUS_CHANGE",
+        "تم إنشاء الحالة تلقائياً من عملية رفع",
+        null,
+        "green",
+      );
     }
 
     // 3. إنشاء سجل الدفعة (Upload Batch)
-    const batchCount = await prisma.studyUploadBatch.count({ where: { studyRequestId } });
+    const batchCount = await prisma.studyUploadBatch.count({
+      where: { studyRequestId },
+    });
     const batch = await prisma.studyUploadBatch.create({
       data: {
-        batchNumber: `B${String(batchCount + 1).padStart(2, '0')}`,
+        batchNumber: `B${String(batchCount + 1).padStart(2, "0")}`,
         source,
         senderName,
         totalFiles: files.length,
         successfulFiles: files.length,
-        studyRequestId
-      }
+        studyRequestId,
+      },
     });
 
     // 4. إنشاء سجلات المرفقات (Attachments) وربطها بالدفعة
     const attachmentPromises = files.map((file, index) => {
       const meta = metadata[index];
-      
+
       return prisma.studyAttachment.create({
         data: {
           studyRequestId,
@@ -409,33 +429,32 @@ exports.uploadBatch = async (req, res) => {
           mimeType: file.mimetype,
           fileSize: meta.size,
           documentType: meta.category,
-          reviewStatus: "NEW"
-        }
+          reviewStatus: "NEW",
+        },
       });
     });
 
     await Promise.all(attachmentPromises);
 
     // 5. تحديث الخط الزمني وتاريخ آخر نشاط
-    await prisma.studyRequest.update({ 
-      where: { id: studyRequestId }, 
-      data: { lastActivityAt: new Date() } 
+    await prisma.studyRequest.update({
+      where: { id: studyRequestId },
+      data: { lastActivityAt: new Date() },
     });
 
     await logTimelineEvent(
-      studyRequestId, 
-      uploadedById, 
-      "DOCUMENT", 
-      `تم رفع دفعة مستندات (${batch.batchNumber})`, 
-      `تحتوي على ${files.length} ملفات.`, 
-      "orange"
+      studyRequestId,
+      uploadedById,
+      "DOCUMENT",
+      `تم رفع دفعة مستندات (${batch.batchNumber})`,
+      `تحتوي على ${files.length} ملفات.`,
+      "orange",
     );
 
     // ==============================================================
     // 🤖 6. الإضافة الجديدة: تحفيز طابور الذكاء الاصطناعي (AI Queue)
     // ==============================================================
     if (aiMode === "ANALYZE_AND_MERGE" || aiMode === "ANALYZE_ONLY") {
-      
       // أ. إنشاء سجل في جدول مهام الذكاء الاصطناعي (AiJob) لتتبع العملية
       const newAiJob = await prisma.aiJob.create({
         data: {
@@ -443,33 +462,38 @@ exports.uploadBatch = async (req, res) => {
           status: "PENDING",
           targetId: studyRequestId,
           targetType: "STUDY_REQUEST",
-          requestedBy: uploadedById
-        }
+          requestedBy: uploadedById,
+        },
       });
 
       // ب. إرسال المهمة إلى طابور BullMQ
       await aiQueue.add(
-        "PROCESS_STUDY_BATCH", 
+        "PROCESS_STUDY_BATCH",
         {
           jobType: "PROCESS_STUDY_BATCH", // يجب أن يطابق الموجود في switch (jobType) داخل aiWorker.js
-          dbJobId: newAiJob.id,           // مهم جداً للـ Worker لتحديث الـ Progress
-          employeeId: uploadedById,       // لإرسال الإشعار للموظف عند الانتهاء
+          dbJobId: newAiJob.id, // مهم جداً للـ Worker لتحديث الـ Progress
+          employeeId: uploadedById, // لإرسال الإشعار للموظف عند الانتهاء
           studyRequestId: studyRequestId,
           batchId: batch.id,
-          userId: uploadedById
+          userId: uploadedById,
         },
-        { 
-          removeOnComplete: true, // تنظيف الطابور من المهام الناجحة 
-          removeOnFail: false     // إبقاء المهام الفاشلة للمراجعة
-        }
+        {
+          removeOnComplete: true, // تنظيف الطابور من المهام الناجحة
+          removeOnFail: false, // إبقاء المهام الفاشلة للمراجعة
+        },
       );
     }
 
-    res.status(201).json({ success: true, message: "تم رفع الدفعة بنجاح، وجاري تحليلها.", batchId: batch.id });
-
+    res.status(201).json({
+      success: true,
+      message: "تم رفع الدفعة بنجاح، وجاري تحليلها.",
+      batchId: batch.id,
+    });
   } catch (error) {
     console.error("Batch Upload Error:", error);
-    res.status(500).json({ success: false, message: "فشل رفع الملفات وحفظ الدفعة." });
+    res
+      .status(500)
+      .json({ success: false, message: "فشل رفع الملفات وحفظ الدفعة." });
   }
 };
 
@@ -483,19 +507,29 @@ exports.instantAiAnalysis = async (req, res) => {
   try {
     const files = req.files;
     if (!files || files.length === 0) {
-      return res.status(400).json({ success: false, message: "لم يتم استلام أي ملفات." });
+      return res
+        .status(400)
+        .json({ success: false, message: "لم يتم استلام أي ملفات." });
     }
 
     // تهيئة Gemini
-    const systemSettings = await prisma.systemSettings.findUnique({ where: { id: 1 } });
-    const apiKey = systemSettings?.geminiApiKey ? decrypt(systemSettings.geminiApiKey) : process.env.GEMINI_API_KEY;
+    const systemSettings = await prisma.systemSettings.findUnique({
+      where: { id: 1 },
+    });
+    const apiKey = systemSettings?.geminiApiKey
+      ? decrypt(systemSettings.geminiApiKey)
+      : process.env.GEMINI_API_KEY;
     if (!apiKey) throw new Error("مفتاح الذكاء الاصطناعي غير متوفر.");
-    
+
     ai = new GoogleGenAI({ apiKey, httpOptions: { timeout: 120000 } });
 
     // رفع الملفات لـ Gemini
     for (const file of files) {
-      const filePath = path.join(__dirname, "../../uploads/study-requests", file.filename);
+      const filePath = path.join(
+        __dirname,
+        "../../uploads/study-requests",
+        file.filename,
+      );
       if (fs.existsSync(filePath)) {
         const uploadResult = await ai.files.upload({
           file: filePath,
@@ -503,7 +537,10 @@ exports.instantAiAnalysis = async (req, res) => {
           displayName: file.originalname,
         });
         // نربط اسم الملف الأصلي لكي يتعرف عليه الفرونت إند
-        uploadedGeminiFiles.push({ geminiFile: uploadResult, originalName: file.originalname });
+        uploadedGeminiFiles.push({
+          geminiFile: uploadResult,
+          originalName: file.originalname,
+        });
       }
     }
 
@@ -524,8 +561,8 @@ exports.instantAiAnalysis = async (req, res) => {
   ]
 }`;
 
-    const fileParts = uploadedGeminiFiles.map(f => ({
-      fileData: { fileUri: f.geminiFile.uri, mimeType: f.geminiFile.mimeType }
+    const fileParts = uploadedGeminiFiles.map((f) => ({
+      fileData: { fileUri: f.geminiFile.uri, mimeType: f.geminiFile.mimeType },
     }));
 
     const response = await ai.models.generateContent({
@@ -539,25 +576,35 @@ exports.instantAiAnalysis = async (req, res) => {
     });
 
     let responseText = response.text || "";
-    responseText = responseText.replace(/```json/gi, "").replace(/```/g, "").trim();
+    responseText = responseText
+      .replace(/```json/gi, "")
+      .replace(/```/g, "")
+      .trim();
     const aiResult = JSON.parse(responseText);
 
     res.json({ success: true, data: aiResult.results });
-
   } catch (error) {
     console.error("Instant AI Error:", error);
-    res.status(500).json({ success: false, message: "فشل التحليل الذكي الفوري." });
+    res
+      .status(500)
+      .json({ success: false, message: "فشل التحليل الذكي الفوري." });
   } finally {
     // 🧹 تنظيف الملفات لأنها لم تُعتمد بعد
     if (req.files) {
-      req.files.forEach(file => {
-        const filePath = path.join(__dirname, "../../uploads/study-requests", file.filename);
+      req.files.forEach((file) => {
+        const filePath = path.join(
+          __dirname,
+          "../../uploads/study-requests",
+          file.filename,
+        );
         if (fs.existsSync(filePath)) fs.unlinkSync(filePath); // مسح من السيرفر
       });
     }
     if (ai && uploadedGeminiFiles.length > 0) {
       for (const f of uploadedGeminiFiles) {
-        try { await ai.files.delete({ name: f.geminiFile.name }); } catch (e) {} // مسح من Gemini
+        try {
+          await ai.files.delete({ name: f.geminiFile.name });
+        } catch (e) {} // مسح من Gemini
       }
     }
   }
@@ -569,22 +616,49 @@ exports.instantAiAnalysis = async (req, res) => {
 exports.reAnalyzeStudyRequest = async (req, res) => {
   try {
     const { id } = req.params;
-    
+
     let userId = req.user?.id;
     if (!userId) {
       const defaultEmployee = await prisma.employee.findFirst();
       userId = defaultEmployee?.id;
     }
 
-    // جلب أحدث دفعة مرفقات لإعادة تحليلها (أو يمكنك تعديل الـ Worker ليحلل كل المرفقات)
-    const latestBatch = await prisma.studyUploadBatch.findFirst({
+    // 🚀 الإصلاح 2: التأكد من وجود مرفقات بشكل عام في السجل
+    const attachmentsCount = await prisma.studyAttachment.count({
       where: { studyRequestId: id },
-      orderBy: { createdAt: 'desc' }
+    });
+    if (attachmentsCount === 0) {
+      return res
+        .status(400)
+        .json({
+          success: false,
+          message: "لا توجد مستندات في السجل لإعادة تحليلها.",
+        });
+    }
+
+    // 🚀 إنشاء "دفعة إعادة تحليل" جديدة لجمع كافة الملفات فيها
+    const batchCount = await prisma.studyUploadBatch.count({
+      where: { studyRequestId: id },
+    });
+    const reAnalyzeBatch = await prisma.studyUploadBatch.create({
+      data: {
+        batchNumber: `RE-B${String(batchCount + 1).padStart(2, "0")}`, // مثال: RE-B03
+        source: "إعادة تقييم شاملة (AI)",
+        senderName: "النظام",
+        totalFiles: attachmentsCount,
+        successfulFiles: attachmentsCount,
+        studyRequestId: id,
+      },
     });
 
-    if (!latestBatch) {
-      return res.status(400).json({ success: false, message: "لا توجد مستندات مرفوعة لتحليلها." });
-    }
+    // 🚀 ربط جميع المرفقات الحالية بهذه الدفعة الجديدة ليقوم الـ Worker بقراءتها كلها معاً
+    await prisma.studyAttachment.updateMany({
+      where: { studyRequestId: id },
+      data: {
+        batchId: reAnalyzeBatch.id,
+        aiAnalysisStatus: "PENDING", // إعادة تصفير الحالة
+      },
+    });
 
     // أ. إنشاء سجل في جدول مهام الذكاء الاصطناعي (AiJob)
     const newAiJob = await prisma.aiJob.create({
@@ -593,48 +667,212 @@ exports.reAnalyzeStudyRequest = async (req, res) => {
         status: "PENDING",
         targetId: id,
         targetType: "STUDY_REQUEST",
-        requestedBy: userId
-      }
+        requestedBy: userId,
+      },
     });
 
-    // ب. إرسال المهمة إلى طابور BullMQ
+    // ب. إرسال المهمة إلى طابور BullMQ مع الـ Batch الجديد الذي يحتوي كل الملفات
     await aiQueue.add(
-      "PROCESS_STUDY_BATCH", 
+      "PROCESS_STUDY_BATCH",
       {
         jobType: "PROCESS_STUDY_BATCH",
         dbJobId: newAiJob.id,
         employeeId: userId,
         studyRequestId: id,
-        batchId: latestBatch.id, // نرسل أحدث دفعة للتحليل
-        userId: userId
+        batchId: reAnalyzeBatch.id, // نرسل دفعة إعادة التحليل
+        userId: userId,
       },
-      { removeOnComplete: true }
+      { removeOnComplete: true },
     );
 
-    await logTimelineEvent(id, userId, "AI_RUN", "طلب إعادة تحليل", "تم إرسال الطلب للذكاء الاصطناعي", "blue");
+    await logTimelineEvent(
+      id,
+      userId,
+      "AI_RUN",
+      "طلب إعادة تحليل ذكي",
+      "تم تجميع كافة المرفقات في دفعة جديدة وإرسالها للتحليل.",
+      "blue",
+    );
 
-    res.json({ success: true, message: "تم إرسال الطلب للذكاء الاصطناعي، سيتم إشعارك عند الانتهاء." });
+    res.json({
+      success: true,
+      message: "تم إرسال الطلب للذكاء الاصطناعي لمعالجة كافة الملفات.",
+    });
   } catch (error) {
     console.error("Re-Analyze Error:", error);
     res.status(500).json({ success: false, message: "فشل طلب إعادة التحليل." });
   }
 };
+
 // ==========================================
 // 8. الحذف الآمن للحالة (Soft Delete)
 // ==========================================
 exports.deleteStudyRequest = async (req, res) => {
   try {
     const { id } = req.params;
-    
+
     // نستخدم الحذف الآمن (Soft Delete) للحفاظ على سلامة البيانات
     await prisma.studyRequest.update({
       where: { id },
-      data: { isDeleted: true }
+      data: { isDeleted: true },
     });
 
-    res.json({ success: true, message: "تم حذف الحالة ونقلها للأرشيف المحذوف." });
+    res.json({
+      success: true,
+      message: "تم حذف الحالة ونقلها للأرشيف المحذوف.",
+    });
   } catch (error) {
     console.error("Delete Error:", error);
     res.status(500).json({ success: false, message: "فشل حذف الحالة." });
+  }
+};
+
+// ==========================================
+// 12. رفع مستندات إضافية مباشرة (بدون ذكاء اصطناعي)
+// ==========================================
+exports.uploadDirectAttachment = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const files = req.files;
+    const metadata = req.body.metadata ? JSON.parse(req.body.metadata) : [];
+
+    if (!files || files.length === 0) {
+      return res
+        .status(400)
+        .json({ success: false, message: "لم يتم استلام أي ملفات." });
+    }
+
+    // 💡 التعديل التطويري لـ userId
+    let userId = req.user?.id;
+    if (!userId) {
+      const defaultEmployee = await prisma.employee.findFirst();
+      userId = defaultEmployee?.id;
+    }
+
+    // إنشاء سجلات المرفقات مباشرة وربطها بالمعاملة (بدون إنشاء دفعة Batch)
+    const attachmentPromises = files.map((file, index) => {
+      const meta = metadata[index] || {};
+
+      return prisma.studyAttachment.create({
+        data: {
+          studyRequestId: id,
+          uploadedById: userId,
+          originalName: meta.originalName || file.originalname,
+          displayName:
+            meta.displayName ||
+            file.originalname.split(".").slice(0, -1).join("."),
+          fileUrl: `/uploads/study-requests/${file.filename}`,
+          extension:
+            meta.extension || file.originalname.split(".").pop().toUpperCase(),
+          mimeType: file.mimetype,
+          fileSize: file.size,
+          documentType: meta.category || "غير مصنف",
+          reviewStatus: "NEW",
+          // نضع حالة الذكاء الاصطناعي كـ "غير مطبق" لأننا رفعناها يدوياً
+          aiAnalysisStatus: "NOT_APPLIED",
+        },
+      });
+    });
+
+    await Promise.all(attachmentPromises);
+
+    // تحديث تاريخ آخر نشاط للمعاملة
+    await prisma.studyRequest.update({
+      where: { id },
+      data: { lastActivityAt: new Date() },
+    });
+
+    // تسجيل الحدث في الخط الزمني
+    await logTimelineEvent(
+      id,
+      userId,
+      "DOCUMENT",
+      "تم رفع مستندات إضافية",
+      `تمت إضافة ${files.length} ملف(ات) جديدة يدوياً.`,
+      "gray",
+    );
+
+    res.status(201).json({
+      success: true,
+      message: "تم رفع المستندات الإضافية بنجاح.",
+    });
+  } catch (error) {
+    console.error("Direct Upload Error:", error);
+    res
+      .status(500)
+      .json({ success: false, message: "فشل رفع المستندات الإضافية." });
+  }
+};
+
+// ==========================================
+// 9. تحديث اسم المرفق
+// ==========================================
+exports.updateAttachmentName = async (req, res) => {
+  try {
+    const { attachmentId } = req.params;
+    const { displayName } = req.body;
+    await prisma.studyAttachment.update({
+      where: { id: attachmentId },
+      data: { displayName },
+    });
+    res.json({ success: true, message: "تم تحديث اسم المرفق بنجاح." });
+  } catch (error) {
+    console.error("Update Attachment Error:", error);
+    res.status(500).json({ success: false, message: "فشل تحديث اسم المرفق." });
+  }
+};
+
+// ==========================================
+// 10. حذف المرفق
+// ==========================================
+exports.deleteAttachment = async (req, res) => {
+  try {
+    const { attachmentId } = req.params;
+    // نقوم بحذف المرفق نهائياً
+    await prisma.studyAttachment.delete({
+      where: { id: attachmentId },
+    });
+    res.json({ success: true, message: "تم حذف المرفق بنجاح." });
+  } catch (error) {
+    console.error("Delete Attachment Error:", error);
+    res.status(500).json({ success: false, message: "فشل حذف المرفق." });
+  }
+};
+
+// ==========================================
+// 11. إضافة ملاحظة يدوية للخط الزمني
+// ==========================================
+exports.addStudyNote = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { text } = req.body;
+
+    let userId = req.user?.id;
+    if (!userId) {
+      const defaultEmployee = await prisma.employee.findFirst();
+      userId = defaultEmployee?.id;
+    }
+
+    const note = await prisma.studyNote.create({
+      data: { studyRequestId: id, text, type: "GENERAL", authorId: userId },
+    });
+
+    await logTimelineEvent(
+      id,
+      userId,
+      "NOTE",
+      "إضافة ملاحظة إدارية",
+      text,
+      "blue",
+    );
+    await prisma.studyRequest.update({
+      where: { id },
+      data: { lastActivityAt: new Date() },
+    });
+
+    res.json({ success: true, data: note, message: "تمت إضافة الملاحظة." });
+  } catch (error) {
+    console.error("Add Note Error:", error);
+    res.status(500).json({ success: false, message: "فشل إضافة الملاحظة." });
   }
 };

@@ -30,6 +30,11 @@ router.post(
   upload.array("files", 30),
   studyController.instantAiAnalysis,
 );
+router.post(
+  "/batch-upload",
+  upload.array("files", 30),
+  studyController.uploadBatch,
+);
 router.get("/:id", studyController.getStudyRequestById); // File 03 (Modal)
 router.put("/:id", studyController.updateStudyRequest); // File 03 & 10 (Cumulative Update)
 router.delete("/:id", studyController.deleteStudyRequest);
@@ -46,12 +51,17 @@ router.post(
   studyController.uploadBatch,
 );
 
+// مسارات إدارة المرفقات المباشرة
+router.put("/attachments/:attachmentId/name", studyController.updateAttachmentName);
+router.delete("/attachments/:attachmentId", studyController.deleteAttachment);
+
+// مسارات الملاحظات
+router.post("/:id/notes", studyController.addStudyNote);
+
 router.post(
-  "/batch-upload",
-  upload.array("files", 30),
-  studyController.uploadBatch,
+  "/:id/attachments", 
+  upload.array("files", 30), 
+  studyController.uploadDirectAttachment
 );
-// 💡 ملاحظة: يمكن لاحقاً إضافة مسارات الرفع (Attachments) والـ AI (Reports)
-// كملفات Controller منفصلة للحفاظ على نظافة الكود.
 
 module.exports = router;
