@@ -188,6 +188,11 @@ model Employee {
   buildingCodeDuplicates BuildingCodeDuplicateCandidate[] @relation("BuildingCodeDuplicateResolver")
   buildingCodeAudits     BuildingCodeAuditLog[]           @relation("BuildingCodeAuditor")
 
+  createdErthReports  ErthReport[]         @relation("ErthReportCreator")
+  reviewedErthReports ErthReport[]         @relation("ErthReportReviewer")
+  approvedErthReports ErthReport[]         @relation("ErthReportApprover")
+  erthReportAuditLogs ErthReportAuditLog[] @relation("ErthReportAuditor")
+
   studyRequestsCreated  StudyRequest[]       @relation("StudyCreator")
   studyRequestsAssigned StudyRequest[]       @relation("StudyAssignee")
   studyNotes            StudyNote[]
@@ -647,6 +652,7 @@ model Client {
   attachments           Attachment[]
   activityLogs          ActivityLog[]
   documents             Document[]
+  erthReports           ErthReport[]              @relation("ClientErthReports")
   // داخل model Client
   privateTransactions   PrivateTransaction[]      @relation("ClientPrivateTransactions")
   TransactionFolder     TransactionFolder[]
@@ -724,6 +730,7 @@ model OwnershipFile {
   archivedDocuments PropertyDocumentArchive[]
 
   studyRequests StudyRequest[]
+  erthReports   ErthReport[]   @relation("OwnershipErthReports")
 
   @@index([deedNumber])
   @@index([district])
@@ -2079,6 +2086,7 @@ model PrivateTransaction {
   originatingStudyRequest StudyRequest?            @relation("ConvertedFromStudy")
 
   settlementCycles SettlementCycleTransaction[]
+  erthReports      ErthReport[]                 @relation("TxErthReports")
 
   @@index([clientId])
   @@index([districtId])
@@ -5641,39 +5649,39 @@ model StudyUploadBatch {
 }
 
 model StudyAttachment {
-  id             String   @id @default(cuid())
-  originalName   String
-  displayName    String?
-  fileUrl        String   @db.Text
-  extension      String
-  mimeType       String?
-  fileSize       Int
-  documentType   String?
-  aiSuggestedType String?
-  aiConfidence   Float?
-  version        Int      @default(1)
-  reviewStatus   String   @default("NEW")
-  aiAnalysisStatus String @default("PENDING")
+  id               String  @id @default(cuid())
+  originalName     String
+  displayName      String?
+  fileUrl          String  @db.Text
+  extension        String
+  mimeType         String?
+  fileSize         Int
+  documentType     String?
+  aiSuggestedType  String?
+  aiConfidence     Float?
+  version          Int     @default(1)
+  reviewStatus     String  @default("NEW")
+  aiAnalysisStatus String  @default("PENDING")
 
   // 👈 أضف هذا السطر لحفظ البيانات المستخرجة
-  notes          String?  @db.Text 
+  notes String? @db.Text
 
-  parentId       String?
-  parent         StudyAttachment? @relation("AttachmentVersions", fields: [parentId], references: [id])
-  versions       StudyAttachment[] @relation("AttachmentVersions")
+  parentId String?
+  parent   StudyAttachment?  @relation("AttachmentVersions", fields: [parentId], references: [id])
+  versions StudyAttachment[] @relation("AttachmentVersions")
 
   studyRequestId String
   studyRequest   StudyRequest @relation(fields: [studyRequestId], references: [id], onDelete: Cascade)
 
-  batchId        String?
-  batch          StudyUploadBatch? @relation(fields: [batchId], references: [id])
+  batchId String?
+  batch   StudyUploadBatch? @relation(fields: [batchId], references: [id])
 
-  uploadedById   String
-  uploadedBy     Employee @relation(fields: [uploadedById], references: [id])
+  uploadedById String
+  uploadedBy   Employee @relation(fields: [uploadedById], references: [id])
 
-  isDeleted      Boolean @default(false)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  isDeleted Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 // ============================================================================
@@ -5809,4 +5817,308 @@ model StudyReport {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+// ============================================================================
+// 🏗️ منظومة التقارير الفنية المتقدمة (Erth Reports Ecosystem)
+// ============================================================================
+
+// 📌 1. الثوابت (Enums) لتوحيد الحالات ومصادر البيانات
+enum ErthReportRecordType {
+  TRANSACTION_REPORT
+  GENERAL_REPORT
+  ARCHIVED_LEGACY
+  REBUILT_EXTERNAL
+}
+
+enum ErthReportStatus {
+  DRAFT
+  UNDER_REVIEW
+  APPROVED
+  ISSUED
+  CANCELED
+  FROZEN
+}
+
+enum ErthDataSourceType {
+  MANUAL
+  SYSTEM_TRANSACTION
+  PREVIOUS_REPORT
+  AI_EXTRACTION
+  IMPORTED_FILE
+}
+
+// 📌 2. هوية المكتب الهندسي للتقارير
+model ErthReportOfficeIdentity {
+  id            String  @id @default(cuid())
+  name          String
+  licenseNumber String?
+  logoUrl       String?
+  headerUrl     String?
+  footerUrl     String?
+  stampUrl      String?
+  signatureUrl  String?
+  signerName    String?
+
+  isActive  Boolean @default(true)
+  isDefault Boolean @default(false)
+
+  reports  ErthReport[]
+  versions ErthReportVersion[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// 📌 3. النموذج الرئيسي للتقرير الفني (الجديد كلياً)
+model ErthReport {
+  id           String  @id @default(cuid())
+  internalCode String  @unique @default(cuid())
+  serialNumber String? @unique
+
+  recordType ErthReportRecordType @default(TRANSACTION_REPORT)
+  status     ErthReportStatus     @default(DRAFT)
+
+  title      String?
+  templateId String?
+
+  // 🔗 الروابط الأساسية بالمنظومة
+  transactionId String?
+  transaction   PrivateTransaction? @relation("TxErthReports", fields: [transactionId], references: [id])
+
+  clientId String?
+  client   Client? @relation("ClientErthReports", fields: [clientId], references: [id])
+
+  ownershipId String?
+  ownership   OwnershipFile? @relation("OwnershipErthReports", fields: [ownershipId], references: [id])
+
+  officeIdentityId String?
+  officeIdentity   ErthReportOfficeIdentity? @relation(fields: [officeIdentityId], references: [id])
+
+  // 🛡️ الحماية، القفل، والحذف الناعم
+  isLocked   Boolean   @default(false)
+  lockedAt   DateTime?
+  lockedById String?
+
+  isFrozen     Boolean   @default(false)
+  frozenReason String?   @db.Text
+  frozenAt     DateTime?
+  frozenById   String?
+
+  isDeleted      Boolean   @default(false)
+  deletedAt      DateTime?
+  deletionReason String?
+
+  // ⏱️ التواريخ الزمنية
+  visitDate    DateTime? @db.Date
+  reviewDate   DateTime?
+  approvalDate DateTime?
+  issueDate    DateTime?
+  expiryDate   DateTime?
+
+  // 👥 المستخدمون والمراجعون
+  createdById String
+  createdBy   Employee @relation("ErthReportCreator", fields: [createdById], references: [id])
+
+  reviewedById String?
+  reviewedBy   Employee? @relation("ErthReportReviewer", fields: [reviewedById], references: [id])
+
+  approvedById String?
+  approvedBy   Employee? @relation("ErthReportApprover", fields: [approvedById], references: [id])
+
+  // 🗂️ الكيانات الفرعية المرتبطة
+  purposes        ErthReportRequestPurpose[]
+  comparisonModes ErthReportComparisonMode[]
+  notes           ErthReportTechnicalNote[]
+  images          ErthReportImage[]
+  attachments     ErthReportAttachment[]
+  versions        ErthReportVersion[]
+  auditLogs       ErthReportAuditLog[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([transactionId])
+  @@index([clientId])
+  @@index([serialNumber])
+}
+
+// 📌 4. لقطات الإصدارات (Snapshots)
+model ErthReportVersion {
+  id       String     @id @default(cuid())
+  reportId String
+  report   ErthReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  versionNumber Int     @default(1)
+  status        String  @default("VALID")
+  issueReason   String?
+
+  snapshotData Json
+
+  pdfUrl   String? @db.Text
+  qrToken  String? @unique
+  fileHash String?
+
+  officeIdentityId String?
+  officeIdentity   ErthReportOfficeIdentity? @relation(fields: [officeIdentityId], references: [id])
+
+  issuedById String
+  issuedAt   DateTime @default(now())
+
+  @@unique([reportId, versionNumber])
+}
+
+// 📌 5. الغرض من الطلب
+model ErthReportRequestPurpose {
+  id       String     @id @default(cuid())
+  reportId String
+  report   ErthReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  text  String @db.Text
+  order Int    @default(0)
+
+  sourceType      ErthDataSourceType @default(MANUAL)
+  sourceReference String?
+  sourcePage      Int?
+  confidenceScore Float?
+
+  isApproved   Boolean @default(true)
+  showInPdf    Boolean @default(true)
+  internalNote String? @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// 📌 6. محرك المقارنات 
+model ErthReportComparisonMode {
+  id       String     @id @default(cuid())
+  reportId String
+  report   ErthReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  name        String
+  isReference Boolean @default(false)
+  order       Int     @default(0)
+  showInPdf   Boolean @default(true)
+
+  floors   ErthReportFloor[]
+  setbacks ErthReportSetback[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// 📌 7. الأدوار والمكونات
+model ErthReportFloor {
+  id     String                   @id @default(cuid())
+  modeId String
+  mode   ErthReportComparisonMode @relation(fields: [modeId], references: [id], onDelete: Cascade)
+
+  name      String
+  level     Int    @default(0)
+  totalArea Float?
+
+  components ErthReportComponent[]
+}
+
+model ErthReportComponent {
+  id      String          @id @default(cuid())
+  floorId String
+  floor   ErthReportFloor @relation(fields: [floorId], references: [id], onDelete: Cascade)
+
+  name      String
+  usageType String?
+  area      Float?
+  quantity  Int?    @default(1)
+  unit      String  @default("م2")
+
+  sourceType      ErthDataSourceType @default(MANUAL)
+  confidenceScore Float?
+  isApproved      Boolean            @default(true)
+}
+
+// 📌 8. الارتدادات
+model ErthReportSetback {
+  id     String                   @id @default(cuid())
+  modeId String
+  mode   ErthReportComparisonMode @relation(fields: [modeId], references: [id], onDelete: Cascade)
+
+  direction     String
+  natureValue   Float?
+  licenseValue  Float?
+  systemValue   Float?
+  difference    Float?
+  result        String?
+  justification String? @db.Text
+
+  sourceType ErthDataSourceType @default(MANUAL)
+}
+
+// 📌 9. الصور والمرفقات
+model ErthReportImage {
+  id       String     @id @default(cuid())
+  reportId String
+  report   ErthReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  originalName String
+  fileUrl      String  @db.Text
+  thumbnailUrl String? @db.Text
+  description  String? @db.Text
+  category     String?
+
+  latitude  Float?
+  longitude Float?
+  takenAt   DateTime?
+
+  showInPdf Boolean @default(true)
+  order     Int     @default(0)
+
+  createdAt DateTime @default(now())
+}
+
+model ErthReportAttachment {
+  id       String     @id @default(cuid())
+  reportId String
+  report   ErthReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  originalName String
+  fileUrl      String  @db.Text
+  fileSize     Int
+  extension    String
+  isSensitive  Boolean @default(false)
+  showInIndex  Boolean @default(true)
+
+  createdAt DateTime @default(now())
+}
+
+// 📌 10. الملاحظات والمخالفات
+model ErthReportTechnicalNote {
+  id       String     @id @default(cuid())
+  reportId String
+  report   ErthReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  type      String
+  text      String  @db.Text
+  priority  String  @default("LOW")
+  showInPdf Boolean @default(true)
+
+  createdAt DateTime @default(now())
+}
+
+// 📌 11. سجل التدقيق الأمني
+model ErthReportAuditLog {
+  id       String     @id @default(cuid())
+  reportId String
+  report   ErthReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  action    String
+  field     String?
+  oldValue  Json?
+  newValue  Json?
+  ipAddress String?
+
+  userId String
+  user   Employee @relation("ErthReportAuditor", fields: [userId], references: [id])
+
+  createdAt DateTime @default(now())
 }

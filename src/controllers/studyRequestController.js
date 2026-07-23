@@ -76,6 +76,7 @@ exports.createStudyRequest = async (req, res) => {
 // ==========================================
 // 2. جلب البيانات للجدول المكثف (Data Grid - File 02)
 // ==========================================
+
 exports.getAllStudyRequests = async (req, res) => {
   try {
     const {
@@ -90,11 +91,9 @@ exports.getAllStudyRequests = async (req, res) => {
 
     const where = { isDeleted: false };
 
-    // فلاتر سريعة
     if (status) where.operationalStatus = status;
     if (readiness) where.readinessLevel = readiness;
 
-    // البحث العميق
     if (search) {
       where.OR = [
         { requestCode: { contains: search } },
@@ -115,6 +114,7 @@ exports.getAllStudyRequests = async (req, res) => {
         include: {
           client: { select: { name: true, mobile: true } },
           assignedTo: { select: { name: true } },
+          createdBy: { select: { name: true } }, // 🚀 1. التعديل هنا: جلب اسم منشئ الطلب
         },
       }),
       prisma.studyRequest.count({ where }),
@@ -134,7 +134,6 @@ exports.getAllStudyRequests = async (req, res) => {
     res.status(500).json({ success: false, message: "فشل جلب بيانات الدليل." });
   }
 };
-
 // ==========================================
 // 3. جلب تفاصيل السجل الواسعة (Mega Modal - File 03)
 // ==========================================
@@ -147,29 +146,33 @@ exports.getStudyRequestById = async (req, res) => {
         client: true,
         ownership: true,
         assignedTo: true,
-        
-        // 🚀 التعديل هنا: جلب المرفقات مع ربط بيانات الموظف (uploadedBy) بوضوح
+
+        // 🚀 1. التعديل الأهم: جلب المرفقات مباشرة مع اسم الموظف الرافع
         attachments: {
-          include: {
-            uploadedBy: {
-              select: { name: true } // جلب الاسم فقط للسرعة
-            }
-          },
-          orderBy: { createdAt: "desc" }
+          include: { uploadedBy: { select: { name: true } } },
+          orderBy: { createdAt: "desc" },
         },
-        
-        batches: { include: { attachments: true } },
+
+        // 🚀 2. جلب المرفقات داخل الدفعات أيضاً مع اسم الموظف للاحتياط
+        batches: {
+          include: {
+            attachments: {
+              include: { uploadedBy: { select: { name: true } } },
+            },
+          },
+        },
+
         notes: {
           include: { author: { select: { name: true } } },
           orderBy: { createdAt: "desc" },
         },
-        decisions: { 
-          include: { decidedBy: { select: { name: true } } }, // أضفنا هذه أيضاً للاحتياط في القرارات
-          orderBy: { createdAt: "desc" } 
+        decisions: {
+          include: { decidedBy: { select: { name: true } } }, // جلب اسم متخذ القرار
+          orderBy: { createdAt: "desc" },
         },
-        timelineEvents: { 
-          include: { user: { select: { name: true } } }, // أضفنا هذه أيضاً لتتبع الخط الزمني
-          orderBy: { createdAt: "desc" } 
+        timelineEvents: {
+          include: { user: { select: { name: true } } }, // جلب اسم صانع الحدث
+          orderBy: { createdAt: "desc" },
         },
         aiAnalysisLogs: { orderBy: { createdAt: "desc" } },
       },
@@ -416,6 +419,9 @@ exports.uploadBatch = async (req, res) => {
     // 4. إنشاء سجلات المرفقات (Attachments) وربطها بالدفعة
     const attachmentPromises = files.map((file, index) => {
       const meta = metadata[index];
+      const notesStr = meta.extractedFields
+        ? JSON.stringify(meta.extractedFields)
+        : null; // 👈 التعديل هنا
 
       return prisma.studyAttachment.create({
         data: {
@@ -424,12 +430,14 @@ exports.uploadBatch = async (req, res) => {
           uploadedById,
           originalName: meta.originalName,
           displayName: meta.displayName,
-          fileUrl: `/uploads/study-requests/${file.filename}`, // تأكد من المسار أنه يطابق الـ multer
+          fileUrl: `/uploads/study-requests/${file.filename}`,
           extension: meta.extension,
           mimeType: file.mimetype,
           fileSize: meta.size,
           documentType: meta.category,
           reviewStatus: "NEW",
+          notes: notesStr, // 👈 حفظ الحقول المستخرجة في الملاحظات
+          aiAnalysisStatus: meta.extractedFields ? "COMPLETED" : "PENDING",
         },
       });
     });
@@ -506,13 +514,11 @@ exports.instantAiAnalysis = async (req, res) => {
 
   try {
     const files = req.files;
-    if (!files || files.length === 0) {
+    if (!files || files.length === 0)
       return res
         .status(400)
         .json({ success: false, message: "لم يتم استلام أي ملفات." });
-    }
 
-    // تهيئة Gemini
     const systemSettings = await prisma.systemSettings.findUnique({
       where: { id: 1 },
     });
@@ -523,7 +529,6 @@ exports.instantAiAnalysis = async (req, res) => {
 
     ai = new GoogleGenAI({ apiKey, httpOptions: { timeout: 120000 } });
 
-    // رفع الملفات لـ Gemini
     for (const file of files) {
       const filePath = path.join(
         __dirname,
@@ -536,7 +541,6 @@ exports.instantAiAnalysis = async (req, res) => {
           mimeType: file.mimetype || "application/pdf",
           displayName: file.originalname,
         });
-        // نربط اسم الملف الأصلي لكي يتعرف عليه الفرونت إند
         uploadedGeminiFiles.push({
           geminiFile: uploadResult,
           originalName: file.originalname,
@@ -544,30 +548,39 @@ exports.instantAiAnalysis = async (req, res) => {
       }
     }
 
-    // هندسة أوامر سريعة جداً (فقط للتصنيف لتكون سريعة للمستخدم)
+    // 🚀 التعديل: هندسة أوامر صارمة لضمان إرجاع الحقول دائماً (حتى لو فارغة)
     const SYSTEM_PROMPT = `
 أنت خبير تصنيف مستندات هندسية وعقارية في السعودية.
-قم بتحليل المستندات المرفقة وصنفها حصرياً ضمن هذه الفئات:
-(صك ملكية، رخصة بناء، مخطط هندسي، هوية / سجل، غير مصنف).
+قم بتحليل المستندات المرفقة وصنفها واستخرج البيانات الأساسية منها للمراجعة السريعة.
 
-أرجع النتيجة بصيغة JSON حصرياً بهذا الهيكل:
+أرجع النتيجة بصيغة JSON حصرياً بهذا الهيكل (استخدم null للقيم غير الموجودة):
 {
   "results": [
     {
       "fileName": "يجب أن يطابق اسم الملف المرفق تماماً",
-      "suggestedCategory": "التصنيف",
-      "confidence": 0.95
+      "suggestedCategory": "تصنيف المستند (صك ملكية، رخصة بناء، هوية / سجل، مخطط هندسي، غير مصنف)",
+      "confidence": 0.95,
+      "extractedFields": {
+        "ownerName": "اسم المالك أو الملاك",
+        "deedNumber": "رقم الصك أو الوثيقة",
+        "planNumber": "رقم المخطط",
+        "plotNumber": "رقم القطعة",
+        "district": "الحي",
+        "totalArea": "المساحة بالأرقام فقط",
+        "propertyUsage": "نوع الاستخدام"
+      }
     }
   ]
-}`;
+}
+تأكد من عدم كتابة أي نصوص خارج هيكل الـ JSON.`;
 
     const fileParts = uploadedGeminiFiles.map((f) => ({
       fileData: { fileUri: f.geminiFile.uri, mimeType: f.geminiFile.mimeType },
     }));
 
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash", // استخدمنا flash لأنه أسرع للتحليل اللحظي
-      contents: ["صنف هذه الملفات وأعطني الـ JSON", ...fileParts],
+      model: "gemini-2.5-flash",
+      contents: ["حلل هذه الملفات وأعطني الـ JSON", ...fileParts],
       config: {
         systemInstruction: SYSTEM_PROMPT,
         temperature: 0.1,
@@ -575,11 +588,15 @@ exports.instantAiAnalysis = async (req, res) => {
       },
     });
 
+    // 🚀 التعديل: تنظيف الـ JSON وتحويل الأرقام العربية لتجنب الأخطاء
     let responseText = response.text || "";
     responseText = responseText
       .replace(/```json/gi, "")
       .replace(/```/g, "")
       .trim();
+    responseText = responseText.replace(/[٠-٩]/g, (d) =>
+      "٠١٢٣٤٥٦٧٨٩".indexOf(d),
+    );
     const aiResult = JSON.parse(responseText);
 
     res.json({ success: true, data: aiResult.results });
@@ -589,7 +606,6 @@ exports.instantAiAnalysis = async (req, res) => {
       .status(500)
       .json({ success: false, message: "فشل التحليل الذكي الفوري." });
   } finally {
-    // 🧹 تنظيف الملفات لأنها لم تُعتمد بعد
     if (req.files) {
       req.files.forEach((file) => {
         const filePath = path.join(
@@ -597,14 +613,14 @@ exports.instantAiAnalysis = async (req, res) => {
           "../../uploads/study-requests",
           file.filename,
         );
-        if (fs.existsSync(filePath)) fs.unlinkSync(filePath); // مسح من السيرفر
+        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
       });
     }
     if (ai && uploadedGeminiFiles.length > 0) {
       for (const f of uploadedGeminiFiles) {
         try {
           await ai.files.delete({ name: f.geminiFile.name });
-        } catch (e) {} // مسح من Gemini
+        } catch (e) {}
       }
     }
   }
@@ -628,12 +644,10 @@ exports.reAnalyzeStudyRequest = async (req, res) => {
       where: { studyRequestId: id },
     });
     if (attachmentsCount === 0) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "لا توجد مستندات في السجل لإعادة تحليلها.",
-        });
+      return res.status(400).json({
+        success: false,
+        message: "لا توجد مستندات في السجل لإعادة تحليلها.",
+      });
     }
 
     // 🚀 إنشاء "دفعة إعادة تحليل" جديدة لجمع كافة الملفات فيها
@@ -874,5 +888,55 @@ exports.addStudyNote = async (req, res) => {
   } catch (error) {
     console.error("Add Note Error:", error);
     res.status(500).json({ success: false, message: "فشل إضافة الملاحظة." });
+  }
+};
+
+// ==========================================
+// 13. تعديل قرار معتمد (Update Decision)
+// ==========================================
+exports.updateDecision = async (req, res) => {
+  try {
+    const { decisionId } = req.params;
+    const { title, type, details } = req.body;
+
+    let userId = req.user?.id;
+    if (!userId) {
+      const defaultEmployee = await prisma.employee.findFirst();
+      userId = defaultEmployee?.id;
+    }
+
+    // جلب القرار القديم للمقارنة والتأكد من وجوده
+    const oldDecision = await prisma.studyDecision.findUnique({
+      where: { id: decisionId },
+    });
+
+    if (!oldDecision) {
+      return res.status(404).json({ success: false, message: "القرار غير موجود." });
+    }
+
+    // تحديث القرار
+    const updatedDecision = await prisma.studyDecision.update({
+      where: { id: decisionId },
+      data: { title, type, details, decidedById: userId },
+    });
+
+    // توثيق التعديل في الخط الزمني
+    await logTimelineEvent(
+      oldDecision.studyRequestId,
+      userId,
+      "DECISION",
+      `تم تعديل قرار: ${title}`,
+      `القرار القديم: ${oldDecision.title} - تم التحديث بنجاح.`,
+      "orange"
+    );
+
+    res.json({
+      success: true,
+      data: updatedDecision,
+      message: "تم تحديث القرار بنجاح.",
+    });
+  } catch (error) {
+    console.error("Update Decision Error:", error);
+    res.status(500).json({ success: false, message: "فشل تحديث القرار." });
   }
 };

@@ -304,6 +304,9 @@ app.use("/api/transaction-settlements", transactionSettlementRoutes);
 const studyRequestRoutes = require("./routes/studyRequestRoutes");
 app.use("/api/study-requests", studyRequestRoutes);
 
+const erthReportRoutes = require('./routes/erthReportRoutes');
+app.use('/api/erth-reports', erthReportRoutes);
+
 const { generateQRBuffer } = require('./utils/qrGenerator');
 
 // أضف هذا المسار في منطقة المسارات العامة (قبل الـ Auth Middleware)

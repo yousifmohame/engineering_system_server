@@ -51,6 +51,7 @@ router.post(
   studyController.uploadBatch,
 );
 
+router.put("/decisions/:decisionId", studyController.updateDecision);
 // مسارات إدارة المرفقات المباشرة
 router.put("/attachments/:attachmentId/name", studyController.updateAttachmentName);
 router.delete("/attachments/:attachmentId", studyController.deleteAttachment);
